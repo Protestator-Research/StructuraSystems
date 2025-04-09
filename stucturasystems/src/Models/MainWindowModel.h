@@ -5,10 +5,37 @@
 #ifndef DIGITALTWIN_MAINWINDOWMODEL_H
 #define DIGITALTWIN_MAINWINDOWMODEL_H
 
+#include <QString>
+#include <QObject>
+#include <QStandardItemModel>
 
-class MainWindowModel {
+#include <map>
 
-};
+namespace StructuraSystems::Client {
+    class StructuraMainWindow;
+    class CodeWidget;
+    class CodeWidgetModel;
+
+    class MainWindowModel : public QObject{
+        Q_OBJECT
+    public:
+        MainWindowModel()=delete;
+        MainWindowModel(StructuraMainWindow* mainWindow);
+        ~MainWindowModel() = default;
+
+
+    public slots:
+        void openFile();
+        void openFolder();
+        void onTabCloseRequested(int index);
+
+    private:
+        StructuraMainWindow* MainWindow;
+        std::map<QString,CodeWidget*> CodeWidgetMap;
+        std::map<QString, CodeWidgetModel*> CodeWidgetModelMap;
+
+    };
+}
 
 
 #endif //DIGITALTWIN_MAINWINDOWMODEL_H

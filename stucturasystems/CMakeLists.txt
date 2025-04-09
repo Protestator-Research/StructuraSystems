@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.15)
 
 find_package(Qt6 REQUIRED COMPONENTS Core Widgets Gui Charts)
 find_package(md4c REQUIRED)
-#find_package(sysmlv2lib REQUIRED)
+find_package(sysmllib REQUIRED)
 
 qt_standard_project_setup()
 
@@ -13,10 +13,16 @@ set(CMAKE_AUTORCC ON)
 set(SOURCES src/main.cpp
             src/Widgets/StructuraMainWindow.cpp
             src/Widgets/StructuraMainWindow.h
-        src/Models/MainWindowModel.cpp
-        src/Models/MainWindowModel.h)
+            src/Models/MainWindowModel.cpp
+            src/Models/MainWindowModel.h
+            src/Models/CodeWidgetModel.cpp
+            src/Models/CodeWidgetModel.h
+            src/Widgets/CodeWidget.h
+            src/Widgets/CodeWidget.cpp)
 
-qt_wrap_ui(SOURCES ui/MainWindow.ui)
+qt_wrap_ui(SOURCES
+        ui/MainWindow.ui
+        ui/CodeWidget.ui)
 
 add_executable(StructuraSystems ${SOURCES})
 
@@ -31,7 +37,7 @@ target_link_libraries(StructuraSystems PUBLIC
         Qt6::Charts
         Qt6::Core
         md4c::md4c
-        #sysmlv2lib::sysmlv2lib
+        sysmllib::sysmllib
 )
 
 if (!UNIX)

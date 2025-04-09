@@ -7,6 +7,7 @@
 #include <QMainWindow>
 #include <QToolBar>
 #include <QAbstractItemModel>
+#include "../Models/MainWindowModel.h"
 
 //---------------------------------------------------
 //Forwarding
@@ -27,11 +28,19 @@ namespace StructuraSystems::Client {
         explicit StructuraMainWindow(QWidget *parent = nullptr);
         ~StructuraMainWindow() override;
 
-    private:
-        Ui::StructuraMainWindow *ui;
-        QToolBar *toolBar;
+        void addTabToMainWindow(QWidget* tab, QString title);
+        void removeTabWithIndex(int index);
+        QString getTabTitle(int index);
 
-    private slots:
+    private:
+        void initWindow();
+        void makeConnections();
+
+        Ui::StructuraMainWindow *ui;
+        QToolBar *ToolBar;
+
+        MainWindowModel *WindowModel;
+
 
     };
 } // StructuraSystems::Client

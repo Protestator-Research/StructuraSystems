@@ -74,8 +74,19 @@
     <addaction name="actionPush"/>
     <addaction name="actionPull"/>
    </widget>
+   <widget class="QMenu" name="menuDigital_Twin">
+    <property name="title">
+     <string>Digital Twin</string>
+    </property>
+    <addaction name="actionCreate_Digital_Twin"/>
+    <addaction name="separator"/>
+    <addaction name="actionEdit_Digital_Twin"/>
+    <addaction name="separator"/>
+    <addaction name="actionDelete_Digital_Twin"/>
+   </widget>
    <addaction name="menuFile"/>
    <addaction name="menuConnection"/>
+   <addaction name="menuDigital_Twin"/>
   </widget>
   <widget class="QStatusBar" name="statusbar"/>
   <widget class="QDockWidget" name="dockWidget">
@@ -173,6 +184,21 @@
   <action name="actionPull">
    <property name="text">
     <string>Pull</string>
+   </property>
+  </action>
+  <action name="actionCreate_Digital_Twin">
+   <property name="text">
+    <string>Create Digital Twin</string>
+   </property>
+  </action>
+  <action name="actionEdit_Digital_Twin">
+   <property name="text">
+    <string>Edit Digital Twin</string>
+   </property>
+  </action>
+  <action name="actionDelete_Digital_Twin">
+   <property name="text">
+    <string>Delete Digital Twin</string>
    </property>
   </action>
  </widget>

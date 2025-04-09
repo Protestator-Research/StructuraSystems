@@ -33,7 +33,7 @@ class CppDigitalTwinRecipe(ConanFile):
         if platform != "darwin":
             self.requires("qt/6.7.3")
         self.requires("md4c/0.4.8")
-        self.requires("sysmlv2lib/1.0-beta-3-wip")
+        self.requires("sysmllib/1.0-beta-3-wip")
 
     def config_options(self):
         if self.settings.os == "Windows":
