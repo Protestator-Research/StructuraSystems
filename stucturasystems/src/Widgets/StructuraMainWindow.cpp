@@ -51,4 +51,12 @@ namespace StructuraSystems::Client {
     QString StructuraMainWindow::getTabTitle(int index) {
         return ui->ProjectTabWidget->tabText(index);
     }
+
+    void StructuraMainWindow::addModelToLocalTreeView(QAbstractItemModel *model) {
+        ui->LocalTreeView->setModel(model);
+    }
+
+    void StructuraMainWindow::addModelToExternalTreeView(QAbstractItemModel *model) {
+        ui->ExternalTreeView->setModel(model);
+    }
 } // StructuraSystems::Client

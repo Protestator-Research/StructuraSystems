@@ -32,6 +32,10 @@ namespace StructuraSystems::Client {
         void removeTabWithIndex(int index);
         QString getTabTitle(int index);
 
+        void addModelToLocalTreeView(QAbstractItemModel* model);
+        void addModelToExternalTreeView(QAbstractItemModel* model);
+
+
     private:
         void initWindow();
         void makeConnections();

@@ -15,6 +15,7 @@ namespace StructuraSystems::Client {
     class StructuraMainWindow;
     class CodeWidget;
     class CodeWidgetModel;
+    class ProjectItemModel;
 
     class MainWindowModel : public QObject{
         Q_OBJECT
@@ -33,7 +34,8 @@ namespace StructuraSystems::Client {
         StructuraMainWindow* MainWindow;
         std::map<QString,CodeWidget*> CodeWidgetMap;
         std::map<QString, CodeWidgetModel*> CodeWidgetModelMap;
-
+        ProjectItemModel* LocalFileItemModel;
+        ProjectItemModel* ExternalFileItemModel;
     };
 }
 

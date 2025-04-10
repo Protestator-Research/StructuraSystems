@@ -73,6 +73,10 @@
     <addaction name="separator"/>
     <addaction name="actionPush"/>
     <addaction name="actionPull"/>
+    <addaction name="separator"/>
+    <addaction name="actionUpload_Local_Project"/>
+    <addaction name="actionDownload_Local_Project"/>
+    <addaction name="separator"/>
    </widget>
    <widget class="QMenu" name="menuDigital_Twin">
     <property name="title">
@@ -84,9 +88,16 @@
     <addaction name="separator"/>
     <addaction name="actionDelete_Digital_Twin"/>
    </widget>
+   <widget class="QMenu" name="menuHelp">
+    <property name="title">
+     <string>Help</string>
+    </property>
+    <addaction name="actionOnline_Help"/>
+   </widget>
    <addaction name="menuFile"/>
    <addaction name="menuConnection"/>
    <addaction name="menuDigital_Twin"/>
+   <addaction name="menuHelp"/>
   </widget>
   <widget class="QStatusBar" name="statusbar"/>
   <widget class="QDockWidget" name="dockWidget">
@@ -109,7 +120,7 @@
         </attribute>
         <layout class="QVBoxLayout" name="verticalLayout_3">
          <item>
-          <widget class="QTreeView" name="treeView"/>
+          <widget class="QTreeView" name="ExternalTreeView"/>
          </item>
         </layout>
        </widget>
@@ -119,7 +130,7 @@
         </attribute>
         <layout class="QVBoxLayout" name="verticalLayout_4">
          <item>
-          <widget class="QTreeView" name="treeView_2"/>
+          <widget class="QTreeView" name="LocalTreeView"/>
          </item>
         </layout>
        </widget>
@@ -199,6 +210,21 @@
   <action name="actionDelete_Digital_Twin">
    <property name="text">
     <string>Delete Digital Twin</string>
+   </property>
+  </action>
+  <action name="actionUpload_Local_Project">
+   <property name="text">
+    <string>Upload Local Project</string>
+   </property>
+  </action>
+  <action name="actionDownload_Local_Project">
+   <property name="text">
+    <string>Download Local Project</string>
+   </property>
+  </action>
+  <action name="actionOnline_Help">
+   <property name="text">
+    <string>Online Help</string>
    </property>
   </action>
  </widget>

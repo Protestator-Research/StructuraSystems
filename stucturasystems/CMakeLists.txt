@@ -18,7 +18,11 @@ set(SOURCES src/main.cpp
             src/Models/CodeWidgetModel.cpp
             src/Models/CodeWidgetModel.h
             src/Widgets/CodeWidget.h
-            src/Widgets/CodeWidget.cpp)
+            src/Widgets/CodeWidget.cpp
+        src/Models/ItemModels/ProjectItemModel.cpp
+        src/Models/ItemModels/ProjectItemModel.h
+        src/Models/ItemModels/ProjectTreeViewItem.h
+        src/Models/ItemModels/ProjectTreeViewItem.cpp)
 
 qt_wrap_ui(SOURCES
         ui/MainWindow.ui
