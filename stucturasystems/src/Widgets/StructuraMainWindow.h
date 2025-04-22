@@ -46,5 +46,6 @@ namespace StructuraSystems::Client {
         MainWindowModel *WindowModel;
 
 
+
     };
 } // StructuraSystems::Client

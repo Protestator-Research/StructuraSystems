@@ -7,6 +7,7 @@
 
 #include <QString>
 #include <QObject>
+#include <QFile>
 #include <QStandardItemModel>
 
 #include <map>
@@ -36,6 +37,8 @@ namespace StructuraSystems::Client {
         std::map<QString, CodeWidgetModel*> CodeWidgetModelMap;
         ProjectItemModel* LocalFileItemModel;
         ProjectItemModel* ExternalFileItemModel;
+
+        void openProjectFromFileStorage(QString filePath);
     };
 }
 

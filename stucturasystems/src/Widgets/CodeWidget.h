@@ -6,6 +6,13 @@
 #define DIGITALTWIN_CODEWIDGET_H
 
 #include <QWidget>
+#include <QAbstractItemModel>
+#include "../Models/CodeWidgetModel.h"
+
+namespace SysMLv2::Entities{
+    class Project;
+    class Commit;
+}
 
 namespace StructuraSystems::Client {
     QT_BEGIN_NAMESPACE
@@ -16,12 +23,13 @@ namespace StructuraSystems::Client {
     Q_OBJECT
 
     public:
-        explicit CodeWidget(QWidget *parent = nullptr);
-
+        explicit CodeWidget(std::shared_ptr<SysMLv2::Entities::Project> project, std::shared_ptr<SysMLv2::Entities::Commit> commit, QWidget *parent = nullptr);
         ~CodeWidget() override;
 
+        void setMarkdownCodeEditingWidgetModel(QAbstractItemModel* model);
     private:
         Ui::CodeWidget *ui;
+        CodeWidgetModel* Model;
     };
 } // StructuraSystems::Client
 

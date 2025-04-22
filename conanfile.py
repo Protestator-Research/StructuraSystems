@@ -6,8 +6,8 @@ import os
 from sys import platform
 
 
-class CppDigitalTwinRecipe(ConanFile):
-    name = "digitaltwin"
+class CppStructuraSystemsRecipe(ConanFile):
+    name = "StructuraSystems"
     version = "2501"
     package_type = "application"
 
