@@ -38,6 +38,7 @@ namespace StructuraSystems::Client {
         connect(ui->ProjectTabWidget, SIGNAL(tabCloseRequested(int)), WindowModel, SLOT(onTabCloseRequested(int)));
         connect(ui->actionOpen_File, SIGNAL(triggered(bool)), WindowModel, SLOT(openFile()));
         connect(ui->actionOpen_Folder, SIGNAL(triggered(bool)), WindowModel, SLOT(openFolder()));
+        connect(ui->LocalTreeView, SIGNAL(doubleClicked(const QModelIndex &)), WindowModel, SLOT(onDoubleClickClicked(const QModelIndex &)));
     }
 
     void StructuraMainWindow::addTabToMainWindow(QWidget *tab, QString title) {

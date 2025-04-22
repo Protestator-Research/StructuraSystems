@@ -4,10 +4,10 @@
 
 #include "MainWindowModel.h"
 #include "../Widgets/StructuraMainWindow.h"
-#include "CodeWidgetModel.h"
 #include "../Widgets/CodeWidget.h"
 #include "ItemModels/ProjectItemModel.h"
 #include "Parser/StructuraSystemsParser.h"
+#include "../Widgets/CodeWidget.h"
 
 #include <QFileDialog>
 #include <QStandardPaths>
@@ -71,6 +71,14 @@ namespace StructuraSystems::Client {
         }
 
         project->getDefaultBranch()->setHead(commit);
+    }
+
+    void MainWindowModel::onDoubleClickClicked(const QModelIndex& index) {
+        auto project = LocalFileItemModel->getProjects().at(index.row());
+        auto commit = project->getDefaultBranch()->getHead();
+        CodeWidgetMap[QString::fromStdString(project->getName())] = new CodeWidget(project,commit,MainWindow);
+        MainWindow->addTabToMainWindow(CodeWidgetMap[QString::fromStdString(project->getName())], QString::fromStdString(project->getName()));
+
     }
 
 }
