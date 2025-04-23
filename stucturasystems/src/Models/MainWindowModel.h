@@ -12,6 +12,8 @@
 
 #include <map>
 
+#include "SettingsModel.h"
+
 namespace StructuraSystems::Client {
     class StructuraMainWindow;
     class CodeWidget;
@@ -24,6 +26,9 @@ namespace StructuraSystems::Client {
         MainWindowModel()=delete;
         MainWindowModel(StructuraMainWindow* mainWindow);
         ~MainWindowModel() = default;
+
+        void openFolder(QString folder);
+        void setSettingsModel(SettingsModel* settingsModel);
 
 
     public slots:
@@ -38,6 +43,8 @@ namespace StructuraSystems::Client {
         std::map<QString, CodeWidgetModel*> CodeWidgetModelMap;
         ProjectItemModel* LocalFileItemModel;
         ProjectItemModel* ExternalFileItemModel;
+
+        SettingsModel* Settings;
 
         void openProjectFromFileStorage(QString filePath);
     };

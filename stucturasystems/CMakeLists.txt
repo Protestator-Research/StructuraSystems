@@ -32,42 +32,51 @@ set(SOURCES src/main.cpp
             src/Models/Parser/Markdown/CommonmarkParser/buffer.h
             src/Models/Parser/Markdown/CommonmarkParser/case_fold.inc
             src/Models/Parser/Markdown/CommonmarkParser/chunk.h
-        src/Models/Parser/Markdown/CommonmarkParser/cmark.c
-        src/Models/Parser/Markdown/CommonmarkParser/cmark.h
-        src/Models/Parser/Markdown/CommonmarkParser/cmark_ctype.c
-        src/Models/Parser/Markdown/CommonmarkParser/cmark_ctype.h
-        src/Models/Parser/Markdown/CommonmarkParser/commonmark.c
-        src/Models/Parser/Markdown/CommonmarkParser/entities.inc
-        src/Models/Parser/Markdown/CommonmarkParser/houdini.h
-        src/Models/Parser/Markdown/CommonmarkParser/houdini_href_e.c
-        src/Models/Parser/Markdown/CommonmarkParser/houdini_html_e.c
-        src/Models/Parser/Markdown/CommonmarkParser/houdini_html_u.c
-        src/Models/Parser/Markdown/CommonmarkParser/html.c
-        src/Models/Parser/Markdown/CommonmarkParser/inlines.c
-        src/Models/Parser/Markdown/CommonmarkParser/inlines.h
-        src/Models/Parser/Markdown/CommonmarkParser/iterator.h
-        src/Models/Parser/Markdown/CommonmarkParser/iterator.c
-        src/Models/Parser/Markdown/CommonmarkParser/latex.c
-        src/Models/Parser/Markdown/CommonmarkParser/node.c
-        src/Models/Parser/Markdown/CommonmarkParser/node.h
-        src/Models/Parser/Markdown/CommonmarkParser/man.c
-        src/Models/Parser/Markdown/CommonmarkParser/parser.h
-        src/Models/Parser/Markdown/CommonmarkParser/references.c
-        src/Models/Parser/Markdown/CommonmarkParser/references.h
-        src/Models/Parser/Markdown/CommonmarkParser/render.c
-        src/Models/Parser/Markdown/CommonmarkParser/render.h
-        src/Models/Parser/Markdown/CommonmarkParser/scanners.c
-        src/Models/Parser/Markdown/CommonmarkParser/scanners.h
-        src/Models/Parser/Markdown/CommonmarkParser/scanners.re
-        src/Models/Parser/Markdown/CommonmarkParser/utf8.c
-        src/Models/Parser/Markdown/CommonmarkParser/utf8.h
-        src/Models/Parser/Markdown/CommonmarkParser/xml.c
-        src/Models/Delegates/HtmlDelegate.cpp
-        src/Models/Delegates/HtmlDelegate.h)
+            src/Models/Parser/Markdown/CommonmarkParser/cmark.c
+            src/Models/Parser/Markdown/CommonmarkParser/cmark.h
+            src/Models/Parser/Markdown/CommonmarkParser/cmark_ctype.c
+            src/Models/Parser/Markdown/CommonmarkParser/cmark_ctype.h
+            src/Models/Parser/Markdown/CommonmarkParser/commonmark.c
+            src/Models/Parser/Markdown/CommonmarkParser/entities.inc
+            src/Models/Parser/Markdown/CommonmarkParser/houdini.h
+            src/Models/Parser/Markdown/CommonmarkParser/houdini_href_e.c
+            src/Models/Parser/Markdown/CommonmarkParser/houdini_html_e.c
+            src/Models/Parser/Markdown/CommonmarkParser/houdini_html_u.c
+            src/Models/Parser/Markdown/CommonmarkParser/html.c
+            src/Models/Parser/Markdown/CommonmarkParser/inlines.c
+            src/Models/Parser/Markdown/CommonmarkParser/inlines.h
+            src/Models/Parser/Markdown/CommonmarkParser/iterator.h
+            src/Models/Parser/Markdown/CommonmarkParser/iterator.c
+            src/Models/Parser/Markdown/CommonmarkParser/latex.c
+            src/Models/Parser/Markdown/CommonmarkParser/node.c
+            src/Models/Parser/Markdown/CommonmarkParser/node.h
+            src/Models/Parser/Markdown/CommonmarkParser/man.c
+            src/Models/Parser/Markdown/CommonmarkParser/parser.h
+            src/Models/Parser/Markdown/CommonmarkParser/references.c
+            src/Models/Parser/Markdown/CommonmarkParser/references.h
+            src/Models/Parser/Markdown/CommonmarkParser/render.c
+            src/Models/Parser/Markdown/CommonmarkParser/render.h
+            src/Models/Parser/Markdown/CommonmarkParser/scanners.c
+            src/Models/Parser/Markdown/CommonmarkParser/scanners.h
+            src/Models/Parser/Markdown/CommonmarkParser/scanners.re
+            src/Models/Parser/Markdown/CommonmarkParser/utf8.c
+            src/Models/Parser/Markdown/CommonmarkParser/utf8.h
+            src/Models/Parser/Markdown/CommonmarkParser/xml.c
+            src/Models/Delegates/HtmlDelegate.cpp
+            src/Models/Delegates/HtmlDelegate.h
+            src/Widgets/Dialogs/EditProjectDialog.h
+            src/Widgets/Dialogs/EditProjectDialog.cpp
+            resources/Resources.qrc
+            src/Models/SettingsModel.cpp
+            src/Models/SettingsModel.h
+            src/Widgets/Dialogs/SettingsDialog.cpp
+            src/Widgets/Dialogs/SettingsDialog.h)
 
 qt_wrap_ui(SOURCES
         ui/MainWindow.ui
-        ui/CodeWidget.ui)
+        ui/CodeWidget.ui
+        ui/EditProjectDialog.ui
+        ui/SettingsDialog.ui)
 
 add_executable(StructuraSystems ${SOURCES})
 

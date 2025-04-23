@@ -6,6 +6,7 @@
 
 #include "StructuraMainWindow.h"
 #include "ui_MainWindow.h"
+#include "Dialogs/SettingsDialog.h"
 
 #include <QFileDialog>
 #include <QStandardPaths>
@@ -22,6 +23,7 @@ namespace StructuraSystems::Client {
 
         initWindow();
         makeConnections();
+        readSettings();
     }
 
     StructuraMainWindow::~StructuraMainWindow() {
@@ -39,6 +41,8 @@ namespace StructuraSystems::Client {
         connect(ui->actionOpen_File, SIGNAL(triggered(bool)), WindowModel, SLOT(openFile()));
         connect(ui->actionOpen_Folder, SIGNAL(triggered(bool)), WindowModel, SLOT(openFolder()));
         connect(ui->LocalTreeView, SIGNAL(doubleClicked(const QModelIndex &)), WindowModel, SLOT(onDoubleClickClicked(const QModelIndex &)));
+        connect(ui->actionSettings, SIGNAL(triggered(bool)), this, SLOT(openSettingsWindow()));
+        connect(ui->actionConnection_Settings, SIGNAL(triggered(bool)), this, SLOT(openSettingsWindow()));
     }
 
     void StructuraMainWindow::addTabToMainWindow(QWidget *tab, QString title) {
@@ -59,5 +63,25 @@ namespace StructuraSystems::Client {
 
     void StructuraMainWindow::addModelToExternalTreeView(QAbstractItemModel *model) {
         ui->ExternalTreeView->setModel(model);
+    }
+
+    void StructuraMainWindow::openSettingsWindow() {
+        SettingsDialog dialog = SettingsDialog(Settings,this);
+        dialog.show();
+        if(dialog.exec()==QDialog::Accepted)
+            WindowModel->openFolder(QString::fromStdString(Settings->workingDirectory()));
+    }
+
+    void StructuraMainWindow::readSettings() {
+        Settings = new SettingsModel();
+        if(Settings->workingDirectory().empty())
+        {
+            if(QMessageBox::question(this, tr("Loading Default Settings"), tr("Do you want to initialize the application with the default Settings?"))==QMessageBox::StandardButton::Yes) {
+                Settings->initWithDefaults();
+            }else
+                return;
+        }
+        WindowModel->openFolder(QString::fromStdString(Settings->workingDirectory()));
+
     }
 } // StructuraSystems::Client

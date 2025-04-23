@@ -16,6 +16,8 @@ namespace StructuraSystems::Client {
         ~StructuraSystemsParser();
 
         std::vector<std::shared_ptr<SysMLv2::Entities::Element>> readFile(QString filePath);
+
+
     private:
         std::vector<std::shared_ptr<SysMLv2::Entities::Element>> readKerMLFile(QString filePath);
         std::vector<std::shared_ptr<SysMLv2::Entities::Element>> readSysMLv2File(QString filePath);

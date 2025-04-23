@@ -37,16 +37,12 @@ namespace StructuraSystems::Client {
     }
 
     void MainWindowModel::openFolder() {
-        QString directoryString = QFileDialog::getExistingDirectory(MainWindow, tr("Open Folder"), QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation));
-        QDir directory(directoryString);
-        QStringList files = directory.entryList(QStringList()<<"*.md"<<"*.kerml"<<"*.sysml"<<"*.xml"<<"*.json");
-        for(QString fileName : files) {
-            openProjectFromFileStorage(directory.absolutePath()+"/"+fileName);
-        }
+        QString directoryString = QFileDialog::getExistingDirectory(MainWindow, tr("Open Folder"), QString::fromStdString(Settings->workingDirectory()));
+        openFolder(directoryString);
     }
 
     void MainWindowModel::openFile() {
-        QStringList filesToOpen = QFileDialog::getOpenFileNames(MainWindow, tr("Open Files"), QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation), tr("Markdown File (*.md);;KerML File (*.kerml);;SysML File (*.sysml);;XML-File (*.xml);;JSON-File (*.json)"));
+        QStringList filesToOpen = QFileDialog::getOpenFileNames(MainWindow, tr("Open Files"), QString::fromStdString(Settings->workingDirectory()), tr("Markdown File (*.md);;KerML File (*.kerml);;SysML File (*.sysml);;XML-File (*.xml);;JSON-File (*.json)"));
         for(QString fileName : filesToOpen) {
             openProjectFromFileStorage(fileName);
         }
@@ -79,6 +75,18 @@ namespace StructuraSystems::Client {
         auto commit = project->getDefaultBranch()->getHead();
         CodeWidgetMap[QString::fromStdString(project->getName())] = new CodeWidget(project,commit,MainWindow);
         MainWindow->addTabToMainWindow(CodeWidgetMap[QString::fromStdString(project->getName())], QString::fromStdString(project->getName()));
+    }
+
+    void MainWindowModel::openFolder(QString folder) {
+        QDir directory(folder);
+        QStringList files = directory.entryList(QStringList()<<"*.md"<<"*.kerml"<<"*.sysml"<<"*.xml"<<"*.json");
+        for(QString fileName : files) {
+            openProjectFromFileStorage(directory.absolutePath()+"/"+fileName);
+        }
+    }
+
+    void MainWindowModel::setSettingsModel(SettingsModel *settingsModel) {
+        Settings = settingsModel;
     }
 
 }

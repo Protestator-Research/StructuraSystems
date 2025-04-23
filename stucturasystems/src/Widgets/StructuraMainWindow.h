@@ -8,6 +8,7 @@
 #include <QToolBar>
 #include <QAbstractItemModel>
 #include "../Models/MainWindowModel.h"
+#include "../Models/SettingsModel.h"
 
 //---------------------------------------------------
 //Forwarding
@@ -35,17 +36,19 @@ namespace StructuraSystems::Client {
         void addModelToLocalTreeView(QAbstractItemModel* model);
         void addModelToExternalTreeView(QAbstractItemModel* model);
 
+    private slots:
+        void openSettingsWindow();
 
     private:
         void initWindow();
         void makeConnections();
+        void readSettings();
 
         Ui::StructuraMainWindow *ui;
         QToolBar *ToolBar;
 
         MainWindowModel *WindowModel;
 
-
-
+        SettingsModel* Settings;
     };
 } // StructuraSystems::Client

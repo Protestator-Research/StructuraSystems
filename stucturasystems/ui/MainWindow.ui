@@ -13,6 +13,9 @@
   <property name="windowTitle">
    <string>Project Editor [*]</string>
   </property>
+  <property name="locale">
+   <locale language="English" country="UnitedStates"/>
+  </property>
   <widget class="QWidget" name="centralwidget">
    <layout class="QVBoxLayout" name="verticalLayout">
     <item>
@@ -94,8 +97,15 @@
     </property>
     <addaction name="actionOnline_Help"/>
    </widget>
+   <widget class="QMenu" name="menuModel">
+    <property name="title">
+     <string>Model</string>
+    </property>
+    <addaction name="actionParse_Model"/>
+   </widget>
    <addaction name="menuFile"/>
    <addaction name="menuConnection"/>
+   <addaction name="menuModel"/>
    <addaction name="menuDigital_Twin"/>
    <addaction name="menuHelp"/>
   </widget>
@@ -161,6 +171,9 @@
    <property name="text">
     <string>Settings</string>
    </property>
+   <property name="visible">
+    <bool>true</bool>
+   </property>
   </action>
   <action name="actionQuit">
    <property name="text">
@@ -225,6 +238,11 @@
   <action name="actionOnline_Help">
    <property name="text">
     <string>Online Help</string>
+   </property>
+  </action>
+  <action name="actionParse_Model">
+   <property name="text">
+    <string>Parse Model</string>
    </property>
   </action>
  </widget>
