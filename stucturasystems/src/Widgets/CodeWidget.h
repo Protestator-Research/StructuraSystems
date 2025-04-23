@@ -15,6 +15,8 @@ namespace SysMLv2::Entities{
 }
 
 namespace StructuraSystems::Client {
+    class HTMLDelegate;
+
     QT_BEGIN_NAMESPACE
     namespace Ui { class CodeWidget; }
     QT_END_NAMESPACE
@@ -28,8 +30,10 @@ namespace StructuraSystems::Client {
 
         void setMarkdownCodeEditingWidgetModel(QAbstractItemModel* model);
     private:
+
         Ui::CodeWidget *ui;
         CodeWidgetModel* Model;
+        HTMLDelegate* HtmlDelegate;
     };
 } // StructuraSystems::Client
 

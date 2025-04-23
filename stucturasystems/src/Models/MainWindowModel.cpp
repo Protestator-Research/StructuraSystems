@@ -41,7 +41,7 @@ namespace StructuraSystems::Client {
         QDir directory(directoryString);
         QStringList files = directory.entryList(QStringList()<<"*.md"<<"*.kerml"<<"*.sysml"<<"*.xml"<<"*.json");
         for(QString fileName : files) {
-            openProjectFromFileStorage(fileName);
+            openProjectFromFileStorage(directory.absolutePath()+"/"+fileName);
         }
     }
 
@@ -57,8 +57,9 @@ namespace StructuraSystems::Client {
     }
 
     void MainWindowModel::openProjectFromFileStorage(QString filePath) {
-        QFile file = QFile(filePath);
-        const auto project = LocalFileItemModel->createProject(file.fileName().split("/").last().toStdString(),
+//        QFile file = QFile(filePath);
+        qDebug()<<"File Path: "<<filePath;
+        const auto project = LocalFileItemModel->createProject(filePath.split("/").last().toStdString(),
                                                                "Created from Filesystem");
         StructuraSystemsParser parser;
         auto elements = parser.readFile(filePath);

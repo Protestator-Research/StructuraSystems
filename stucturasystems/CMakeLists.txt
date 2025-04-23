@@ -61,7 +61,9 @@ set(SOURCES src/main.cpp
         src/Models/Parser/Markdown/CommonmarkParser/scanners.re
         src/Models/Parser/Markdown/CommonmarkParser/utf8.c
         src/Models/Parser/Markdown/CommonmarkParser/utf8.h
-        src/Models/Parser/Markdown/CommonmarkParser/xml.c)
+        src/Models/Parser/Markdown/CommonmarkParser/xml.c
+        src/Models/Delegates/HtmlDelegate.cpp
+        src/Models/Delegates/HtmlDelegate.h)
 
 qt_wrap_ui(SOURCES
         ui/MainWindow.ui
