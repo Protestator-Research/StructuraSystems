@@ -53,12 +53,12 @@ namespace StructuraSystems::Client {
     }
 
     void MainWindowModel::onTabCloseRequested(int index) {
-        MainWindow->getTabTitle(index);
+        const auto &title = MainWindow->getTabTitle(index);
+        CodeWidgetModelMap.erase(title);
+        MainWindow->removeTabWithIndex(index);
     }
 
     void MainWindowModel::openProjectFromFileStorage(QString filePath) {
-//        QFile file = QFile(filePath);
-        qDebug()<<"File Path: "<<filePath;
         const auto project = LocalFileItemModel->createProject(filePath.split("/").last().toStdString(),
                                                                "Created from Filesystem");
         StructuraSystemsParser parser;
@@ -79,7 +79,6 @@ namespace StructuraSystems::Client {
         auto commit = project->getDefaultBranch()->getHead();
         CodeWidgetMap[QString::fromStdString(project->getName())] = new CodeWidget(project,commit,MainWindow);
         MainWindow->addTabToMainWindow(CodeWidgetMap[QString::fromStdString(project->getName())], QString::fromStdString(project->getName()));
-
     }
 
 }

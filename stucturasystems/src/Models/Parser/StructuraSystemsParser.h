@@ -21,6 +21,7 @@ namespace StructuraSystems::Client {
         std::vector<std::shared_ptr<SysMLv2::Entities::Element>> readSysMLv2File(QString filePath);
         std::vector<std::shared_ptr<SysMLv2::Entities::Element>> readXmlFile(QString filePath);
         std::vector<std::shared_ptr<SysMLv2::Entities::Element>> readMarkdownFile(QString filePath);
+        std::vector<std::shared_ptr<SysMLv2::Entities::Element>> readJsonFile(QString filePath);
     };
 } // StructuraSystems::Client
 
