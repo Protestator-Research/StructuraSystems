@@ -22,7 +22,7 @@ namespace StructuraSystems::Client {
 
         QVariant data(const QModelIndex &index, int role) const override;
 
-        void removeErrorsFromProject()
+        void removeErrorsFromProject();
 
     private:
 

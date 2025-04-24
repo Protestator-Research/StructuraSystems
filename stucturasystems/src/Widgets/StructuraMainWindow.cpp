@@ -34,6 +34,17 @@ namespace StructuraSystems::Client {
         ui->ProjectTabWidget->clear();
         ToolBar = new QToolBar();
         WindowModel = new MainWindowModel(this);
+
+        ui->actionOpen_Folder->setIcon(QIcon(":/icons/userinterface/Open"));
+        ui->actionConnect->setIcon(QIcon(":/icons/userinterface/Connection"));
+        ui->actionStep_Back->setIcon(QIcon(":/icons/arrows/StepBack"));
+        ui->actionStep_Forward->setIcon(QIcon(":/icons/arrows/StepForward"));
+
+        addToolBar(ToolBar);
+        ToolBar->addAction(ui->actionOpen_Folder);
+        ToolBar->addAction(ui->actionConnect);
+        ToolBar->addAction(ui->actionStep_Back);
+        ToolBar->addAction(ui->actionStep_Forward);
     }
 
     void StructuraMainWindow::makeConnections() {
@@ -74,6 +85,7 @@ namespace StructuraSystems::Client {
 
     void StructuraMainWindow::readSettings() {
         Settings = new SettingsModel();
+        WindowModel->setSettingsModel(Settings);
         if(Settings->workingDirectory().empty())
         {
             if(QMessageBox::question(this, tr("Loading Default Settings"), tr("Do you want to initialize the application with the default Settings?"))==QMessageBox::StandardButton::Yes) {

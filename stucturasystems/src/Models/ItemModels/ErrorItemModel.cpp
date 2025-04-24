@@ -10,23 +10,23 @@ namespace StructuraSystems::Client {
 
     }
 
-    QModelIndex ErrorItemModel::index(int row, int column, const QModelIndex &parent) const {
+    QModelIndex ErrorItemModel::index(int , int , const QModelIndex &) const {
         return QModelIndex();
     }
 
-    QModelIndex ErrorItemModel::parent(const QModelIndex &child) const {
+    QModelIndex ErrorItemModel::parent(const QModelIndex &) const {
         return QModelIndex();
     }
 
-    int ErrorItemModel::rowCount(const QModelIndex &parent) const {
+    int ErrorItemModel::rowCount(const QModelIndex &) const {
         return 0;
     }
 
-    int ErrorItemModel::columnCount(const QModelIndex &parent) const {
+    int ErrorItemModel::columnCount(const QModelIndex &) const {
         return 0;
     }
 
-    QVariant ErrorItemModel::data(const QModelIndex &index, int role) const {
+    QVariant ErrorItemModel::data(const QModelIndex &, int ) const {
         return QVariant();
     }
 }

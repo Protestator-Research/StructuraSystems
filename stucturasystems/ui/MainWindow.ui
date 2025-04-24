@@ -58,7 +58,6 @@
     </property>
     <addaction name="actionNeu"/>
     <addaction name="actionOpen_Folder"/>
-    <addaction name="actionOpen_File"/>
     <addaction name="actionSave_File"/>
     <addaction name="separator"/>
     <addaction name="actionSettings"/>
@@ -102,6 +101,9 @@
      <string>Model</string>
     </property>
     <addaction name="actionParse_Model"/>
+    <addaction name="separator"/>
+    <addaction name="actionStep_Back"/>
+    <addaction name="actionStep_Forward"/>
    </widget>
    <widget class="QMenu" name="menuView">
     <property name="title">
@@ -273,6 +275,16 @@
   <action name="actionShow_Error_Widget">
    <property name="text">
     <string>Show Error Widget</string>
+   </property>
+  </action>
+  <action name="actionStep_Back">
+   <property name="text">
+    <string>Step Back</string>
+   </property>
+  </action>
+  <action name="actionStep_Forward">
+   <property name="text">
+    <string>Step Forward</string>
    </property>
   </action>
  </widget>

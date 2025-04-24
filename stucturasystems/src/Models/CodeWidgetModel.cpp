@@ -4,10 +4,13 @@
 
 #include <sysmlv2/rest/entities/Element.h>
 #include <QStandardItem>
+#include <QListWidget>
 
 #include "CodeWidgetModel.h"
 #include "../Widgets/CodeWidget.h"
 #include "Parser/Markdown/MarkdownParser.h"
+#include "../Widgets/ListWidgets/MarkdownElement.h"
+#include "../Widgets/ListWidgets/AddElementWidget.h"
 
 namespace StructuraSystems::Client {
     CodeWidgetModel::CodeWidgetModel(StructuraSystems::Client::CodeWidget *codeWidget,
@@ -19,24 +22,27 @@ namespace StructuraSystems::Client {
             CodeWidget(codeWidget),
             ItemModel(new QStandardItemModel(codeWidget)),
             ElementService(std::make_unique<SysMLv2::API::ElementNavigationService>()){
-        CodeWidget->setMarkdownCodeEditingWidgetModel(ItemModel);
         updateItemView(project,commit);
     }
 
     void CodeWidgetModel::updateItemView(std::shared_ptr<SysMLv2::Entities::Project> &project,
                                          std::shared_ptr<SysMLv2::Entities::Commit> &commit) {
-        ItemModel->clear();
-
+        const auto codeDisplayWidget = CodeWidget->getListWidget();
         const auto & elements = ElementService->getElements(project,commit);
         for(const auto& element : elements) {
-            MarkdownParser parser;
-            parser.parseMarkdown(QString::fromStdString(element->getMarkdownString()));
-            auto item = new QStandardItem(parser.getHTMLOfMarkdown());
-            ItemModel->appendRow(item);
+            auto markdownElement = new MarkdownElement(element, codeDisplayWidget);
+            auto listItemWidget = new QListWidgetItem(codeDisplayWidget);
+            listItemWidget->setSizeHint(markdownElement->sizeHint());
+            codeDisplayWidget->setItemWidget(listItemWidget, markdownElement);
         }
+        auto addElementWidget = new AddElementWidget(codeDisplayWidget);
+        auto listItemWidget = new QListWidgetItem(codeDisplayWidget);
+        listItemWidget->setSizeHint(addElementWidget->sizeHint());
+        codeDisplayWidget->setItemWidget(listItemWidget, addElementWidget);
     }
 
     CodeWidgetModel::~CodeWidgetModel() {
         delete ItemModel;
     }
+
 }

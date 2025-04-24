@@ -33,7 +33,6 @@ namespace StructuraSystems::Client {
         CodeWidget* CodeWidget;
         QStandardItemModel *ItemModel;
         std::unique_ptr<SysMLv2::API::ElementNavigationService> ElementService;
-
     };
 }
 

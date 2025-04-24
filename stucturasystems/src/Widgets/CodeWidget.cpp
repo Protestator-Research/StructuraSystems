@@ -15,7 +15,7 @@ namespace StructuraSystems::Client {
         ui->retranslateUi(this);
         Model = new CodeWidgetModel(this, project,commit);
         HtmlDelegate = new HTMLDelegate();
-        ui->MarkdownCodeEditingWidget->setItemDelegate(HtmlDelegate);
+        decorateWidget();
     }
 
     CodeWidget::~CodeWidget() {
@@ -24,7 +24,12 @@ namespace StructuraSystems::Client {
         delete HtmlDelegate;
     }
 
-    void CodeWidget::setMarkdownCodeEditingWidgetModel(QAbstractItemModel *model) {
-        ui->MarkdownCodeEditingWidget->setModel(model);
+    void CodeWidget::decorateWidget() {
+        ui->AddElementToolButton->setIcon(QIcon(":/icons/userinterface/Add"));
+        ui->AddElementToolButton->setVisible(false);
+    }
+
+    QListWidget *CodeWidget::getListWidget() {
+        return ui->MarkdownCodeElementsWidget;
     }
 } // StructuraSystems::Client

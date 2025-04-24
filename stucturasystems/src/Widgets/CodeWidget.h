@@ -7,6 +7,8 @@
 
 #include <QWidget>
 #include <QAbstractItemModel>
+#include <QToolButton>
+#include <QListWidget>
 #include "../Models/CodeWidgetModel.h"
 
 namespace SysMLv2::Entities{
@@ -28,12 +30,18 @@ namespace StructuraSystems::Client {
         explicit CodeWidget(std::shared_ptr<SysMLv2::Entities::Project> project, std::shared_ptr<SysMLv2::Entities::Commit> commit, QWidget *parent = nullptr);
         ~CodeWidget() override;
 
-        void setMarkdownCodeEditingWidgetModel(QAbstractItemModel* model);
+        QListWidget* getListWidget();
+
     private:
+        void decorateWidget();
 
         Ui::CodeWidget *ui;
         CodeWidgetModel* Model;
         HTMLDelegate* HtmlDelegate;
+
+        QToolButton* AddElementBelow;
+        QToolButton* MoveElementUp;
+        QToolButton* MoveElementDown;
     };
 } // StructuraSystems::Client
 
