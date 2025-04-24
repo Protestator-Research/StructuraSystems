@@ -7,7 +7,7 @@
     <x>0</x>
     <y>0</y>
     <width>1100</width>
-    <height>597</height>
+    <height>765</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -103,14 +103,21 @@
     </property>
     <addaction name="actionParse_Model"/>
    </widget>
+   <widget class="QMenu" name="menuView">
+    <property name="title">
+     <string>View</string>
+    </property>
+    <addaction name="actionShow_Error_Widget"/>
+   </widget>
    <addaction name="menuFile"/>
    <addaction name="menuConnection"/>
    <addaction name="menuModel"/>
    <addaction name="menuDigital_Twin"/>
+   <addaction name="menuView"/>
    <addaction name="menuHelp"/>
   </widget>
   <widget class="QStatusBar" name="statusbar"/>
-  <widget class="QDockWidget" name="dockWidget">
+  <widget class="QDockWidget" name="ProjectDockWidget">
    <attribute name="dockWidgetArea">
     <number>1</number>
    </attribute>
@@ -144,6 +151,24 @@
          </item>
         </layout>
        </widget>
+      </widget>
+     </item>
+    </layout>
+   </widget>
+  </widget>
+  <widget class="QDockWidget" name="ErrorDockWidget_2">
+   <attribute name="dockWidgetArea">
+    <number>8</number>
+   </attribute>
+   <widget class="QWidget" name="dockWidgetContents_5">
+    <layout class="QHBoxLayout" name="horizontalLayout">
+     <item>
+      <widget class="QTableView" name="ErrorTableView">
+       <property name="font">
+        <font>
+         <family>.AppleSystemUIFont</family>
+        </font>
+       </property>
       </widget>
      </item>
     </layout>
@@ -243,6 +268,11 @@
   <action name="actionParse_Model">
    <property name="text">
     <string>Parse Model</string>
+   </property>
+  </action>
+  <action name="actionShow_Error_Widget">
+   <property name="text">
+    <string>Show Error Widget</string>
    </property>
   </action>
  </widget>

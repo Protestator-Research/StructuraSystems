@@ -70,7 +70,11 @@ set(SOURCES src/main.cpp
             src/Models/SettingsModel.cpp
             src/Models/SettingsModel.h
             src/Widgets/Dialogs/SettingsDialog.cpp
-            src/Widgets/Dialogs/SettingsDialog.h)
+            src/Widgets/Dialogs/SettingsDialog.h
+        src/Models/ItemModels/ErrorItemModel.cpp
+        src/Models/ItemModels/ErrorItemModel.h
+        src/Models/ItemModels/ErrorItem.cpp
+        src/Models/ItemModels/ErrorItem.h)
 
 qt_wrap_ui(SOURCES
         ui/MainWindow.ui
