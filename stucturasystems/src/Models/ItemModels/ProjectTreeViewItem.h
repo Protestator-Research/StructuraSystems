@@ -2,8 +2,7 @@
 // Created by Moritz Herzog on 15.05.24.
 //
 
-#ifndef DIGITALTWIN_PROJECTTREEVIEWITEM_H
-#define DIGITALTWIN_PROJECTTREEVIEWITEM_H
+#pragma once
 
 #include <QVariant>
 #include <boost/uuid/uuid.hpp>
@@ -41,6 +40,3 @@ namespace StructuraSystems::Client {
         ProjectTreeViewItem *Parent;
     };
 }
-
-
-#endif //DIGITALTWIN_PROJECTTREEVIEWITEM_H
