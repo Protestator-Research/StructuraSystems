@@ -54,6 +54,7 @@ namespace StructuraSystems::Client {
         connect(ui->LocalTreeView, SIGNAL(doubleClicked(const QModelIndex &)), WindowModel, SLOT(onDoubleClickClicked(const QModelIndex &)));
         connect(ui->actionSettings, SIGNAL(triggered(bool)), this, SLOT(openSettingsWindow()));
         connect(ui->actionConnection_Settings, SIGNAL(triggered(bool)), this, SLOT(openSettingsWindow()));
+        connect(ui->actionConnect, SIGNAL(triggered(bool)), WindowModel, SLOT(connectToBackend()));
     }
 
     void StructuraMainWindow::addTabToMainWindow(QWidget *tab, QString title) {

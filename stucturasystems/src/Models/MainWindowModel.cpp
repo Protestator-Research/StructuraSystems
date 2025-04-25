@@ -14,6 +14,7 @@
 #include <QFile>
 #include <QString>
 #include <QApplication>
+#include <QMessageBox>
 
 #include <sysmlv2/rest/entities/Commit.h>
 #include <sysmlv2/rest/entities/DataVersion.h>
@@ -78,6 +79,7 @@ namespace StructuraSystems::Client {
     }
 
     void MainWindowModel::openFolder(QString folder) {
+        LocalFileItemModel->clear();
         QDir directory(folder);
         QStringList files = directory.entryList(QStringList()<<"*.md"<<"*.kerml"<<"*.sysml"<<"*.xml"<<"*.json");
         for(QString fileName : files) {
@@ -89,4 +91,19 @@ namespace StructuraSystems::Client {
         Settings = settingsModel;
     }
 
+    void MainWindowModel::connectToBackend() {
+        if(BackendConnection != nullptr) {
+            QMessageBox msg = QMessageBox(MainWindow);
+            msg.setIcon(QMessageBox::Icon::Critical);
+            msg.setText(tr("Online Connection already established. Reconnecting will be canceled."));
+            msg.show();
+            return;
+        }
+        BackendConnection = new CommunicationService(Settings->serverPath());
+        BackendConnection->setUserForLoginInBackend(Settings->username(), Settings->password());
+        auto projects = BackendConnection->getAllProjects();
+        for(const auto& project : projects){
+            ExternalFileItemModel->createProject(project->getName(),project->getDescription());
+        }
+    }
 }

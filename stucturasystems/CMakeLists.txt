@@ -79,7 +79,9 @@ set(SOURCES
         src/Widgets/ListWidgets/AddElementWidget.h
         src/Widgets/ListWidgets/AddElementWidget.cpp
         src/Widgets/ListWidgets/MarkdownElement.h
-        src/Widgets/ListWidgets/MarkdownElement.cpp)
+        src/Widgets/ListWidgets/MarkdownElement.cpp
+        src/Services/BECommunicationService.h
+        src/Services/BECommunicationService.cpp)
 
 qt_wrap_ui(SOURCES
         ui/MainWindow.ui

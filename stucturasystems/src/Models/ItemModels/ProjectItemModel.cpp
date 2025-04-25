@@ -103,4 +103,16 @@ namespace StructuraSystems::Client {
         return orientation == Qt::Horizontal && role == Qt::DisplayRole
                ? RootItem->data() : QVariant{};
     }
+
+    void ProjectItemModel::clear() {
+        const int lastElement  = RootItem->childCount()-1;
+
+        if (lastElement < 0)
+            return;
+
+        beginRemoveRows(QModelIndex(), 0, lastElement);
+        RootItem->clearChildItems();
+        endRemoveRows();
+        removeRows(0, lastElement, index(0,0));
+    }
 }

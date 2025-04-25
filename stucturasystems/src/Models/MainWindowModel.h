@@ -13,6 +13,7 @@
 #include <map>
 
 #include "SettingsModel.h"
+#include "../Services/BECommunicationService.h"
 
 namespace StructuraSystems::Client {
     class StructuraMainWindow;
@@ -36,6 +37,7 @@ namespace StructuraSystems::Client {
         void openFolder();
         void onTabCloseRequested(int index);
         void onDoubleClickClicked(const QModelIndex& index);
+        void connectToBackend();
 
     private:
         StructuraMainWindow* MainWindow;
@@ -45,6 +47,8 @@ namespace StructuraSystems::Client {
         ProjectItemModel* ExternalFileItemModel;
 
         SettingsModel* Settings;
+
+        CommunicationService* BackendConnection = nullptr;
 
         void openProjectFromFileStorage(QString filePath);
     };
