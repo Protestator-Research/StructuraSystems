@@ -71,7 +71,7 @@ namespace StructuraSystems::Client {
         project->getDefaultBranch()->setHead(commit);
     }
 
-    void MainWindowModel::onDoubleClickClicked(const QModelIndex& index) {
+    void MainWindowModel::onFileDoubleClickClicked(const QModelIndex& index) {
         auto project = LocalFileItemModel->getProjects().at(index.row());
         auto commit = project->getDefaultBranch()->getHead();
         CodeWidgetMap[QString::fromStdString(project->getName())] = new CodeWidget(project,commit,MainWindow);
@@ -92,18 +92,35 @@ namespace StructuraSystems::Client {
     }
 
     void MainWindowModel::connectToBackend() {
-        if(BackendConnection != nullptr) {
+        try {
+            if (BackendConnection != nullptr) {
+                QMessageBox msg = QMessageBox(MainWindow);
+                msg.setIcon(QMessageBox::Icon::Critical);
+                msg.setText(tr("Online Connection already established. Reconnecting will be canceled."));
+                msg.show();
+                return;
+            }
+            BackendConnection = new CommunicationService(Settings->serverPath());
+            BackendConnection->setUserForLoginInBackend(Settings->username(), Settings->password());
+            auto projects = BackendConnection->getAllProjects();
+            for (const auto &project: projects) {
+                ExternalFileItemModel->createProject(project->getName(), project->getDescription());
+            }
+        }catch (const std::exception& ex) {
             QMessageBox msg = QMessageBox(MainWindow);
             msg.setIcon(QMessageBox::Icon::Critical);
-            msg.setText(tr("Online Connection already established. Reconnecting will be canceled."));
+            msg.setText(tr("Could not connect to backend. \r\n Reason is:"));
+            msg.setInformativeText(QString::fromStdString(ex.what()));
             msg.show();
-            return;
+            BackendConnection = nullptr;
         }
-        BackendConnection = new CommunicationService(Settings->serverPath());
-        BackendConnection->setUserForLoginInBackend(Settings->username(), Settings->password());
-        auto projects = BackendConnection->getAllProjects();
-        for(const auto& project : projects){
-            ExternalFileItemModel->createProject(project->getName(),project->getDescription());
-        }
+    }
+
+    void MainWindowModel::onOnlineProjectDoubleClicked(const QModelIndex &index) {
+        auto project = ExternalFileItemModel->getProjects().at(index.row());
+        auto mainBranch = BackendConnection->getAllBranchesForProjectWithID(project->getId());
+        auto commit = project->getDefaultBranch()->getHead();
+        CodeWidgetMap[QString::fromStdString(project->getName())] = new CodeWidget(project,commit,MainWindow);
+        MainWindow->addTabToMainWindow(CodeWidgetMap[QString::fromStdString(project->getName())], QString::fromStdString(project->getName()));
     }
 }

@@ -33,6 +33,8 @@ namespace StructuraSystems::Client {
 
         std::shared_ptr<SysMLv2::Entities::Project> createProject(std::string projectName, std::string description) override;
 
+        void appendProject(std::shared_ptr<SysMLv2::Entities::Project> project);
+
         std::shared_ptr<SysMLv2::Entities::Project> updateProject(boost::uuids::uuid projectId, std::string projectName, std::string description, std::shared_ptr<SysMLv2::Entities::Branch> branch) override;
 
         std::shared_ptr<SysMLv2::Entities::Project> deleteProject(boost::uuids::uuid projectId) override;

@@ -51,10 +51,11 @@ namespace StructuraSystems::Client {
         connect(ui->ProjectTabWidget, SIGNAL(tabCloseRequested(int)), WindowModel, SLOT(onTabCloseRequested(int)));
         connect(ui->actionOpen_File, SIGNAL(triggered(bool)), WindowModel, SLOT(openFile()));
         connect(ui->actionOpen_Folder, SIGNAL(triggered(bool)), WindowModel, SLOT(openFolder()));
-        connect(ui->LocalTreeView, SIGNAL(doubleClicked(const QModelIndex &)), WindowModel, SLOT(onDoubleClickClicked(const QModelIndex &)));
+        connect(ui->LocalTreeView, SIGNAL(doubleClicked(const QModelIndex &)), WindowModel, SLOT(onFileDoubleClickClicked(const QModelIndex &)));
         connect(ui->actionSettings, SIGNAL(triggered(bool)), this, SLOT(openSettingsWindow()));
         connect(ui->actionConnection_Settings, SIGNAL(triggered(bool)), this, SLOT(openSettingsWindow()));
         connect(ui->actionConnect, SIGNAL(triggered(bool)), WindowModel, SLOT(connectToBackend()));
+        connect(ui->ExternalTreeView, SIGNAL(doubleClicked(const QModelIndex &)), WindowModel, SLOT(onOnlineProjectDoubleClicked(const QModelIndex &)));
     }
 
     void StructuraMainWindow::addTabToMainWindow(QWidget *tab, QString title) {
@@ -95,6 +96,5 @@ namespace StructuraSystems::Client {
                 return;
         }
         WindowModel->openFolder(QString::fromStdString(Settings->workingDirectory()));
-
     }
 } // StructuraSystems::Client

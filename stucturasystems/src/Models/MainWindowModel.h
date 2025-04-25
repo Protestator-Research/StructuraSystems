@@ -36,7 +36,8 @@ namespace StructuraSystems::Client {
         void openFile();
         void openFolder();
         void onTabCloseRequested(int index);
-        void onDoubleClickClicked(const QModelIndex& index);
+        void onFileDoubleClickClicked(const QModelIndex& index);
+        void onOnlineProjectDoubleClicked(const QModelIndex& index);
         void connectToBackend();
 
     private:

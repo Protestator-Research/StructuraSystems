@@ -115,4 +115,11 @@ namespace StructuraSystems::Client {
         endRemoveRows();
         removeRows(0, lastElement, index(0,0));
     }
+
+    void ProjectItemModel::appendProject(std::shared_ptr<SysMLv2::Entities::Project> project) {
+        beginInsertRows(QModelIndex(), 0, RootItem->childCount());
+        RootItem->appendProject(project);
+        endInsertRows();
+        emit dataChanged(index(0,0), index(RootItem->childCount()-1,1), {Qt::DisplayRole});
+    }
 }
