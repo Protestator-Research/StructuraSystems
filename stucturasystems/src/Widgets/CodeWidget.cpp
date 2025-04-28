@@ -32,4 +32,14 @@ namespace StructuraSystems::Client {
     QListWidget *CodeWidget::getListWidget() {
         return ui->MarkdownCodeElementsWidget;
     }
+
+    CodeWidget::CodeWidget(std::shared_ptr<SysMLv2::Entities::Project> project,
+                           std::vector<std::shared_ptr<SysMLv2::Entities::Element>> entities, QWidget *parent) :
+                           QWidget(parent), ui(new Ui::CodeWidget){
+        ui->setupUi(this);
+        ui->retranslateUi(this);
+        Model = new CodeWidgetModel(this, project, entities);
+        HtmlDelegate = new HTMLDelegate();
+        decorateWidget();
+    }
 } // StructuraSystems::Client

@@ -51,8 +51,9 @@ namespace StructuraSystems::Client {
         return returnValue;
     }
 
-    std::shared_ptr<SysMLv2::Entities::Commit> CommunicationService::getCommitWithId(boost::uuids::uuid , boost::uuids::uuid ) {
-        return nullptr;
+    std::shared_ptr<SysMLv2::Entities::Commit> CommunicationService::getCommitWithId(boost::uuids::uuid projectId, boost::uuids::uuid commitId) {
+        auto commit = APIImplementation->getCommit(boost::lexical_cast<std::string>(projectId), boost::lexical_cast<std::string>(commitId), BarrierString);
+        return std::dynamic_pointer_cast<SysMLv2::Entities::Commit>(commit);
     }
 
     std::shared_ptr<SysMLv2::Entities::Commit> CommunicationService::postCommitWithId(boost::uuids::uuid projectId, std::shared_ptr<SysMLv2::Entities::Commit> commit)

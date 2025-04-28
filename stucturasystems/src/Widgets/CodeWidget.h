@@ -14,6 +14,7 @@
 namespace SysMLv2::Entities{
     class Project;
     class Commit;
+    class Element;
 }
 
 namespace StructuraSystems::Client {
@@ -28,6 +29,7 @@ namespace StructuraSystems::Client {
 
     public:
         explicit CodeWidget(std::shared_ptr<SysMLv2::Entities::Project> project, std::shared_ptr<SysMLv2::Entities::Commit> commit, QWidget *parent = nullptr);
+        explicit CodeWidget(std::shared_ptr<SysMLv2::Entities::Project> project, std::vector<std::shared_ptr<SysMLv2::Entities::Element>> entities, QWidget *parent = nullptr);
         ~CodeWidget() override;
 
         QListWidget* getListWidget();

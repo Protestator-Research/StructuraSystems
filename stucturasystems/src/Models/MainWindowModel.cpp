@@ -104,7 +104,7 @@ namespace StructuraSystems::Client {
             BackendConnection->setUserForLoginInBackend(Settings->username(), Settings->password());
             auto projects = BackendConnection->getAllProjects();
             for (const auto &project: projects) {
-                ExternalFileItemModel->createProject(project->getName(), project->getDescription());
+                ExternalFileItemModel->appendProject(project);
             }
         }catch (const std::exception& ex) {
             QMessageBox msg = QMessageBox(MainWindow);
@@ -118,9 +118,14 @@ namespace StructuraSystems::Client {
 
     void MainWindowModel::onOnlineProjectDoubleClicked(const QModelIndex &index) {
         auto project = ExternalFileItemModel->getProjects().at(index.row());
-        auto mainBranch = BackendConnection->getAllBranchesForProjectWithID(project->getId());
-        auto commit = project->getDefaultBranch()->getHead();
-        CodeWidgetMap[QString::fromStdString(project->getName())] = new CodeWidget(project,commit,MainWindow);
+        auto branches = BackendConnection->getAllBranchesForProjectWithID(project->getId());
+        std::shared_ptr<SysMLv2::Entities::Branch> mainBranch;
+        for(const auto & branch : branches)
+            if(branch->getId() == project->getDefaultBranch()->getId())
+                mainBranch = branch;
+
+        auto commit = BackendConnection->getCommitWithId(project->getId(),mainBranch->getHead()->getId());
+        CodeWidgetMap[QString::fromStdString(project->getName())] = new CodeWidget(project,BackendConnection->getAllElements(commit->getId(),project->getId()),MainWindow);
         MainWindow->addTabToMainWindow(CodeWidgetMap[QString::fromStdString(project->getName())], QString::fromStdString(project->getName()));
     }
 }
