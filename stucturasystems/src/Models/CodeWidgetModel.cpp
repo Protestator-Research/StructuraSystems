@@ -5,6 +5,7 @@
 #include <sysmlv2/rest/entities/Element.h>
 #include <QStandardItem>
 #include <QListWidget>
+#include <QMessageBox>
 #include <utility>
 
 #include "CodeWidgetModel.h"
@@ -39,22 +40,26 @@ namespace StructuraSystems::Client {
 
     void CodeWidgetModel::updateItemView(std::shared_ptr<SysMLv2::Entities::Project> &project,
                                          std::shared_ptr<SysMLv2::Entities::Commit> &commit) {
+
         const auto codeDisplayWidget = CodeWidget->getListWidget();
 
-        if(Elements.empty() && (Commit!= nullptr))
+        if (Elements.empty() && (Commit != nullptr))
             Elements = ElementService->getElements(project, commit);
 
-        for(const auto& element : Elements) {
-            auto markdownElement = new MarkdownElement(element, codeDisplayWidget);
-            auto listItemWidget = new QListWidgetItem(codeDisplayWidget);
-            listItemWidget->setSizeHint(markdownElement->sizeHint());
-            codeDisplayWidget->setItemWidget(listItemWidget, markdownElement);
+        for (const auto &element: Elements) {
+            if(!element->body().empty()) {
+                auto markdownElement = new MarkdownElement(element, codeDisplayWidget);
+                auto listItemWidget = new QListWidgetItem(codeDisplayWidget);
+                listItemWidget->setSizeHint(markdownElement->sizeHint());
+                codeDisplayWidget->setItemWidget(listItemWidget, markdownElement);
+            }
         }
 
         auto addElementWidget = new AddElementWidget(codeDisplayWidget);
         auto listItemWidget = new QListWidgetItem(codeDisplayWidget);
         listItemWidget->setSizeHint(addElementWidget->sizeHint());
         codeDisplayWidget->setItemWidget(listItemWidget, addElementWidget);
+
     }
 
     CodeWidgetModel::~CodeWidgetModel() {

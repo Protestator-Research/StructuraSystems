@@ -106,7 +106,7 @@ namespace StructuraSystems::Client {
             for (const auto &project: projects) {
                 ExternalFileItemModel->appendProject(project);
             }
-        }catch (const std::exception& ex) {
+        }catch (std::exception& ex) {
             QMessageBox msg = QMessageBox(MainWindow);
             msg.setIcon(QMessageBox::Icon::Critical);
             msg.setText(tr("Could not connect to backend. \r\n Reason is:"));
@@ -117,15 +117,27 @@ namespace StructuraSystems::Client {
     }
 
     void MainWindowModel::onOnlineProjectDoubleClicked(const QModelIndex &index) {
-        auto project = ExternalFileItemModel->getProjects().at(index.row());
-        auto branches = BackendConnection->getAllBranchesForProjectWithID(project->getId());
-        std::shared_ptr<SysMLv2::Entities::Branch> mainBranch;
-        for(const auto & branch : branches)
-            if(branch->getId() == project->getDefaultBranch()->getId())
-                mainBranch = branch;
+        try {
+            auto project = ExternalFileItemModel->getProjects().at(index.row());
+            auto branches = BackendConnection->getAllBranchesForProjectWithID(project->getId());
+            std::shared_ptr<SysMLv2::Entities::Branch> mainBranch;
+            for (const auto &branch: branches)
+                if (branch->getId() == project->getDefaultBranch()->getId())
+                    mainBranch = branch;
 
-        auto commit = BackendConnection->getCommitWithId(project->getId(),mainBranch->getHead()->getId());
-        CodeWidgetMap[QString::fromStdString(project->getName())] = new CodeWidget(project,BackendConnection->getAllElements(commit->getId(),project->getId()),MainWindow);
-        MainWindow->addTabToMainWindow(CodeWidgetMap[QString::fromStdString(project->getName())], QString::fromStdString(project->getName()));
+            auto commit = BackendConnection->getCommitWithId(project->getId(), mainBranch->getHead()->getId());
+            CodeWidgetMap[QString::fromStdString(project->getName())] = new CodeWidget(project,
+                                                                                       BackendConnection->getAllElements(
+                                                                                               commit->getId(),
+                                                                                               project->getId()),
+                                                                                       MainWindow);
+            MainWindow->addTabToMainWindow(CodeWidgetMap[QString::fromStdString(project->getName())],
+                                           QString::fromStdString(project->getName()));
+        }catch (std::exception &ex) {
+            QMessageBox msg;
+            msg.setText("Error Downloading Elements.");
+            msg.setInformativeText(ex.what());
+            msg.show();
+        }
     }
 }
