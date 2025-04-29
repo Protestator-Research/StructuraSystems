@@ -12,6 +12,8 @@ namespace StructuraSystems::Client {
         ui->setupUi(this);
         ui->retranslateUi(this);
         Element = element;
+        ui->MoveElementDown->setIcon(QIcon(":/icons/arrows/DownGreen"));
+        ui->MoveElementUp->setIcon(QIcon(":/icons/arrows/UpGreen"));
         redecorateMarkdownElement();
         makeConnections();
     }
@@ -28,14 +30,20 @@ namespace StructuraSystems::Client {
                     +node["name"].as<std::string>() + "</h1>"
                     +"<h3>Author: "+node["maintainer"].as<std::string>() +"</h3></div>");
             ui->TextBrowser->setHtml(value);
+            ui->LanguageCombobox->setCurrentIndex(1);
         }
         if(Element->language() != "YaML") {
             ui->TextBrowser->setMarkdown(QString::fromStdString(Element->getMarkdownString()));
             ui->TextEditor->setText(QString::fromStdString(Element->getMarkdownString()));
         }
+        if((Element->language() == "SysML")||(Element->language() == "SysMLv2")||(Element->language() == "SysMD")) {
+            ui->LanguageCombobox->setCurrentIndex(2);
+        }
+        if((Element->language() == "KerML")) {
+            ui->LanguageCombobox->setCurrentIndex(3);
+        }
         ui->TextEditor->setVisible(false);
-        ui->MoveElementDown->setIcon(QIcon(":/icons/arrows/DownGreen"));
-        ui->MoveElementUp->setIcon(QIcon(":/icons/arrows/UpGreen"));
+        qDebug()<<Element->language();
     }
 
     void MarkdownElement::makeConnections() {
@@ -47,6 +55,7 @@ namespace StructuraSystems::Client {
         connect(ui->actionDelete, SIGNAL(triggered(bool)), this, SIGNAL(elementDeleteTriggered()));
         connect(ui->MoveElementUp, SIGNAL(clicked(bool)), this, SIGNAL(moveElementUp()));
         connect(ui->MoveElementDown, SIGNAL(clicked(bool)), this, SIGNAL(moveElementDown()));
+        connect(ui->LanguageCombobox, SIGNAL(currentIndexChanged(int)), this, SLOT(editElementLanguage()));
     }
 
     void MarkdownElement::contextMenuEvent(QContextMenuEvent *event) {
@@ -88,6 +97,24 @@ namespace StructuraSystems::Client {
             ui->LanguageCombobox->setEnabled(false);
             redecorateMarkdownElement();
             emit elementEdited();
+        }
+    }
+
+    void MarkdownElement::editElementLanguage() {
+        switch (ui->LanguageCombobox->currentIndex()) {
+            case 0:
+            default:
+                Element->setLanguage("Markdown");
+                break;
+            case 1:
+                Element->setLanguage("YaML");
+                break;
+            case 2:
+                Element->setLanguage("SysMLv2");
+                break;
+            case 3:
+                Element->setLanguage("KerML");
+                break;
         }
     }
 }

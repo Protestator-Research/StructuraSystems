@@ -30,6 +30,7 @@ namespace StructuraSystems::Client {
     private slots:
         void customContextMenuRequested(QPoint pos);
         void onEditClicked();
+        void editElementLanguage();
 
     private:
         void openContextMenu(QPoint pos);
