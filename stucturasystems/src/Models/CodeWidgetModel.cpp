@@ -50,6 +50,7 @@ namespace StructuraSystems::Client {
             if(!element->body().empty()) {
                 auto markdownElement = new MarkdownElement(element, codeDisplayWidget);
                 auto listItemWidget = new QListWidgetItem(codeDisplayWidget);
+                connect(markdownElement, SIGNAL(elementEdited()), this, SLOT(elementEdited()));
                 listItemWidget->setSizeHint(markdownElement->sizeHint());
                 codeDisplayWidget->setItemWidget(listItemWidget, markdownElement);
             }
@@ -66,5 +67,9 @@ namespace StructuraSystems::Client {
         delete ItemModel;
     }
 
+    void CodeWidgetModel::elementEdited() {
+        CodeWidget->setWindowModified(true);
+        emit tabEdited();
+    }
 
 }

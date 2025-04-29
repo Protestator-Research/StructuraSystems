@@ -34,16 +34,14 @@ namespace StructuraSystems::Client {
 
         QListWidget* getListWidget();
 
+        CodeWidgetModel* getModel() const;
+
     private:
         void decorateWidget();
 
         Ui::CodeWidget *ui;
         CodeWidgetModel* Model;
         HTMLDelegate* HtmlDelegate;
-
-        QToolButton* AddElementBelow;
-        QToolButton* MoveElementUp;
-        QToolButton* MoveElementDown;
     };
 } // StructuraSystems::Client
 

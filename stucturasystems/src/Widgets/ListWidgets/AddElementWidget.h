@@ -15,7 +15,11 @@ namespace StructuraSystems::Client {
 
         ~AddElementWidget();
 
+    signals:
+        void addElementAbove();
+
     private:
+        void makeConnections();
         Ui::AddElementWidget *ui;
     };
 }

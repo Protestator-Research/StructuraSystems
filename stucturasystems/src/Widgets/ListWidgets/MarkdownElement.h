@@ -16,11 +16,20 @@ namespace StructuraSystems::Client {
         explicit MarkdownElement(std::shared_ptr<SysMLv2::Entities::Element> element, QWidget *parent = nullptr);
         ~MarkdownElement();
 
+    signals:
+        void moveElementUp();
+        void moveElementDown();
+        void addElementAbove();
+        void addElementBelow();
+        void elementEdited();
+        void elementDeleteTriggered();
+
     protected:
         void contextMenuEvent(QContextMenuEvent *event) override;
 
     private slots:
         void customContextMenuRequested(QPoint pos);
+        void onEditClicked();
 
     private:
         void openContextMenu(QPoint pos);
@@ -28,6 +37,7 @@ namespace StructuraSystems::Client {
         void redecorateMarkdownElement();
         Ui::MarkdownElement *ui;
         std::shared_ptr<SysMLv2::Entities::Element> Element;
+        bool EditationState=false;
     };
 }
 #endif // MARKDOWNELEMENT_H

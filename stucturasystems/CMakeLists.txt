@@ -3,6 +3,7 @@ cmake_minimum_required(VERSION 3.15)
 find_package(Qt6 REQUIRED COMPONENTS Core Widgets Gui Charts)
 find_package(md4c REQUIRED)
 find_package(sysmllib REQUIRED)
+find_package(yaml-cpp REQUIRED)
 
 qt_standard_project_setup()
 
@@ -105,6 +106,7 @@ target_link_libraries(StructuraSystems PUBLIC
         Qt6::Core
         md4c::md4c
         sysmllib::sysmllib
+        yaml-cpp::yaml-cpp
 )
 
 if (!UNIX)

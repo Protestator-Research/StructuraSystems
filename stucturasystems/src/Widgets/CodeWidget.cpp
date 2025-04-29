@@ -42,4 +42,8 @@ namespace StructuraSystems::Client {
         HtmlDelegate = new HTMLDelegate();
         decorateWidget();
     }
+
+    CodeWidgetModel *CodeWidget::getModel() const {
+        return Model;
+    }
 } // StructuraSystems::Client

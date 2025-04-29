@@ -28,7 +28,15 @@ namespace StructuraSystems::Client {
         ~CodeWidgetModel() override;
 
         void updateItemView(std::shared_ptr<SysMLv2::Entities::Project> &project, std::shared_ptr<SysMLv2::Entities::Commit> &commit);
+
+    signals:
+        void tabEdited();
+
     public slots:
+
+
+    private slots:
+        void elementEdited();
 
     private:
         std::shared_ptr<SysMLv2::Entities::Project> Project;

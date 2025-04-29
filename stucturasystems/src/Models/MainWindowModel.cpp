@@ -133,6 +133,9 @@ namespace StructuraSystems::Client {
                                                                                        MainWindow);
             MainWindow->addTabToMainWindow(CodeWidgetMap[QString::fromStdString(project->getName())],
                                            QString::fromStdString(project->getName()));
+
+            CodeWidgetModelMap[QString::fromStdString(project->getName())] =  CodeWidgetMap[QString::fromStdString(project->getName())]->getModel();
+            connect(CodeWidgetModelMap[QString::fromStdString(project->getName())], SIGNAL(tabEdited()), this, SLOT(onTabEdited()));
         }catch (std::exception &ex) {
             QMessageBox msg;
             msg.setText("Error Downloading Elements.");
@@ -140,4 +143,9 @@ namespace StructuraSystems::Client {
             msg.show();
         }
     }
+
+    void MainWindowModel::onTabEdited() {
+        MainWindow->setWindowModified(true);
+    }
+
 }

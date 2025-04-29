@@ -34,6 +34,7 @@ class CppStructuraSystemsRecipe(ConanFile):
             self.requires("qt/6.7.3")
         self.requires("md4c/0.4.8")
         self.requires("sysmllib/1.0-beta-3-wip")
+        self.requires("yaml-cpp/0.8.0")
 
     def config_options(self):
         if self.settings.os == "Windows":
@@ -49,12 +50,14 @@ class CppStructuraSystemsRecipe(ConanFile):
             self.options["libcurl/*"].shared = True
             self.options["nlohmann_json/*"].shared = True
             self.options["sysmlv2lib/*"].shared=True
+            self.options["yaml-cpp/*"].shared=True
         else:
             self.options["boost/*"].shared = False
             self.options["gtest/*"].shared = False
             self.options["libcurl/*"].shared = False
             self.options["nlohmann_json/*"].shared = False
             self.options["sysmlv2lib/*"].shared=False
+            self.options["yaml-cpp/*"].shared=False
 
         if platform != "darwin":
             self.options["qt/*"].shared = True

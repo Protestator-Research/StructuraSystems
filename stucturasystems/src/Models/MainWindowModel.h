@@ -40,6 +40,9 @@ namespace StructuraSystems::Client {
         void onOnlineProjectDoubleClicked(const QModelIndex& index);
         void connectToBackend();
 
+    private slots:
+        void onTabEdited();
+
     private:
         StructuraMainWindow* MainWindow;
         std::map<QString,CodeWidget*> CodeWidgetMap;
