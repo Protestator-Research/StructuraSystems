@@ -39,6 +39,8 @@ namespace StructuraSystems::Client {
         void onFileDoubleClickClicked(const QModelIndex& index);
         void onOnlineProjectDoubleClicked(const QModelIndex& index);
         void connectToBackend();
+        void saveFile();
+        void newFile();
 
     private slots:
         void onTabEdited();

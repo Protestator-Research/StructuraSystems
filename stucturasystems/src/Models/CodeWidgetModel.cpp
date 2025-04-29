@@ -3,6 +3,7 @@
 //
 
 #include <sysmlv2/rest/entities/Element.h>
+#include <sysmlv2/rest/entities/Project.h>
 #include <QStandardItem>
 #include <QListWidget>
 #include <QMessageBox>
@@ -13,6 +14,7 @@
 #include "Parser/Markdown/MarkdownParser.h"
 #include "../Widgets/ListWidgets/MarkdownElement.h"
 #include "../Widgets/ListWidgets/AddElementWidget.h"
+#include "Parser/StructuraSystemsParser.h"
 
 namespace StructuraSystems::Client {
     CodeWidgetModel::CodeWidgetModel(StructuraSystems::Client::CodeWidget *codeWidget,
@@ -72,4 +74,13 @@ namespace StructuraSystems::Client {
         emit tabEdited();
     }
 
+    void CodeWidgetModel::createCommit() {
+        //TODO
+    }
+
+    void CodeWidgetModel::saveFile(std::string basePath) {
+        StructuraSystemsParser parser;
+        auto path = QString::fromStdString(basePath + "/" + Project->getName());
+        parser.writeFile(path, Elements);
+    }
 }

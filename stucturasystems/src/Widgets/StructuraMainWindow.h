@@ -32,6 +32,8 @@ namespace StructuraSystems::Client {
         void addTabToMainWindow(QWidget* tab, QString title);
         void removeTabWithIndex(int index);
         QString getTabTitle(int index);
+        QWidget* getActiveTabWidget();
+        int getActiveTabIndex();
 
         void addModelToLocalTreeView(QAbstractItemModel* model);
         void addModelToExternalTreeView(QAbstractItemModel* model);

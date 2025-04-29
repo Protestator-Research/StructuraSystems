@@ -46,4 +46,8 @@ namespace StructuraSystems::Client {
     CodeWidgetModel *CodeWidget::getModel() const {
         return Model;
     }
+
+    void CodeWidget::safeFile(std::string basePath) {
+        Model->saveFile(basePath);
+    }
 } // StructuraSystems::Client

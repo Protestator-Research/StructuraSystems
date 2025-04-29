@@ -15,6 +15,7 @@
 #include <QString>
 #include <QApplication>
 #include <QMessageBox>
+#include <QTextStream>
 
 #include <sysmlv2/rest/entities/Commit.h>
 #include <sysmlv2/rest/entities/DataVersion.h>
@@ -76,6 +77,8 @@ namespace StructuraSystems::Client {
         auto commit = project->getDefaultBranch()->getHead();
         CodeWidgetMap[QString::fromStdString(project->getName())] = new CodeWidget(project,commit,MainWindow);
         MainWindow->addTabToMainWindow(CodeWidgetMap[QString::fromStdString(project->getName())], QString::fromStdString(project->getName()));
+        CodeWidgetModelMap[QString::fromStdString(project->getName())] =  CodeWidgetMap[QString::fromStdString(project->getName())]->getModel();
+        connect(CodeWidgetModelMap[QString::fromStdString(project->getName())], SIGNAL(tabEdited()), this, SLOT(onTabEdited()));
     }
 
     void MainWindowModel::openFolder(QString folder) {
@@ -147,5 +150,24 @@ namespace StructuraSystems::Client {
     void MainWindowModel::onTabEdited() {
         MainWindow->setWindowModified(true);
     }
+
+    void MainWindowModel::saveFile() {
+        const auto projectName = MainWindow->getTabTitle(MainWindow->getActiveTabIndex());
+        CodeWidgetModelMap[projectName]->saveFile(Settings->workingDirectory());
+    }
+
+    void MainWindowModel::newFile() {
+        const auto filename = QFileDialog::getSaveFileName(MainWindow,tr("Create new File"), QString::fromStdString(Settings->workingDirectory()),tr("Markdown File (*.md);;KerML File (*.kerml);;SysML File (*.sysml);;XML-File (*.xml);;JSON-File (*.json)"));
+        QFile file;
+        file.setFileName(filename);
+        if (file.open(QIODevice::ReadWrite)) {
+            QTextStream stream(&file);
+            stream << tr("Get Started!");
+        }
+        file.flush();
+        file.close();
+        openFolder(QString::fromStdString(Settings->workingDirectory()));
+    }
+
 
 }

@@ -43,7 +43,6 @@ namespace StructuraSystems::Client {
             ui->LanguageCombobox->setCurrentIndex(3);
         }
         ui->TextEditor->setVisible(false);
-        qDebug()<<Element->language();
     }
 
     void MarkdownElement::makeConnections() {

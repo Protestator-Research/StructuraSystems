@@ -56,7 +56,7 @@
     <property name="title">
      <string>File</string>
     </property>
-    <addaction name="actionNeu"/>
+    <addaction name="actionNew"/>
     <addaction name="actionOpen_Folder"/>
     <addaction name="actionSave_File"/>
     <addaction name="separator"/>
@@ -207,9 +207,12 @@
     <string>Quit</string>
    </property>
   </action>
-  <action name="actionNeu">
+  <action name="actionNew">
    <property name="text">
-    <string>Neu</string>
+    <string>New</string>
+   </property>
+   <property name="toolTip">
+    <string>New</string>
    </property>
   </action>
   <action name="actionConnect">

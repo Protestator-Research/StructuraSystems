@@ -17,6 +17,7 @@ namespace StructuraSystems::Client {
 
         std::vector<std::shared_ptr<SysMLv2::Entities::Element>> readFile(QString filePath);
 
+        void writeFile(QString filePath, std::vector<std::shared_ptr<SysMLv2::Entities::Element>> elements);
 
     private:
         std::vector<std::shared_ptr<SysMLv2::Entities::Element>> readKerMLFile(QString filePath);
@@ -24,6 +25,12 @@ namespace StructuraSystems::Client {
         std::vector<std::shared_ptr<SysMLv2::Entities::Element>> readXmlFile(QString filePath);
         std::vector<std::shared_ptr<SysMLv2::Entities::Element>> readMarkdownFile(QString filePath);
         std::vector<std::shared_ptr<SysMLv2::Entities::Element>> readJsonFile(QString filePath);
+
+        void writeKerMLFile(QString filePath, std::vector<std::shared_ptr<SysMLv2::Entities::Element>> elements);
+        void writeSysMLv2File(QString filePath, std::vector<std::shared_ptr<SysMLv2::Entities::Element>> elements);
+        void writeXmlFile(QString filePath, std::vector<std::shared_ptr<SysMLv2::Entities::Element>> elements);
+        void writeMarkdownFile(QString filePath, std::vector<std::shared_ptr<SysMLv2::Entities::Element>> elements);
+        void writeJsonFile(QString filePath, std::vector<std::shared_ptr<SysMLv2::Entities::Element>> elements);
     };
 } // StructuraSystems::Client
 

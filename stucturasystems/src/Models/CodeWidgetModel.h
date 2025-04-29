@@ -29,6 +29,8 @@ namespace StructuraSystems::Client {
 
         void updateItemView(std::shared_ptr<SysMLv2::Entities::Project> &project, std::shared_ptr<SysMLv2::Entities::Commit> &commit);
 
+        void createCommit();
+        void saveFile(std::string basePath);
     signals:
         void tabEdited();
 
@@ -39,6 +41,8 @@ namespace StructuraSystems::Client {
         void elementEdited();
 
     private:
+
+
         std::shared_ptr<SysMLv2::Entities::Project> Project;
         std::shared_ptr<SysMLv2::Entities::Commit> Commit;
         std::vector<std::shared_ptr<SysMLv2::Entities::Element>> Elements;

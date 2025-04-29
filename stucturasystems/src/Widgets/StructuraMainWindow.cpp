@@ -39,8 +39,12 @@ namespace StructuraSystems::Client {
         ui->actionConnect->setIcon(QIcon(":/icons/userinterface/Connection"));
         ui->actionStep_Back->setIcon(QIcon(":/icons/arrows/StepBack"));
         ui->actionStep_Forward->setIcon(QIcon(":/icons/arrows/StepForward"));
+        ui->actionSave_File->setIcon(QIcon(":/icons/userinterface/Save"));
+        ui->actionNew->setIcon(QIcon(":/icons/userinterface/New"));
 
         addToolBar(ToolBar);
+        ToolBar->addAction(ui->actionNew);
+        ToolBar->addAction(ui->actionSave_File);
         ToolBar->addAction(ui->actionOpen_Folder);
         ToolBar->addAction(ui->actionConnect);
         ToolBar->addAction(ui->actionStep_Back);
@@ -56,6 +60,8 @@ namespace StructuraSystems::Client {
         connect(ui->actionConnection_Settings, SIGNAL(triggered(bool)), this, SLOT(openSettingsWindow()));
         connect(ui->actionConnect, SIGNAL(triggered(bool)), WindowModel, SLOT(connectToBackend()));
         connect(ui->ExternalTreeView, SIGNAL(doubleClicked(const QModelIndex &)), WindowModel, SLOT(onOnlineProjectDoubleClicked(const QModelIndex &)));
+        connect(ui->actionNew, SIGNAL(triggered(bool)), WindowModel, SLOT(newFile()));
+        connect(ui->actionSave_File, SIGNAL(triggered(bool)),WindowModel, SLOT(saveFile()));
     }
 
     void StructuraMainWindow::addTabToMainWindow(QWidget *tab, QString title) {
@@ -96,5 +102,13 @@ namespace StructuraSystems::Client {
                 return;
         }
         WindowModel->openFolder(QString::fromStdString(Settings->workingDirectory()));
+    }
+
+    QWidget *StructuraMainWindow::getActiveTabWidget() {
+        return ui->tabWidget->currentWidget();
+    }
+
+    int StructuraMainWindow::getActiveTabIndex() {
+        return ui->tabWidget->currentIndex() - 1;
     }
 } // StructuraSystems::Client

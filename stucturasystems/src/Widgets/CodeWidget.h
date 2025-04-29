@@ -36,6 +36,8 @@ namespace StructuraSystems::Client {
 
         CodeWidgetModel* getModel() const;
 
+        void safeFile(std::string basePath);
+
     private:
         void decorateWidget();
 
