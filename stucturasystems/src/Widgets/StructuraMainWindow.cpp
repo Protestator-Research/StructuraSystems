@@ -32,7 +32,8 @@ namespace StructuraSystems::Client {
 
     void StructuraMainWindow::initWindow() {
         ui->ProjectTabWidget->clear();
-        ToolBar = new QToolBar();
+        ToolBar = new QToolBar(this);
+        ModelToolBar = new QToolBar(this);
         WindowModel = new MainWindowModel(this);
 
         ui->actionOpen_Folder->setIcon(QIcon(":/icons/userinterface/Open"));
@@ -41,14 +42,18 @@ namespace StructuraSystems::Client {
         ui->actionStep_Forward->setIcon(QIcon(":/icons/arrows/StepForward"));
         ui->actionSave_File->setIcon(QIcon(":/icons/userinterface/Save"));
         ui->actionNew->setIcon(QIcon(":/icons/userinterface/New"));
+        ui->actionParse_Model->setIcon(QIcon(":/icons/sience/Debug"));
 
         addToolBar(ToolBar);
         ToolBar->addAction(ui->actionNew);
         ToolBar->addAction(ui->actionSave_File);
         ToolBar->addAction(ui->actionOpen_Folder);
         ToolBar->addAction(ui->actionConnect);
-        ToolBar->addAction(ui->actionStep_Back);
-        ToolBar->addAction(ui->actionStep_Forward);
+
+        addToolBar(ModelToolBar);
+        ModelToolBar->addAction(ui->actionParse_Model);
+        ModelToolBar->addAction(ui->actionStep_Back);
+        ModelToolBar->addAction(ui->actionStep_Forward);
     }
 
     void StructuraMainWindow::makeConnections() {
@@ -62,6 +67,7 @@ namespace StructuraSystems::Client {
         connect(ui->ExternalTreeView, SIGNAL(doubleClicked(const QModelIndex &)), WindowModel, SLOT(onOnlineProjectDoubleClicked(const QModelIndex &)));
         connect(ui->actionNew, SIGNAL(triggered(bool)), WindowModel, SLOT(newFile()));
         connect(ui->actionSave_File, SIGNAL(triggered(bool)),WindowModel, SLOT(saveFile()));
+        connect(ui->actionParse_Model, SIGNAL(triggered(bool)), WindowModel, SLOT(onActionParseModelClicked()));
     }
 
     void StructuraMainWindow::addTabToMainWindow(QWidget *tab, QString title) {

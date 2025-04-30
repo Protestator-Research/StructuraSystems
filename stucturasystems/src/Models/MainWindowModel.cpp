@@ -169,5 +169,10 @@ namespace StructuraSystems::Client {
         openFolder(QString::fromStdString(Settings->workingDirectory()));
     }
 
+    void MainWindowModel::onActionParseModelClicked() {
+        QString activeTabName = MainWindow->getTabTitle(MainWindow->getActiveTabIndex());
+        CodeWidgetModelMap[activeTabName]->parseKerMLSysMLModel();
+    }
+
 
 }

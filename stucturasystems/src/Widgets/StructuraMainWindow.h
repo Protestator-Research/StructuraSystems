@@ -48,6 +48,7 @@ namespace StructuraSystems::Client {
 
         Ui::StructuraMainWindow *ui;
         QToolBar *ToolBar;
+        QToolBar *ModelToolBar;
 
         MainWindowModel *WindowModel;
 

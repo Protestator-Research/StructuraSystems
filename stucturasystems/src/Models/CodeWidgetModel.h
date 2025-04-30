@@ -31,6 +31,8 @@ namespace StructuraSystems::Client {
 
         void createCommit();
         void saveFile(std::string basePath);
+
+        void parseKerMLSysMLModel();
     signals:
         void tabEdited();
 

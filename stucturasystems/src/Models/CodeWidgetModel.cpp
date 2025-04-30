@@ -4,6 +4,7 @@
 
 #include <sysmlv2/rest/entities/Element.h>
 #include <sysmlv2/rest/entities/Project.h>
+#include <sysmlv2file/Parser.h>
 #include <QStandardItem>
 #include <QListWidget>
 #include <QMessageBox>
@@ -15,6 +16,7 @@
 #include "../Widgets/ListWidgets/MarkdownElement.h"
 #include "../Widgets/ListWidgets/AddElementWidget.h"
 #include "Parser/StructuraSystemsParser.h"
+
 
 namespace StructuraSystems::Client {
     CodeWidgetModel::CodeWidgetModel(StructuraSystems::Client::CodeWidget *codeWidget,
@@ -82,5 +84,13 @@ namespace StructuraSystems::Client {
         StructuraSystemsParser parser;
         auto path = QString::fromStdString(basePath + "/" + Project->getName());
         parser.writeFile(path, Elements);
+    }
+
+    void CodeWidgetModel::parseKerMLSysMLModel() {
+        for(const auto& element : Elements){
+            if(element->language()=="KerML")
+                auto parsedModel = SysMLv2::Files::Parser::parseKerML(element->body());
+        }
+
     }
 }

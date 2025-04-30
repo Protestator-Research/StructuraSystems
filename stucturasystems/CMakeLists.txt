@@ -75,8 +75,6 @@ set(SOURCES
         src/Widgets/Dialogs/SettingsDialog.h
         src/Models/ItemModels/ErrorItemModel.cpp
         src/Models/ItemModels/ErrorItemModel.h
-        src/Models/ItemModels/ErrorItem.cpp
-        src/Models/ItemModels/ErrorItem.h
         src/Widgets/ListWidgets/AddElementWidget.h
         src/Widgets/ListWidgets/AddElementWidget.cpp
         src/Widgets/ListWidgets/MarkdownElement.h

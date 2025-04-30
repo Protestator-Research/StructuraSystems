@@ -41,6 +41,7 @@ namespace StructuraSystems::Client {
         void connectToBackend();
         void saveFile();
         void newFile();
+        void onActionParseModelClicked();
 
     private slots:
         void onTabEdited();
