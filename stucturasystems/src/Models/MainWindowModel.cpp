@@ -27,6 +27,7 @@
 
 #include <boost/uuid/uuid.hpp>
 #include <boost/uuid/random_generator.hpp>
+#include <curl/curl.h>
 
 namespace StructuraSystems::Client {
     MainWindowModel::MainWindowModel(StructuraMainWindow *mainWindow) {
@@ -177,6 +178,6 @@ namespace StructuraSystems::Client {
     void MainWindowModel::onUploadModelClicked() {
         const auto modelName = MainWindow->getTabTitle(MainWindow->getActiveTabIndex()+1);
         const auto model = CodeWidgetModelMap[modelName];
-        model->createProjectAndCommit();
+        model->createProjectAndCommit(BackendConnection);
     }
 }

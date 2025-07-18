@@ -11,11 +11,15 @@
 #include <utility>
 
 #include "CodeWidgetModel.h"
+
+#include <sysmlv2/rest/entities/Commit.h>
+
 #include "../Widgets/CodeWidget.h"
 #include "Parser/Markdown/MarkdownParser.h"
 #include "../Widgets/ListWidgets/MarkdownElement.h"
 #include "../Widgets/ListWidgets/AddElementWidget.h"
 #include "Parser/StructuraSystemsParser.h"
+#include "../Services/BECommunicationService.h"
 
 
 namespace StructuraSystems::Client {
@@ -77,6 +81,7 @@ namespace StructuraSystems::Client {
     }
 
     void CodeWidgetModel::createCommit(CommunicationService* communicationService) {
+        communicationService->postCommitWithId(Project->getId(), Commit);
         //TODO
     }
 
@@ -95,6 +100,7 @@ namespace StructuraSystems::Client {
     }
 
     void CodeWidgetModel::createProjectAndCommit(CommunicationService* communicationService) {
-        communicationService->
+        Project = communicationService->postProject(Project->getName(), Project->getDescription(), "Main");
+        communicationService->postCommitWithId(Project->getId(), Commit);
     }
 }

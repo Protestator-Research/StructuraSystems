@@ -19,6 +19,7 @@ namespace SysMLv2::Entities{
 
 namespace StructuraSystems::Client {
     class CodeWidget;
+    class CommunicationService;
 
     class CodeWidgetModel : public QObject{
         Q_OBJECT
