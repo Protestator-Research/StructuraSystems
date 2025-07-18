@@ -14,6 +14,7 @@
 
 #include "SettingsModel.h"
 #include "../Services/BECommunicationService.h"
+#include "../Models/ItemModels/ErrorItemModel.h"
 
 namespace StructuraSystems::Client {
     class StructuraMainWindow;
@@ -42,6 +43,7 @@ namespace StructuraSystems::Client {
         void saveFile();
         void newFile();
         void onActionParseModelClicked();
+        void onUploadModelClicked();
 
     private slots:
         void onTabEdited();
@@ -56,6 +58,7 @@ namespace StructuraSystems::Client {
         SettingsModel* Settings;
 
         CommunicationService* BackendConnection = nullptr;
+
 
         void openProjectFromFileStorage(QString filePath);
     };

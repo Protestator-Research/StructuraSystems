@@ -174,5 +174,9 @@ namespace StructuraSystems::Client {
         CodeWidgetModelMap[activeTabName]->parseKerMLSysMLModel();
     }
 
-
+    void MainWindowModel::onUploadModelClicked() {
+        const auto modelName = MainWindow->getTabTitle(MainWindow->getActiveTabIndex()+1);
+        const auto model = CodeWidgetModelMap[modelName];
+        model->createProjectAndCommit();
+    }
 }

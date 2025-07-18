@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.15)
 
-find_package(Qt6 REQUIRED COMPONENTS Core Widgets Gui Charts)
+find_package(Qt6 REQUIRED COMPONENTS Core Widgets Gui)
 find_package(md4c REQUIRED)
 find_package(sysmllib REQUIRED)
 find_package(yaml-cpp REQUIRED)
@@ -100,7 +100,6 @@ target_include_directories(StructuraSystems PUBLIC
 target_link_libraries(StructuraSystems PUBLIC
         Qt6::Widgets
         Qt6::Gui
-        Qt6::Charts
         Qt6::Core
         md4c::md4c
         sysmllib::sysmllib

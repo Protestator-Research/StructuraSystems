@@ -76,7 +76,7 @@ namespace StructuraSystems::Client {
         emit tabEdited();
     }
 
-    void CodeWidgetModel::createCommit() {
+    void CodeWidgetModel::createCommit(CommunicationService* communicationService) {
         //TODO
     }
 
@@ -92,5 +92,9 @@ namespace StructuraSystems::Client {
                 auto parsedModel = SysMLv2::Files::Parser::parseKerML(element->body());
         }
 
+    }
+
+    void CodeWidgetModel::createProjectAndCommit(CommunicationService* communicationService) {
+        communicationService->
     }
 }

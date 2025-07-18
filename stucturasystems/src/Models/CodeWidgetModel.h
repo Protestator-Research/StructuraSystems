@@ -29,7 +29,9 @@ namespace StructuraSystems::Client {
 
         void updateItemView(std::shared_ptr<SysMLv2::Entities::Project> &project, std::shared_ptr<SysMLv2::Entities::Commit> &commit);
 
-        void createCommit();
+        void createCommit(CommunicationService* communicationService);
+        void createProjectAndCommit(CommunicationService* communicationService);
+
         void saveFile(std::string basePath);
 
         void parseKerMLSysMLModel();
