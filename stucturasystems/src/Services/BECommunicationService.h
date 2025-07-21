@@ -17,7 +17,7 @@
 //---------------------------------------------------------
 // Forwarding
 //---------------------------------------------------------
-namespace SysMLv2::Entities {
+namespace SysMLv2::REST {
     class IEntity;
     class Commit;
     class Branch;
@@ -60,13 +60,13 @@ namespace StructuraSystems::Client {
          * @see std::vector
          * @see ENTITIES::Element
          */
-        std::vector<std::shared_ptr<SysMLv2::Entities::Element>> getAllElements(boost::uuids::uuid commitId, boost::uuids::uuid projectId);
+        std::vector<std::shared_ptr<SysMLv2::REST::Element>> getAllElements(boost::uuids::uuid commitId, boost::uuids::uuid projectId);
 
         /**
          * Creates a connection to the REST endpoint of the given AGILA Backend sever, to get all saved projects within the instance of the Backend
          * @return An std::vector of the Projects
          */
-        std::vector<std::shared_ptr<SysMLv2::Entities::Project>> getAllProjects();
+        std::vector<std::shared_ptr<SysMLv2::REST::Project>> getAllProjects();
 
         /**
          * Creates online a project with the given Properties.
@@ -75,14 +75,14 @@ namespace StructuraSystems::Client {
          * @param defaultBranchName
          * @return
          */
-        std::shared_ptr<SysMLv2::Entities::Project> postProject(std::string projectName, std::string projectDescription, std::string defaultBranchName);
+        std::shared_ptr<SysMLv2::REST::Project> postProject(std::string projectName, std::string projectDescription, std::string defaultBranchName);
 
         /**
          * Download all branches for a project, with the projects id.
          * @param projectId UUID ("@id") of the project.
          * @return All Branches of the Project.
          */
-        std::vector<std::shared_ptr<SysMLv2::Entities::Branch>> getAllBranchesForProjectWithID(boost::uuids::uuid projectId);
+        std::vector<std::shared_ptr<SysMLv2::REST::Branch>> getAllBranchesForProjectWithID(boost::uuids::uuid projectId);
 
         /**
          * Download the commits with its commit id and project id identifying the specific commit.
@@ -91,7 +91,7 @@ namespace StructuraSystems::Client {
          * @return The complete Commit
          * @see ENTITIES::Commit
          */
-        std::shared_ptr<SysMLv2::Entities::Commit> getCommitWithId(boost::uuids::uuid projectId, boost::uuids::uuid commitId);
+        std::shared_ptr<SysMLv2::REST::Commit> getCommitWithId(boost::uuids::uuid projectId, boost::uuids::uuid commitId);
 
         /**
          * Posts a new Commit to the Backend.
@@ -99,7 +99,7 @@ namespace StructuraSystems::Client {
          * @param commit 
          * @return 
          */
-        std::shared_ptr<SysMLv2::Entities::Commit> postCommitWithId(boost::uuids::uuid projectId, std::shared_ptr<SysMLv2::Entities::Commit> commit);
+        std::shared_ptr<SysMLv2::REST::Commit> postCommitWithId(boost::uuids::uuid projectId, std::shared_ptr<SysMLv2::REST::Commit> commit);
 
 
         /**
@@ -109,7 +109,7 @@ namespace StructuraSystems::Client {
          * @return All elements of the specific commit.
          * @see ENTITIES::Element
          */
-        std::vector<std::shared_ptr<SysMLv2::Entities::Element>> getAllElementsOfCommit(boost::uuids::uuid projectId, boost::uuids::uuid commitId);
+        std::vector<std::shared_ptr<SysMLv2::REST::Element>> getAllElementsOfCommit(boost::uuids::uuid projectId, boost::uuids::uuid commitId);
 
         /**
          * Sets and checks internally the user, that the server is connected to.

@@ -11,7 +11,7 @@
 #include <QStandardItemModel>
 #include <sysmlv2service/implementation/ElementNavigationService.h>
 
-namespace SysMLv2::Entities{
+namespace SysMLv2::REST{
     class Project;
     class Commit;
     class Element;
@@ -24,11 +24,11 @@ namespace StructuraSystems::Client {
     class CodeWidgetModel : public QObject{
         Q_OBJECT
     public:
-        CodeWidgetModel(CodeWidget* codeWidget, std::shared_ptr<SysMLv2::Entities::Project> &project, std::shared_ptr<SysMLv2::Entities::Commit> &commit);
-        CodeWidgetModel(CodeWidget* codeWidget, std::shared_ptr<SysMLv2::Entities::Project> &project, std::vector<std::shared_ptr<SysMLv2::Entities::Element>> elements);
+        CodeWidgetModel(CodeWidget* codeWidget, std::shared_ptr<SysMLv2::REST::Project> &project, std::shared_ptr<SysMLv2::REST::Commit> &commit);
+        CodeWidgetModel(CodeWidget* codeWidget, std::shared_ptr<SysMLv2::REST::Project> &project, std::vector<std::shared_ptr<SysMLv2::REST::Element>> elements);
         ~CodeWidgetModel() override;
 
-        void updateItemView(std::shared_ptr<SysMLv2::Entities::Project> &project, std::shared_ptr<SysMLv2::Entities::Commit> &commit);
+        void updateItemView(std::shared_ptr<SysMLv2::REST::Project> &project, std::shared_ptr<SysMLv2::REST::Commit> &commit);
 
         void createCommit(CommunicationService* communicationService);
         void createProjectAndCommit(CommunicationService* communicationService);
@@ -48,9 +48,9 @@ namespace StructuraSystems::Client {
     private:
 
 
-        std::shared_ptr<SysMLv2::Entities::Project> Project;
-        std::shared_ptr<SysMLv2::Entities::Commit> Commit;
-        std::vector<std::shared_ptr<SysMLv2::Entities::Element>> Elements;
+        std::shared_ptr<SysMLv2::REST::Project> Project;
+        std::shared_ptr<SysMLv2::REST::Commit> Commit;
+        std::vector<std::shared_ptr<SysMLv2::REST::Element>> Elements;
         CodeWidget* CodeWidget;
         QStandardItemModel *ItemModel;
         std::unique_ptr<SysMLv2::API::ElementNavigationService> ElementService;

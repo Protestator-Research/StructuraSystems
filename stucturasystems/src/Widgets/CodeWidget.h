@@ -11,7 +11,7 @@
 #include <QListWidget>
 #include "../Models/CodeWidgetModel.h"
 
-namespace SysMLv2::Entities{
+namespace SysMLv2::REST{
     class Project;
     class Commit;
     class Element;
@@ -28,8 +28,8 @@ namespace StructuraSystems::Client {
     Q_OBJECT
 
     public:
-        explicit CodeWidget(std::shared_ptr<SysMLv2::Entities::Project> project, std::shared_ptr<SysMLv2::Entities::Commit> commit, QWidget *parent = nullptr);
-        explicit CodeWidget(std::shared_ptr<SysMLv2::Entities::Project> project, std::vector<std::shared_ptr<SysMLv2::Entities::Element>> entities, QWidget *parent = nullptr);
+        explicit CodeWidget(std::shared_ptr<SysMLv2::REST::Project> project, std::shared_ptr<SysMLv2::REST::Commit> commit, QWidget *parent = nullptr);
+        explicit CodeWidget(std::shared_ptr<SysMLv2::REST::Project> project, std::vector<std::shared_ptr<SysMLv2::REST::Element>> entities, QWidget *parent = nullptr);
         ~CodeWidget() override;
 
         QListWidget* getListWidget();

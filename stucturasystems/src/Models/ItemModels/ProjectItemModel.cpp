@@ -42,30 +42,30 @@ namespace StructuraSystems::Client {
         return item->data();
     }
 
-    std::vector<std::shared_ptr<SysMLv2::Entities::Project>> ProjectItemModel::getProjects() {
-        std::vector<std::shared_ptr<SysMLv2::Entities::Project>> returnValue;
+    std::vector<std::shared_ptr<SysMLv2::REST::Project>> ProjectItemModel::getProjects() {
+        std::vector<std::shared_ptr<SysMLv2::REST::Project>> returnValue;
         for(int i = 0; i<RootItem->childCount(); i++)
             returnValue.push_back(RootItem->child(i)->getProject());
         return returnValue;
     }
 
-    std::shared_ptr<SysMLv2::Entities::Project> ProjectItemModel::getProjectById(boost::uuids::uuid projectId) {
+    std::shared_ptr<SysMLv2::REST::Project> ProjectItemModel::getProjectById(boost::uuids::uuid projectId) {
         return RootItem->getProjectById(projectId);
     }
 
-    std::shared_ptr<SysMLv2::Entities::Project>
+    std::shared_ptr<SysMLv2::REST::Project>
     ProjectItemModel::createProject(std::string projectName, std::string description) {
         beginInsertRows(QModelIndex(), 0, RootItem->childCount());
-        auto project = std::make_shared<SysMLv2::Entities::Project>(projectName, description, "main");
+        auto project = std::make_shared<SysMLv2::REST::Project>(projectName, description, "main");
         RootItem->appendProject(project);
         endInsertRows();
         emit dataChanged(index(0,0), index(RootItem->childCount()-1,1), {Qt::DisplayRole});
         return project;
     }
 
-    std::shared_ptr<SysMLv2::Entities::Project>
+    std::shared_ptr<SysMLv2::REST::Project>
     ProjectItemModel::updateProject(boost::uuids::uuid projectId, std::string projectName, std::string description,
-                                    std::shared_ptr<SysMLv2::Entities::Branch> branch) {
+                                    std::shared_ptr<SysMLv2::REST::Branch> branch) {
         auto project = RootItem->getProjectById(projectId);
         if(!projectName.empty())
             project->setName(projectName);
@@ -77,7 +77,7 @@ namespace StructuraSystems::Client {
         return project;
     }
 
-    std::shared_ptr<SysMLv2::Entities::Project> ProjectItemModel::deleteProject(boost::uuids::uuid projectId) {
+    std::shared_ptr<SysMLv2::REST::Project> ProjectItemModel::deleteProject(boost::uuids::uuid projectId) {
 //        beginRemoveColumns(index(getIndexFromProjectId(projectId),0), getIndexFromProjectId(projectId), getIndexFromProjectId(projectId));
         auto project =  RootItem->getProjectById(projectId);
 //        endRemoveColumns();
@@ -116,7 +116,7 @@ namespace StructuraSystems::Client {
         removeRows(0, lastElement, index(0,0));
     }
 
-    void ProjectItemModel::appendProject(std::shared_ptr<SysMLv2::Entities::Project> project) {
+    void ProjectItemModel::appendProject(std::shared_ptr<SysMLv2::REST::Project> project) {
         beginInsertRows(QModelIndex(), 0, RootItem->childCount());
         RootItem->appendProject(project);
         endInsertRows();

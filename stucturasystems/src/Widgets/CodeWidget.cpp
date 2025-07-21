@@ -9,7 +9,7 @@
 #include "../Models/Delegates/HtmlDelegate.h"
 
 namespace StructuraSystems::Client {
-    CodeWidget::CodeWidget(std::shared_ptr<SysMLv2::Entities::Project> project, std::shared_ptr<SysMLv2::Entities::Commit> commit, QWidget *parent) :
+    CodeWidget::CodeWidget(std::shared_ptr<SysMLv2::REST::Project> project, std::shared_ptr<SysMLv2::REST::Commit> commit, QWidget *parent) :
             QWidget(parent), ui(new Ui::CodeWidget) {
         ui->setupUi(this);
         ui->retranslateUi(this);
@@ -33,8 +33,8 @@ namespace StructuraSystems::Client {
         return ui->MarkdownCodeElementsWidget;
     }
 
-    CodeWidget::CodeWidget(std::shared_ptr<SysMLv2::Entities::Project> project,
-                           std::vector<std::shared_ptr<SysMLv2::Entities::Element>> entities, QWidget *parent) :
+    CodeWidget::CodeWidget(std::shared_ptr<SysMLv2::REST::Project> project,
+                           std::vector<std::shared_ptr<SysMLv2::REST::Element>> entities, QWidget *parent) :
                            QWidget(parent), ui(new Ui::CodeWidget){
         ui->setupUi(this);
         ui->retranslateUi(this);

@@ -7,7 +7,7 @@
 
 
 namespace StructuraSystems::Client {
-    MarkdownElement::MarkdownElement(std::shared_ptr<SysMLv2::Entities::Element> element, QWidget *parent)
+    MarkdownElement::MarkdownElement(std::shared_ptr<SysMLv2::REST::Element> element, QWidget *parent)
             : QWidget(parent), ui(new Ui::MarkdownElement) {
         ui->setupUi(this);
         ui->retranslateUi(this);

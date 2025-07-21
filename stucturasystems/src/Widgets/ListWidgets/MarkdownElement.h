@@ -13,7 +13,7 @@ namespace StructuraSystems::Client {
     Q_OBJECT
 
     public:
-        explicit MarkdownElement(std::shared_ptr<SysMLv2::Entities::Element> element, QWidget *parent = nullptr);
+        explicit MarkdownElement(std::shared_ptr<SysMLv2::REST::Element> element, QWidget *parent = nullptr);
         ~MarkdownElement();
 
     signals:
@@ -37,7 +37,7 @@ namespace StructuraSystems::Client {
         void makeConnections();
         void redecorateMarkdownElement();
         Ui::MarkdownElement *ui;
-        std::shared_ptr<SysMLv2::Entities::Element> Element;
+        std::shared_ptr<SysMLv2::REST::Element> Element;
         bool EditationState=false;
     };
 }

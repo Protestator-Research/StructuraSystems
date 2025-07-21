@@ -62,11 +62,11 @@ namespace StructuraSystems::Client {
                                                                "Created from Filesystem");
         StructuraSystemsParser parser;
         auto elements = parser.readFile(filePath);
-        auto commit = std::make_shared<SysMLv2::Entities::Commit>("Created from Filesystem", "Created from Filesystem",
+        auto commit = std::make_shared<SysMLv2::REST::Commit>("Created from Filesystem", "Created from Filesystem",
                                                                   project);
         for (auto element: elements) {
-            auto dataVersion = std::make_shared<SysMLv2::Entities::DataVersion>(
-                    std::make_shared<SysMLv2::Entities::DataIdentity>(boost::uuids::random_generator()()), element);
+            auto dataVersion = std::make_shared<SysMLv2::REST::DataVersion>(
+                    std::make_shared<SysMLv2::REST::DataIdentity>(boost::uuids::random_generator()()), element);
             commit->addChange(dataVersion);
         }
 
@@ -124,7 +124,7 @@ namespace StructuraSystems::Client {
         try {
             auto project = ExternalFileItemModel->getProjects().at(index.row());
             auto branches = BackendConnection->getAllBranchesForProjectWithID(project->getId());
-            std::shared_ptr<SysMLv2::Entities::Branch> mainBranch;
+            std::shared_ptr<SysMLv2::REST::Branch> mainBranch;
             for (const auto &branch: branches)
                 if (branch->getId() == project->getDefaultBranch()->getId())
                     mainBranch = branch;
@@ -176,7 +176,7 @@ namespace StructuraSystems::Client {
     }
 
     void MainWindowModel::onUploadModelClicked() {
-        const auto modelName = MainWindow->getTabTitle(MainWindow->getActiveTabIndex()+1);
+        const auto modelName = MainWindow->getTabTitle(MainWindow->getActiveTabIndex());
         const auto model = CodeWidgetModelMap[modelName];
         model->createProjectAndCommit(BackendConnection);
     }

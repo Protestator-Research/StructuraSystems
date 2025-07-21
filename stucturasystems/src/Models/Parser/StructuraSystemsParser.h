@@ -15,22 +15,22 @@ namespace StructuraSystems::Client {
         StructuraSystemsParser();
         ~StructuraSystemsParser();
 
-        std::vector<std::shared_ptr<SysMLv2::Entities::Element>> readFile(QString filePath);
+        std::vector<std::shared_ptr<SysMLv2::REST::Element>> readFile(QString filePath);
 
-        void writeFile(QString filePath, std::vector<std::shared_ptr<SysMLv2::Entities::Element>> elements);
+        void writeFile(QString filePath, std::vector<std::shared_ptr<SysMLv2::REST::Element>> elements);
 
     private:
-        std::vector<std::shared_ptr<SysMLv2::Entities::Element>> readKerMLFile(QString filePath);
-        std::vector<std::shared_ptr<SysMLv2::Entities::Element>> readSysMLv2File(QString filePath);
-        std::vector<std::shared_ptr<SysMLv2::Entities::Element>> readXmlFile(QString filePath);
-        std::vector<std::shared_ptr<SysMLv2::Entities::Element>> readMarkdownFile(QString filePath);
-        std::vector<std::shared_ptr<SysMLv2::Entities::Element>> readJsonFile(QString filePath);
+        std::vector<std::shared_ptr<SysMLv2::REST::Element>> readKerMLFile(QString filePath);
+        std::vector<std::shared_ptr<SysMLv2::REST::Element>> readSysMLv2File(QString filePath);
+        std::vector<std::shared_ptr<SysMLv2::REST::Element>> readXmlFile(QString filePath);
+        std::vector<std::shared_ptr<SysMLv2::REST::Element>> readMarkdownFile(QString filePath);
+        std::vector<std::shared_ptr<SysMLv2::REST::Element>> readJsonFile(QString filePath);
 
-        void writeKerMLFile(QString filePath, std::vector<std::shared_ptr<SysMLv2::Entities::Element>> elements);
-        void writeSysMLv2File(QString filePath, std::vector<std::shared_ptr<SysMLv2::Entities::Element>> elements);
-        void writeXmlFile(QString filePath, std::vector<std::shared_ptr<SysMLv2::Entities::Element>> elements);
-        void writeMarkdownFile(QString filePath, std::vector<std::shared_ptr<SysMLv2::Entities::Element>> elements);
-        void writeJsonFile(QString filePath, std::vector<std::shared_ptr<SysMLv2::Entities::Element>> elements);
+        void writeKerMLFile(QString filePath, std::vector<std::shared_ptr<SysMLv2::REST::Element>> elements);
+        void writeSysMLv2File(QString filePath, std::vector<std::shared_ptr<SysMLv2::REST::Element>> elements);
+        void writeXmlFile(QString filePath, std::vector<std::shared_ptr<SysMLv2::REST::Element>> elements);
+        void writeMarkdownFile(QString filePath, std::vector<std::shared_ptr<SysMLv2::REST::Element>> elements);
+        void writeJsonFile(QString filePath, std::vector<std::shared_ptr<SysMLv2::REST::Element>> elements);
     };
 } // StructuraSystems::Client
 

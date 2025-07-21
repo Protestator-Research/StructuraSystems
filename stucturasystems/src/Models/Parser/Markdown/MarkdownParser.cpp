@@ -37,8 +37,8 @@ namespace StructuraSystems::Client {
         return QString::fromStdString(MarkdownString);
     }
 
-    std::vector<std::shared_ptr<SysMLv2::Entities::Element>> MarkdownParser::getElementsOfProject() {
-        std::vector<std::shared_ptr<SysMLv2::Entities::Element>> returnValue;
+    std::vector<std::shared_ptr<SysMLv2::REST::Element>> MarkdownParser::getElementsOfProject() {
+        std::vector<std::shared_ptr<SysMLv2::REST::Element>> returnValue;
         auto child = cmark_node_first_child(MarkdownDocument);
         switch (cmark_node_get_type(child)) {
             case CMARK_NODE_NONE:
@@ -106,9 +106,9 @@ namespace StructuraSystems::Client {
         MarkdownDocument = cmark_parse_document(MarkdownString.c_str(),MarkdownString.size(),0);
     }
 
-    std::shared_ptr<SysMLv2::Entities::Element> MarkdownParser::createElement(std::string language, std::string body) {
+    std::shared_ptr<SysMLv2::REST::Element> MarkdownParser::createElement(std::string language, std::string body) {
 
-        std::shared_ptr<SysMLv2::Entities::Element> element = std::make_shared<SysMLv2::Entities::Element>();
+        std::shared_ptr<SysMLv2::REST::Element> element = std::make_shared<SysMLv2::REST::Element>();
         element->setLanguage(language);
         element->setBody(body);
         return element;

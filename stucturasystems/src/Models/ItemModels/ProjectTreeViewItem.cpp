@@ -13,7 +13,7 @@ namespace StructuraSystems::Client {
     Parent(nullptr)
     {     }
 
-    ProjectTreeViewItem::ProjectTreeViewItem(std::shared_ptr<SysMLv2::Entities::Project> project, ProjectTreeViewItem *parent) :
+    ProjectTreeViewItem::ProjectTreeViewItem(std::shared_ptr<SysMLv2::REST::Project> project, ProjectTreeViewItem *parent) :
         ProjectData(project),
         Parent(parent)
     {    }
@@ -56,7 +56,7 @@ namespace StructuraSystems::Client {
         return Parent;
     }
 
-    void ProjectTreeViewItem::appendProject(std::shared_ptr<SysMLv2::Entities::Project> project) {
+    void ProjectTreeViewItem::appendProject(std::shared_ptr<SysMLv2::REST::Project> project) {
         ChildItems.push_back(new ProjectTreeViewItem(project,this));
     }
 
@@ -67,7 +67,7 @@ namespace StructuraSystems::Client {
         ChildItems.clear();
     }
 
-    std::shared_ptr<SysMLv2::Entities::Project> ProjectTreeViewItem::getProject() const {
+    std::shared_ptr<SysMLv2::REST::Project> ProjectTreeViewItem::getProject() const {
         return ProjectData;
     }
 
@@ -78,11 +78,11 @@ namespace StructuraSystems::Client {
         ChildItems.clear();
     }
 
-    std::shared_ptr<SysMLv2::Entities::Project> ProjectTreeViewItem::getProjectById(boost::uuids::uuid projectId) {
+    std::shared_ptr<SysMLv2::REST::Project> ProjectTreeViewItem::getProjectById(boost::uuids::uuid projectId) {
         for(const auto& project : ChildItems)
             if(project->ProjectData->getId()==projectId)
                 return project->ProjectData;
 
-        return std::shared_ptr<SysMLv2::Entities::Project>(nullptr);
+        return std::shared_ptr<SysMLv2::REST::Project>(nullptr);
     }
 }
