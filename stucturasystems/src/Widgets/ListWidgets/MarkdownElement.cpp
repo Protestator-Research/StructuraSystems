@@ -43,6 +43,7 @@ namespace StructuraSystems::Client {
             ui->LanguageCombobox->setCurrentIndex(3);
         }
         ui->TextEditor->setVisible(false);
+        ui->LanguageCombobox->setVisible(false);
     }
 
     void MarkdownElement::makeConnections() {
@@ -85,6 +86,7 @@ namespace StructuraSystems::Client {
             ui->TextEditor->setVisible(true);
             ui->actionEdit->setText(tr("Edit finished"));
             ui->LanguageCombobox->setEnabled(true);
+            ui->LanguageCombobox->setVisible(true);
             EditationState = true;
         } else if(EditationState) {
             Element->setBody(ui->TextEditor->toPlainText().toStdString());
@@ -94,6 +96,9 @@ namespace StructuraSystems::Client {
             ui->actionEdit->setText(tr("Edit"));
             EditationState = false;
             ui->LanguageCombobox->setEnabled(false);
+            ui->LanguageCombobox->setVisible(false);
+            adjustSize();
+            parentWidget()->adjustSize();
             redecorateMarkdownElement();
             emit elementEdited();
         }
