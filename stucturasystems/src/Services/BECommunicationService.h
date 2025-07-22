@@ -119,6 +119,9 @@ namespace StructuraSystems::Client {
          */
         bool setUserForLoginInBackend(std::string username, std::string password);
 
+
+        std::shared_ptr<SysMLv2::REST::DigitalTwin> postDigitalTwinToProject(boost::uuids::uuid projectId, std::shared_ptr<SysMLv2::REST::DigitalTwin> digitalTwin);
+
     private:
         std::string ServerAddress;
 

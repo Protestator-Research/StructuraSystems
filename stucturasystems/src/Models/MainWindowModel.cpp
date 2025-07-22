@@ -7,6 +7,7 @@
 #include "../Widgets/CodeWidget.h"
 #include "ItemModels/ProjectItemModel.h"
 #include "Parser/StructuraSystemsParser.h"
+#include "../Widgets/Dialogs/DigitalTwinCreationWizzard.h"
 #include "../Widgets/CodeWidget.h"
 
 #include <QFileDialog>
@@ -179,5 +180,11 @@ namespace StructuraSystems::Client {
         const auto modelName = MainWindow->getTabTitle(MainWindow->getActiveTabIndex());
         const auto model = CodeWidgetModelMap[modelName];
         model->createProjectAndCommit(BackendConnection);
+    }
+
+    void MainWindowModel::onCreateDTClicked() {
+        auto wizzard = DigitalTwinCreationWizzard(MainWindow);
+        wizzard.show();
+        wizzard.exec();
     }
 }

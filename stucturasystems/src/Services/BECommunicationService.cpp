@@ -14,6 +14,7 @@
 #include <sysmlv2/rest/entities/Commit.h>
 #include <sysmlv2/rest/entities/Branch.h>
 #include <sysmlv2/rest/entities/Element.h>
+#include "entities/DigitalTwin.h"
 #include <sysmlv2service/online/SysMLAPIImplementation.h>
 #include <boost/uuid/uuid_io.hpp>
 #include <boost/lexical_cast.hpp>
@@ -71,6 +72,12 @@ namespace StructuraSystems::Client {
         return !BarrierString.empty();
     }
 
+    std::shared_ptr<SysMLv2::REST::DigitalTwin> CommunicationService::postDigitalTwinToProject(
+        boost::uuids::uuid , std::shared_ptr<SysMLv2::REST::DigitalTwin> ) {
+        return std::make_shared<SysMLv2::REST::DigitalTwin>("");
+    }
+
+
     std::vector<std::shared_ptr<SysMLv2::REST::Branch>> CommunicationService::getAllBranchesForProjectWithID(boost::uuids::uuid projectId) {
         auto elements = APIImplementation->getAllBranchesFroProject(boost::lexical_cast<std::string>(projectId), BarrierString);
 
@@ -97,6 +104,5 @@ namespace StructuraSystems::Client {
         project = dynamic_pointer_cast<SysMLv2::REST::Project>(APIImplementation->postProject(project, BarrierString));
         return project;
     }
-
 
 }

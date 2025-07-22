@@ -80,7 +80,11 @@ set(SOURCES
         src/Widgets/ListWidgets/MarkdownElement.h
         src/Widgets/ListWidgets/MarkdownElement.cpp
         src/Services/BECommunicationService.h
-        src/Services/BECommunicationService.cpp)
+        src/Services/BECommunicationService.cpp
+        src/Services/entities/DigitalTwin.h
+        src/Services/entities/DigitalTwin.cpp
+        src/Widgets/Dialogs/DigitalTwinCreationWizzard.cpp
+        src/Widgets/Dialogs/DigitalTwinCreationWizzard.h)
 
 qt_wrap_ui(SOURCES
         ui/MainWindow.ui
@@ -88,7 +92,8 @@ qt_wrap_ui(SOURCES
         ui/EditProjectDialog.ui
         ui/SettingsDialog.ui
         ui/MarkdownElement.ui
-        ui/AddElementWidget.ui)
+        ui/AddElementWidget.ui
+        ui/DigitalTwinCreationWizzard.ui)
 
 add_executable(StructuraSystems ${SOURCES})
 
