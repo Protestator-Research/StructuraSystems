@@ -185,6 +185,7 @@ namespace StructuraSystems::Client {
     void MainWindowModel::onCreateDTClicked() {
         auto wizzard = DigitalTwinCreationWizzard(MainWindow);
         wizzard.show();
-        wizzard.exec();
+        if (wizzard.exec()==QDialog::Accepted)
+            BackendConnection->postDigitalTwinToProject();
     }
 }
