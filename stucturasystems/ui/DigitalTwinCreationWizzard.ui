@@ -38,11 +38,7 @@
    </layout>
   </widget>
   <widget class="QWizardPage" name="wizardPage2">
-   <layout class="QHBoxLayout" name="horizontalLayout_3">
-    <item>
-     <widget class="QListWidget" name="listWidget"/>
-    </item>
-   </layout>
+   <layout class="QHBoxLayout" name="horizontalLayout_3"/>
   </widget>
  </widget>
  <resources/>

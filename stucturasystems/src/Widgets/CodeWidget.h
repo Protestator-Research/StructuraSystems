@@ -29,7 +29,7 @@ namespace StructuraSystems::Client {
 
     public:
         explicit CodeWidget(std::shared_ptr<SysMLv2::REST::Project> project, std::shared_ptr<SysMLv2::REST::Commit> commit, QWidget *parent = nullptr);
-        explicit CodeWidget(std::shared_ptr<SysMLv2::REST::Project> project, std::vector<std::shared_ptr<SysMLv2::REST::Element>> entities, QWidget *parent = nullptr);
+        explicit CodeWidget(std::shared_ptr<SysMLv2::REST::Project> project, std::shared_ptr<SysMLv2::REST::Commit> commit, std::vector<std::shared_ptr<SysMLv2::REST::Element>> entities, QWidget *parent = nullptr);
         ~CodeWidget() override;
 
         QListWidget* getListWidget();
@@ -38,6 +38,9 @@ namespace StructuraSystems::Client {
 
         void safeFile(std::string basePath);
 
+        void decorateDialogView();
+
+        std::vector<std::shared_ptr<SysMLv2::REST::Element>> getSelectedElements();
     private:
         void decorateWidget();
 

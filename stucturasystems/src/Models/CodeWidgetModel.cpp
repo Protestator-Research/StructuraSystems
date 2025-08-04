@@ -36,18 +36,17 @@ namespace StructuraSystems::Client {
             Project(project),
             Commit(commit),
             CodeWidget(codeWidget),
-            ItemModel(new QStandardItemModel(codeWidget)),
             ElementService(std::make_unique<SysMLv2::API::ElementNavigationService>()){
         updateItemView(project,commit);
     }
 
     CodeWidgetModel::CodeWidgetModel(StructuraSystems::Client::CodeWidget *codeWidget, std::shared_ptr<SysMLv2::REST::Project> &project,
-                                     std::vector<std::shared_ptr<SysMLv2::REST::Element>> elements) :
+                                     std::vector<std::shared_ptr<SysMLv2::REST::Element>> elements, std::shared_ptr<SysMLv2::REST::Commit> &commit) :
             QObject(codeWidget),
             Project(project),
+            Commit(commit),
             Elements(std::move(elements)),
             CodeWidget(codeWidget),
-            ItemModel(new QStandardItemModel(codeWidget)),
             ElementService(std::make_unique<SysMLv2::API::ElementNavigationService>()) {
         updateItemView(project,Commit);
     }
@@ -57,28 +56,39 @@ namespace StructuraSystems::Client {
 
         const auto codeDisplayWidget = CodeWidget->getListWidget();
 
+        codeDisplayWidget->clear();
+
         if (Elements.empty() && (Commit != nullptr))
             Elements = ElementService->getElements(project, commit);
 
         for (const auto &element: Elements) {
             if(!element->body().empty()) {
+                if ((DialogView)&&((element->language() == "Markdown")||(element->language() == "YaML")))
+                        continue;
+
                 auto markdownElement = new MarkdownElement(element, codeDisplayWidget);
                 auto listItemWidget = new QListWidgetItem(codeDisplayWidget);
                 connect(markdownElement, SIGNAL(elementEdited()), this, SLOT(elementEdited()));
                 listItemWidget->setSizeHint(markdownElement->sizeHint());
                 codeDisplayWidget->setItemWidget(listItemWidget, markdownElement);
+
+                if (DialogView) {
+                    listItemWidget->setFlags(listItemWidget->flags() | Qt::ItemIsUserCheckable);
+                    listItemWidget->setCheckState(Qt::Unchecked);
+                }
             }
         }
 
-        auto addElementWidget = new AddElementWidget(codeDisplayWidget);
-        auto listItemWidget = new QListWidgetItem(codeDisplayWidget);
-        listItemWidget->setSizeHint(addElementWidget->sizeHint());
-        codeDisplayWidget->setItemWidget(listItemWidget, addElementWidget);
+        if (!DialogView) {
+            auto addElementWidget = new AddElementWidget(codeDisplayWidget);
+            auto listItemWidget = new QListWidgetItem(codeDisplayWidget);
+            listItemWidget->setSizeHint(addElementWidget->sizeHint());
+            codeDisplayWidget->setItemWidget(listItemWidget, addElementWidget);
+        }
 
     }
 
     CodeWidgetModel::~CodeWidgetModel() {
-        delete ItemModel;
     }
 
     void CodeWidgetModel::elementEdited() {
@@ -105,6 +115,34 @@ namespace StructuraSystems::Client {
 
     }
 
+    std::shared_ptr<SysMLv2::REST::Commit> CodeWidgetModel::getCommit() const {
+        return Commit;
+    }
+
+    std::shared_ptr<SysMLv2::REST::Project> CodeWidgetModel::getProject() const {
+        return Project;
+    }
+
+    void CodeWidgetModel::setDialogView(bool dialogView) {
+        DialogView = dialogView;
+        updateItemView(Project, Commit);
+    }
+
+    std::vector<std::shared_ptr<SysMLv2::REST::Element>> CodeWidgetModel::getSelectedElements() const {
+        const auto codeDisplayWidget = CodeWidget->getListWidget();
+
+        const auto selectedItems = codeDisplayWidget->selectedItems();
+
+        std::vector<std::shared_ptr<SysMLv2::REST::Element>> result;
+        for (const auto& index : selectedItems) {
+            const auto& markdownWidget = dynamic_cast<MarkdownElement*>(index);
+            result.push_back(markdownWidget->getElement());
+        }
+
+
+        return result;
+    }
+
     void CodeWidgetModel::createProjectAndCommit(CommunicationService* communicationService) {
         Project = communicationService->postProject(Project->getName(), Project->getDescription(), "Main");
 
@@ -116,4 +154,6 @@ namespace StructuraSystems::Client {
 
         communicationService->postCommitWithId(Project->getId(), Commit);
     }
+
+
 }

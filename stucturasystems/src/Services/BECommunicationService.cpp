@@ -73,8 +73,9 @@ namespace StructuraSystems::Client {
     }
 
     std::shared_ptr<SysMLv2::REST::DigitalTwin> CommunicationService::postDigitalTwinToProject(
-        boost::uuids::uuid , std::shared_ptr<SysMLv2::REST::DigitalTwin> ) {
-        return std::make_shared<SysMLv2::REST::DigitalTwin>("");
+        boost::uuids::uuid projectId, std::shared_ptr<SysMLv2::REST::DigitalTwin> requestedDT) {
+        auto digiTwinJSON = APIImplementation->postCustomRequest("/projects/"+boost::lexical_cast<std::string>(projectId)+"/digital-twin",requestedDT->serializeToJson(),BarrierString);
+        return std::make_shared<SysMLv2::REST::DigitalTwin>(digiTwinJSON);
     }
 
 

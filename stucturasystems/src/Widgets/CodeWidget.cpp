@@ -33,12 +33,12 @@ namespace StructuraSystems::Client {
         return ui->MarkdownCodeElementsWidget;
     }
 
-    CodeWidget::CodeWidget(std::shared_ptr<SysMLv2::REST::Project> project,
+    CodeWidget::CodeWidget(std::shared_ptr<SysMLv2::REST::Project> project, std::shared_ptr<SysMLv2::REST::Commit> commit,
                            std::vector<std::shared_ptr<SysMLv2::REST::Element>> entities, QWidget *parent) :
                            QWidget(parent), ui(new Ui::CodeWidget){
         ui->setupUi(this);
         ui->retranslateUi(this);
-        Model = new CodeWidgetModel(this, project, entities);
+        Model = new CodeWidgetModel(this, project, entities, commit);
         HtmlDelegate = new HTMLDelegate();
         decorateWidget();
     }
@@ -49,5 +49,14 @@ namespace StructuraSystems::Client {
 
     void CodeWidget::safeFile(std::string basePath) {
         Model->saveFile(basePath);
+    }
+
+    void CodeWidget::decorateDialogView() {
+        ui->MarkdownCodeElementsWidget->setSelectionMode(QAbstractItemView::SelectionMode::MultiSelection);
+        Model->setDialogView(true);
+    }
+
+    std::vector<std::shared_ptr<SysMLv2::REST::Element>> CodeWidget::getSelectedElements() {
+        return Model->getSelectedElements();
     }
 } // StructuraSystems::Client

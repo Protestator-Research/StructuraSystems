@@ -25,7 +25,7 @@ namespace StructuraSystems::Client {
         Q_OBJECT
     public:
         CodeWidgetModel(CodeWidget* codeWidget, std::shared_ptr<SysMLv2::REST::Project> &project, std::shared_ptr<SysMLv2::REST::Commit> &commit);
-        CodeWidgetModel(CodeWidget* codeWidget, std::shared_ptr<SysMLv2::REST::Project> &project, std::vector<std::shared_ptr<SysMLv2::REST::Element>> elements);
+        CodeWidgetModel(CodeWidget* codeWidget, std::shared_ptr<SysMLv2::REST::Project> &project, std::vector<std::shared_ptr<SysMLv2::REST::Element>> elements, std::shared_ptr<SysMLv2::REST::Commit> &commit);
         ~CodeWidgetModel() override;
 
         void updateItemView(std::shared_ptr<SysMLv2::REST::Project> &project, std::shared_ptr<SysMLv2::REST::Commit> &commit);
@@ -36,6 +36,13 @@ namespace StructuraSystems::Client {
         void saveFile(std::string basePath);
 
         void parseKerMLSysMLModel();
+
+        std::shared_ptr<SysMLv2::REST::Commit> getCommit() const;
+        std::shared_ptr<SysMLv2::REST::Project> getProject() const;
+
+        void setDialogView(bool dialogView);
+
+        std::vector<std::shared_ptr<SysMLv2::REST::Element>> getSelectedElements() const;
     signals:
         void tabEdited();
 
@@ -52,8 +59,10 @@ namespace StructuraSystems::Client {
         std::shared_ptr<SysMLv2::REST::Commit> Commit;
         std::vector<std::shared_ptr<SysMLv2::REST::Element>> Elements;
         CodeWidget* CodeWidget;
-        QStandardItemModel *ItemModel;
+        //QStandardItemModel *ItemModel;
         std::unique_ptr<SysMLv2::API::ElementNavigationService> ElementService;
+        bool DialogView = false;
+
     };
 }
 

@@ -131,7 +131,7 @@ namespace StructuraSystems::Client {
                     mainBranch = branch;
 
             auto commit = BackendConnection->getCommitWithId(project->getId(), mainBranch->getHead()->getId());
-            CodeWidgetMap[QString::fromStdString(project->getName())] = new CodeWidget(project,
+            CodeWidgetMap[QString::fromStdString(project->getName())] = new CodeWidget(project, commit,
                                                                                        BackendConnection->getAllElements(
                                                                                                commit->getId(),
                                                                                                project->getId()),
@@ -183,9 +183,17 @@ namespace StructuraSystems::Client {
     }
 
     void MainWindowModel::onCreateDTClicked() {
-        auto wizzard = DigitalTwinCreationWizzard(MainWindow);
+        int index = MainWindow->getActiveTabIndex();
+        const auto modelName = MainWindow->getTabTitle(index+1);
+        const auto model = CodeWidgetModelMap[modelName];
+        std::vector<std::shared_ptr<SysMLv2::REST::Element>> elements = BackendConnection->getAllElements(model->getCommit()->getId(), model->getProject()->getId());
+        auto wizzard = DigitalTwinCreationWizzard(model->getProject(),model->getCommit(), elements, MainWindow);
         wizzard.show();
-        if (wizzard.exec()==QDialog::Accepted)
-            BackendConnection->postDigitalTwinToProject();
+        if (wizzard.exec()==QDialog::Accepted) {
+            const auto digitalTwin = wizzard.generateDigitalTwin();
+            BackendConnection->postDigitalTwinToProject(model->getProject()->getId(), digitalTwin);
+        }
+            return;
+            // BackendConnection->postDigitalTwinToProject();
     }
 }

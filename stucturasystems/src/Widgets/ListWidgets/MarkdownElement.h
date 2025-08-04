@@ -16,6 +16,8 @@ namespace StructuraSystems::Client {
         explicit MarkdownElement(std::shared_ptr<SysMLv2::REST::Element> element, QWidget *parent = nullptr);
         ~MarkdownElement();
 
+        std::shared_ptr<SysMLv2::REST::Element> getElement() const;
+
     signals:
         void moveElementUp();
         void moveElementDown();

@@ -32,7 +32,7 @@ namespace StructuraSystems::Client {
         void openFolder(QString folder);
         void setSettingsModel(SettingsModel* settingsModel);
 
-
+        void setViewToDialogView(bool dialogViewActivated);
     public slots:
         void openFile();
         void openFolder();

@@ -22,6 +22,10 @@ namespace StructuraSystems::Client {
         delete ui;
     }
 
+    std::shared_ptr<SysMLv2::REST::Element> MarkdownElement::getElement() const {
+        return Element;
+    }
+
     void MarkdownElement::redecorateMarkdownElement() {
         if(Element->language() == "YaML") {
             const auto yamlValue = QString::fromStdString(Element->body()).remove("---\n");

@@ -14,6 +14,8 @@ namespace SysMLv2::REST {
 }
 
 namespace StructuraSystems::Client {
+    class CodeWidget;
+
     namespace Ui {
         class CreateDTWizard;
     }
@@ -25,10 +27,14 @@ namespace StructuraSystems::Client {
         std::shared_ptr<SysMLv2::REST::DigitalTwin> generateDigitalTwin();
 
     private:
+        void decorateUI();
+
         Ui::CreateDTWizard *ui;
         std::shared_ptr<SysMLv2::REST::Project> Project;
         std::shared_ptr<SysMLv2::REST::Commit> Commit;
         std::vector<std::shared_ptr<SysMLv2::REST::Element>> Elements;
+
+        CodeWidget *_CodeWidget;
     };
 }
 
