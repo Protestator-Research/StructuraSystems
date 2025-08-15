@@ -5,6 +5,10 @@
 #include <QCoreApplication>
 #include <QCommandLineParser>
 #include <QResource>
+#include <QTcpServer>
+#include <QHttpServer>
+
+#include "Controller/ProjectController.hpp"
 
 #define SCHEME "http"
 #define HOST "127.0.0.1"
@@ -27,6 +31,28 @@ int main(int argc, char *argv[]) {
     if (!parser.value("port").isEmpty())
         portArg = parser.value("port").toUShort();
 
+    QHttpServer* httpServer = new QHttpServer();
+    httpServer->route("/", []() {
+        return "This is a test.";
+    });
+
+    auto projectController = new StructuraSystems::Server::ProjectController(httpServer);
+
+    auto tcpserver = std::make_unique<QTcpServer>();
+    if (!tcpserver->listen(QHostAddress::Any, portArg)) {
+        qDebug() << QCoreApplication::translate("QHttpServerExample",
+            "Server failed to listen on a port.");
+        return 0;
+    }
+
+    httpServer->bind(tcpserver.get());
+    quint16 port = tcpserver->serverPort();
+    tcpserver.release();
+
+    qDebug() << QCoreApplication::translate(
+        "QHttpServerExample",
+        "Running on http://127.0.0.1:%1/ (Press CTRL+C to quit)")
+        .arg(port);
 
 
     return app.exec();
