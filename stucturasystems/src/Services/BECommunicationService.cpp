@@ -15,7 +15,7 @@
 #include <sysmlv2/rest/entities/Branch.h>
 #include <sysmlv2/rest/entities/Element.h>
 #include "entities/DigitalTwin.h"
-#include <sysmlv2service/online/SysMLAPIImplementation.h>
+#include <sysmlv2/service/online/SysMLAPIImplementation.h>
 #include <boost/uuid/uuid_io.hpp>
 #include <boost/lexical_cast.hpp>
 #include <memory>

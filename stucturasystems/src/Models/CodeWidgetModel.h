@@ -9,7 +9,7 @@
 #include <vector>
 #include <QObject>
 #include <QStandardItemModel>
-#include <sysmlv2service/implementation/ElementNavigationService.h>
+#include <sysmlv2/service/implementation/ElementNavigationService.h>
 
 namespace SysMLv2::REST{
     class Project;

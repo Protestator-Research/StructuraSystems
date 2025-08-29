@@ -5,7 +5,7 @@
 #include <sysmlv2/rest/entities/Element.h>
 #include <sysmlv2/rest/entities/Project.h>
 #include <sysmlv2/rest/entities/Identification.h>
-#include <sysmlv2file/Parser.h>
+#include <sysmlv2/file/Parser.h>
 #include <QStandardItem>
 #include <QListWidget>
 #include <QMessageBox>

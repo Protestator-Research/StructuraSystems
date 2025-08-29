@@ -6,7 +6,7 @@
 #define STRUCTURASYSTEMS_PROJECTITEMMODEL_H
 
 #include <QAbstractItemModel>
-#include <sysmlv2service/interfaces/IProjectService.h>
+#include <sysmlv2/service/interfaces/IProjectService.h>
 
 namespace StructuraSystems::Client {
     class ProjectTreeViewItem;

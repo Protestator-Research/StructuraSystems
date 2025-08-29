@@ -22,7 +22,11 @@ set(SOURCES
         src/Json/entities/Project.h
         src/Json/entities/Project.cpp
         src/Services/ProjectService.h
-        src/Services/ProjectService.cpp)
+        src/Services/ProjectService.cpp
+        src/Services/ElementNavigationService.h
+        src/Services/ElementNavigationService.cpp
+        src/Services/ProjectVersioningService.h
+        src/Services/ProjectVersioningService.cpp)
 
 add_executable(StructuraSystemsServer ${SOURCES})
 
