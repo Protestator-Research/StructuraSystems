@@ -21,7 +21,7 @@ namespace StructuraSystems::Server
 		std::shared_ptr<SysMLv2::REST::Commit> createCommit(std::shared_ptr<SysMLv2::REST::DataVersion> change,	std::vector<std::shared_ptr<SysMLv2::REST::Commit>> previousCommits, std::shared_ptr<SysMLv2::REST::Project> project) override;
 		std::shared_ptr<SysMLv2::REST::Commit> createCommit(std::shared_ptr<SysMLv2::REST::DataVersion> change, std::shared_ptr<SysMLv2::REST::Project> project) override;
 		std::vector<std::shared_ptr<SysMLv2::REST::DataVersion>> getCommitChange(std::shared_ptr<SysMLv2::REST::Project> project, std::shared_ptr<SysMLv2::REST::Commit> commit, std::vector<SysMLv2::REST::ChangeType>) override;
-		std::shared_ptr<SysMLv2::REST::DataVersion> getCommitChangeById(std::shared_ptr<SysMLv2::REST::Project> project, std::shared_ptr<SysMLv2::REST::Commit> commit, boost::uuids::uuid changeId) override;
+		std::shared_ptr<SysMLv2::REST::DataVersion> getCommitChangeById(std::shared_ptr<SysMLv2::REST::Project> project, std::shared_ptr<SysMLv2::REST::Commit> commit, boost::uuids::uuid& changeId) override;
 		std::vector<std::shared_ptr<SysMLv2::REST::Branch>> getBranches(std::shared_ptr<SysMLv2::REST::Project> project) override;
 		std::shared_ptr<SysMLv2::REST::Branch> getBranchById(std::shared_ptr<SysMLv2::REST::Project> project, boost::uuids::uuid branchId) override;
 		std::shared_ptr<SysMLv2::REST::Branch> getDefaultBranch(std::shared_ptr<SysMLv2::REST::Project> project) override;
@@ -37,6 +37,8 @@ namespace StructuraSystems::Server
 
 	private:
 		std::map<boost::uuids::uuid, std::vector<std::shared_ptr<SysMLv2::REST::Commit>>> ProjectIdCommitMap;
+		std::map<boost::uuids::uuid, std::vector<std::shared_ptr<SysMLv2::REST::Branch>>> ProjectIdBranchMap;
+		std::map<boost::uuids::uuid, std::vector<std::shared_ptr<SysMLv2::REST::Tag>>> ProjectIdTagMap;
 	};
 
 }

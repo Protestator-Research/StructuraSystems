@@ -1,7 +1,8 @@
 cmake_minimum_required(VERSION 3.15)
 find_package(Qt6 REQUIRED COMPONENTS Core HttpServer)
 find_package(sysmllib REQUIRED)
-find_package(mongocxx REQUIRED)
+
+find_package(libpqxx)
 
 qt_standard_project_setup()
 
@@ -21,8 +22,8 @@ set(SOURCES
         src/Json/FromJsonFactory.hpp
         src/Json/entities/Project.h
         src/Json/entities/Project.cpp
-        src/Services/ProjectService.h
-        src/Services/ProjectService.cpp
+        src/Services/ServerProjectService.h
+        src/Services/ServerProjectService.cpp
         src/Services/ElementNavigationService.h
         src/Services/ElementNavigationService.cpp
         src/Services/ProjectVersioningService.h
@@ -39,8 +40,7 @@ target_link_libraries(StructuraSystemsServer PUBLIC
         Qt6::Core
     	Qt6::HttpServer
         sysmllib::sysmllib
-        mongo::bsoncxx_shared
-        mongo::mongocxx_shared)
+        libpqxx::pqxx)
 
 if (!UNIX)
 set_target_properties(StructuraSystemsServer PROPERTIES

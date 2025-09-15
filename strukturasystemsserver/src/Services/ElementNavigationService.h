@@ -1,5 +1,6 @@
 ﻿#pragma once
 
+#include <map>
 #include <sysmlv2/service/interfaces/IElementNavigationService.h>
 
 namespace StructuraSystems::Server {
@@ -18,6 +19,5 @@ namespace StructuraSystems::Server {
 		std::vector<std::shared_ptr<SysMLv2::REST::Element>> getRootElements(std::shared_ptr<SysMLv2::REST::Project> project, std::shared_ptr<SysMLv2::REST::Commit> commit) override;
 
 	private:
-
 	};
 }

@@ -6,7 +6,7 @@
 #include <QJsonDocument>
 
 #include "BaseController.hpp"
-#include "../Services/ProjectService.h"
+#include "../Services/ServerProjectService.h"
 
 namespace StructuraSystems::Server
 {
@@ -17,7 +17,7 @@ namespace StructuraSystems::Server
 		ProjectController(QHttpServer* httpServer) : BaseController(httpServer)
 		{
 			generateRoutes();
-			_ProjectService = new ProjectService();
+			_ProjectService = new ServerProjectService();
 		}
 
 		~ProjectController() override = default;
@@ -29,7 +29,7 @@ namespace StructuraSystems::Server
 				{
 					const auto& projects = _ProjectService->getProjects();
 					std::string returnValue = "[\r\n";
-					for (int i = 0; i < projects.size(); i++)
+					for (size_t i = 0; i < projects.size(); i++)
 					{
 						returnValue += projects[i]->serializeToJson();
 						if (i < (projects.size() - 1))
@@ -66,7 +66,7 @@ namespace StructuraSystems::Server
 		}
 
 	private:
-		ProjectService* _ProjectService;
+		ServerProjectService* _ProjectService;
 
 	};
 }
