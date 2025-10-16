@@ -125,7 +125,7 @@ namespace StructuraSystems::Client {
     private:
         std::string ServerAddress;
 
-        std::string BarrierString;
+        std::string BarrierString = "";
 
         SysMLv2::API::SysMLAPIImplementation* APIImplementation;
     };

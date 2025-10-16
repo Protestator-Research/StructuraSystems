@@ -30,7 +30,8 @@ class CppStructuraSystemsRecipe(ConanFile):
         self.requires("boost/1.86.0")
         self.requires("libcurl/8.4.0")
         self.requires("nlohmann_json/3.11.3")
-        self.requires("qt/6.8.3")
+        if platform != "darwin":
+            self.requires("qt/6.8.3")
         self.requires("md4c/0.4.8")
         self.requires("sysmllib/1.0-beta-3-wip")
         self.requires("yaml-cpp/0.8.0")
@@ -61,9 +62,10 @@ class CppStructuraSystemsRecipe(ConanFile):
             self.options["yaml-cpp/*"].shared=False
             self.options["libpqxx/*"].shared=False
 
-        self.options["qt/*"].shared = True
-        self.options["qt/*"].qtcharts = True
-        self.options["qt/*"].qthttpserver = True
+        if platform != "darwin":
+            self.options["qt/*"].shared = True
+            self.options["qt/*"].qtcharts = True
+            self.options["qt/*"].qthttpserver = True
 
     
     def layout(self):

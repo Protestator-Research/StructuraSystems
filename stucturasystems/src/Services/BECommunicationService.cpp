@@ -68,7 +68,11 @@ namespace StructuraSystems::Client {
 
 
     bool CommunicationService::setUserForLoginInBackend(std::string username, std::string password) {
-        BarrierString = APIImplementation->loginUserWithPassword(username,password);
+        try {
+            BarrierString = APIImplementation->loginUserWithPassword(username,password);
+        }catch (...) {
+            throw std::invalid_argument("Invalid username or password");
+        }
         return !BarrierString.empty();
     }
 

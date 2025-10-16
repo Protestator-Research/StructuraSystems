@@ -117,6 +117,7 @@ namespace StructuraSystems::Client {
             msg.setText(tr("Could not connect to backend. \r\n Reason is:"));
             msg.setInformativeText(QString::fromStdString(ex.what()));
             msg.show();
+            msg.exec();
             BackendConnection = nullptr;
         }
     }
