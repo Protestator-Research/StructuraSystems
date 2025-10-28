@@ -69,7 +69,7 @@ namespace StructuraSystems::Server {
         {
         }
 
-        QHttpServerResponse registerSession(const QHttpServerRequest& request)
+        QHttpServerResponse registerSession(const QHttpServerRequest& )
         {
             //const auto json = byteArrayToJsonObject(request.body());
             //if (!json)
@@ -83,7 +83,7 @@ namespace StructuraSystems::Server {
             //return QHttpServerResponse(session->toJson());
         }
 
-        QHttpServerResponse login(const QHttpServerRequest& request)
+        QHttpServerResponse login(const QHttpServerRequest& )
         {
             //const auto json = byteArrayToJsonObject(request.body());
 
@@ -125,7 +125,7 @@ namespace StructuraSystems::Server {
             return false;
         }
 
-        static std::optional<QString> getTokenFromRequest(const QHttpServerRequest& request)
+        static std::optional<QString> getTokenFromRequest(const QHttpServerRequest& )
         {
             std::optional<QString> token;
             //if (auto bytes = getValueFromHeader(request.headers(), "token"); !bytes.isEmpty()) {

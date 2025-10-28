@@ -36,7 +36,7 @@ int main(int argc, char *argv[]) {
         return "This is a test.";
     });
 
-    auto projectController = new StructuraSystems::Server::ProjectController(httpServer);
+    [[maybe_unused]] auto projectController = new StructuraSystems::Server::ProjectController(httpServer);
 
     auto tcpserver = std::make_unique<QTcpServer>();
     if (!tcpserver->listen(QHostAddress::Any, portArg)) {

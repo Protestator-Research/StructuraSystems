@@ -22,7 +22,6 @@
 #include <sysmlv2/rest/entities/DataVersion.h>
 #include <sysmlv2/rest/entities/Data.h>
 #include <sysmlv2/rest/entities/Element.h>
-#include <sysmlv2/rest/entities/DataIdentity.h>
 #include <sysmlv2/rest/entities/Project.h>
 #include <sysmlv2/rest/entities/Branch.h>
 
@@ -66,8 +65,7 @@ namespace StructuraSystems::Client {
         auto commit = std::make_shared<SysMLv2::REST::Commit>("Created from Filesystem", "Created from Filesystem",
                                                                   project);
         for (auto element: elements) {
-            auto dataVersion = std::make_shared<SysMLv2::REST::DataVersion>(
-                    std::make_shared<SysMLv2::REST::DataIdentity>(boost::uuids::random_generator()()), element);
+            auto dataVersion = std::make_shared<SysMLv2::REST::DataVersion>(boost::uuids::random_generator()(), element);
             commit->addChange(dataVersion);
         }
 

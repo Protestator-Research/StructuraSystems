@@ -1,22 +1,19 @@
 //
 // Created by Moritz Herzog on 09.04.25.
 //
-
+#include <boost/uuid/uuid.hpp>
 #include <sysmlv2/rest/entities/Element.h>
 #include <sysmlv2/rest/entities/Project.h>
 #include <sysmlv2/rest/entities/Identification.h>
-#include <sysmlv2/file/Parser.h>
-#include <QStandardItem>
-#include <QListWidget>
-#include <QMessageBox>
+#include <sysmlv2/Parser.h>
 #include <utility>
 #include <boost/uuid/uuid.hpp>
 #include <boost/uuid/random_generator.hpp>
+#include <memory>
 
 #include "CodeWidgetModel.h"
 
 #include <sysmlv2/rest/entities/Commit.h>
-#include <sysmlv2/rest/entities/DataIdentity.h>
 #include <sysmlv2/rest/entities/DataVersion.h>
 
 #include "../Widgets/CodeWidget.h"
@@ -25,7 +22,6 @@
 #include "../Widgets/ListWidgets/AddElementWidget.h"
 #include "Parser/StructuraSystemsParser.h"
 #include "../Services/BECommunicationService.h"
-#include "../Widgets/ListWidgets/MarkdownElement.h"
 
 
 namespace StructuraSystems::Client {
@@ -148,7 +144,7 @@ namespace StructuraSystems::Client {
 
         Commit = std::make_shared<SysMLv2::REST::Commit>("Upload from Local Project, by Structura Systems", "Upload from Local Project, by Structura Systems", Project);
         for (const auto &element : Elements) {
-            auto dataVersion = std::make_shared<SysMLv2::REST::DataVersion>(std::make_shared<SysMLv2::REST::DataIdentity>(boost::uuids::random_generator()()),element);
+            auto dataVersion = std::make_shared<SysMLv2::REST::DataVersion>(boost::uuids::random_generator()(), element);
             Commit->addChange(dataVersion);
         }
 

@@ -27,13 +27,13 @@ class CppStructuraSystemsRecipe(ConanFile):
     exports_sources = "CMakeLists.txt", "CppDigitalTwin/*"
 
     def requirements(self):
-        self.requires("boost/1.86.0")
-        self.requires("libcurl/8.4.0")
-        self.requires("nlohmann_json/3.11.3")
+        self.requires("boost/[>=1.86.0 <2]")
+        self.requires("libcurl/[>=8.4.0 <9]")
+        self.requires("nlohmann_json/[>=3.11.3 <3.13]")
         if platform != "darwin":
             self.requires("qt/6.8.3")
         self.requires("md4c/0.4.8")
-        self.requires("sysmllib/1.0-beta-3-wip")
+        self.requires("sysmllib/1.0-beta-4-wip")
         self.requires("yaml-cpp/0.8.0")
         self.requires("libpqxx/7.10.1")
 
@@ -87,7 +87,7 @@ class CppStructuraSystemsRecipe(ConanFile):
         self.tool_requires("cmake/3.30.0")
         self.tool_requires("icu/74.2")
         if platform != "darwin":
-            self.tool_requires("qt/6.7.3")
+            self.tool_requires("qt/6.8.3")
         self.test_requires("gtest/1.14.0")
 
     def test(self):

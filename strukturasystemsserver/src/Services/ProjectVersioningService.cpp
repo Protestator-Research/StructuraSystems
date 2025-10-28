@@ -5,6 +5,7 @@
 #include <sysmlv2/rest/entities/DataVersion.h>
 #include <sysmlv2/rest/entities/Project.h>
 #include <sysmlv2/rest/entities/ChangeType.h>
+#include <sysmlv2/rest/entities/Data.h>
 #include <sysmlv2/rest/entities/Tag.h>
 
 namespace StructuraSystems::Server
@@ -91,20 +92,19 @@ namespace StructuraSystems::Server
 	}
 
 	std::vector<std::shared_ptr<SysMLv2::REST::DataVersion>> ProjectVersioningService::getCommitChange(
-		std::shared_ptr<SysMLv2::REST::Project> project, std::shared_ptr<SysMLv2::REST::Commit> commit,
-		std::vector<SysMLv2::REST::ChangeType> changetype)
+		std::shared_ptr<SysMLv2::REST::Project> , std::shared_ptr<SysMLv2::REST::Commit> ,
+		std::vector<SysMLv2::REST::ChangeType> )
 	{
 		std::vector<std::shared_ptr<SysMLv2::REST::DataVersion>> returnValue;
 
-		uint8_t filter = 0x00;
+		// uint8_t filter = 0x00;
 
-		for (const auto change : changetype)
-			filter |= (uint8_t)change;
+		// for (const auto change : changetype)
+		// 	filter |= (uint8_t)change;
 
-		for (const auto& dataVersion : commit->getDataVersion())
-		{
-			//if (dataVersion->getPayload()->)
-		}
+		// for (const auto& dataVersion : commit->getDataVersion())
+		// {
+		// }
 
 		return returnValue;
 	}
@@ -127,8 +127,8 @@ namespace StructuraSystems::Server
 		return ProjectIdBranchMap.at(project->getId());
 	}
 
-	std::shared_ptr<SysMLv2::REST::Branch> ProjectVersioningService::getBranchById(
-		std::shared_ptr<SysMLv2::REST::Project> project, boost::uuids::uuid branchId)
+	std::shared_ptr<SysMLv2::REST::Branch> ProjectVersioningService::getBranchById(std::shared_ptr<SysMLv2::REST::Project> project,
+			boost::uuids::uuid &branchId)
 	{
 		const auto branchesList = ProjectIdBranchMap.at(project->getId());
 
@@ -145,12 +145,12 @@ namespace StructuraSystems::Server
 		return project->getDefaultBranch();
 	}
 
-	std::shared_ptr<SysMLv2::REST::Project> ProjectVersioningService::setDefaultBranch(
-		std::shared_ptr<SysMLv2::REST::Project> project, boost::uuids::uuid branchId)
+	std::shared_ptr<SysMLv2::REST::Project> ProjectVersioningService::setDefaultBranch(std::shared_ptr<SysMLv2::REST::Project> project,
+			boost::uuids::uuid &branchId)
 	{
 		const auto branchesList = ProjectIdBranchMap.at(project->getId());
 
-		for (const auto branch : branchesList)
+		for (const auto &branch : branchesList)
 		{
 			if (branch->getId()==branchId)
 			{
@@ -169,7 +169,8 @@ namespace StructuraSystems::Server
 		return newBranch;
 	}
 
-	std::shared_ptr<SysMLv2::REST::Branch> ProjectVersioningService::deleteBranch(std::shared_ptr<SysMLv2::REST::Project> project, boost::uuids::uuid branchId)
+	std::shared_ptr<SysMLv2::REST::Branch> ProjectVersioningService::deleteBranch(std::shared_ptr<SysMLv2::REST::Project> project,
+			boost::uuids::uuid &branchId)
 	{
 		auto& branchesList = ProjectIdBranchMap.at(project->getId());
 		std::shared_ptr<SysMLv2::REST::Branch> branch;
@@ -179,6 +180,7 @@ namespace StructuraSystems::Server
 				branch = branchesList[i];
 		}
 		ProjectIdBranchMap.at(project->getId()).erase(std::remove(ProjectIdBranchMap.at(project->getId()).begin(), ProjectIdBranchMap.at(project->getId()).end(), branch));
+		return branch;
 	}
 
 	std::vector<std::shared_ptr<SysMLv2::REST::Tag>> ProjectVersioningService::getTags(std::shared_ptr<SysMLv2::REST::Project> project)
@@ -186,8 +188,8 @@ namespace StructuraSystems::Server
 		return ProjectIdTagMap.at(project->getId());
 	}
 
-	std::shared_ptr<SysMLv2::REST::Tag> ProjectVersioningService::getTagById(
-		std::shared_ptr<SysMLv2::REST::Project> project, boost::uuids::uuid tagId)
+	std::shared_ptr<SysMLv2::REST::Tag> ProjectVersioningService::getTagById(std::shared_ptr<SysMLv2::REST::Project> project,
+			boost::uuids::uuid &tagId)
 	{
 		auto& tagList = ProjectIdTagMap.at(project->getId());
 		for (const auto& tag : tagList)
@@ -198,12 +200,13 @@ namespace StructuraSystems::Server
 		return nullptr;
 	}
 
-	std::shared_ptr<SysMLv2::REST::Commit> ProjectVersioningService::getTaggedCommit(std::shared_ptr<SysMLv2::REST::Project> project, std::shared_ptr<SysMLv2::REST::Tag> tag)
+	std::shared_ptr<SysMLv2::REST::Commit> ProjectVersioningService::getTaggedCommit(std::shared_ptr<SysMLv2::REST::Project> , std::shared_ptr<SysMLv2::REST::Tag> tag)
 	{
 		return tag->referencedCommit();
 	}
 
-	std::shared_ptr<SysMLv2::REST::Tag> ProjectVersioningService::createTag(std::shared_ptr<SysMLv2::REST::Project> project, std::string tagName, std::shared_ptr<SysMLv2::REST::Commit> taggedCommit)
+	std::shared_ptr<SysMLv2::REST::Tag> ProjectVersioningService::createTag(std::shared_ptr<SysMLv2::REST::Project> project,
+			std::string &tagName, std::shared_ptr<SysMLv2::REST::Commit> taggedCommit)
 	{
 		const auto newTag = std::make_shared<SysMLv2::REST::Tag>(tagName);
 		newTag->setReferencedCommit(taggedCommit);
@@ -211,10 +214,9 @@ namespace StructuraSystems::Server
 		return newTag;
 	}
 
-	std::shared_ptr<SysMLv2::REST::MergeResult> ProjectVersioningService::mergeIntoBranch(
-		std::shared_ptr<SysMLv2::REST::Branch>,
-		std::vector<std::shared_ptr<SysMLv2::REST::Commit>>,
-		std::shared_ptr<SysMLv2::REST::Data>, std::string)
+	std::shared_ptr<SysMLv2::REST::MergeResult> ProjectVersioningService::mergeIntoBranch(std::shared_ptr<SysMLv2::REST::Branch> ,
+			std::vector<std::shared_ptr<SysMLv2::REST::Commit>> ,
+			std::shared_ptr<SysMLv2::REST::Data> , std::string &)
 	{
 		return nullptr;
 	}
