@@ -6,6 +6,6 @@ namespace StructuraSystems::Server
 {
 	ServerProjectService::ServerProjectService() : ProjectService()
 	{
-		DBController = DataBaseController::getInstance();
+		//DBController = DataBaseController::getInstance();
 	}
 }

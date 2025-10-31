@@ -36,6 +36,8 @@ class CppStructuraSystemsRecipe(ConanFile):
         self.requires("sysmllib/1.0-beta-4-wip")
         self.requires("yaml-cpp/0.8.0")
         self.requires("libpqxx/7.10.1")
+        self.requires("openssl/3.6.0")
+
 
     def config_options(self):
         if self.settings.os == "Windows":
@@ -53,6 +55,7 @@ class CppStructuraSystemsRecipe(ConanFile):
             self.options["sysmlv2lib/*"].shared=True
             self.options["yaml-cpp/*"].shared=True
             self.options["libpqxx/*"].shared=True
+            self.options["openssl/*"].shared=True
         else:
             self.options["boost/*"].shared = False
             self.options["gtest/*"].shared = False
@@ -61,6 +64,7 @@ class CppStructuraSystemsRecipe(ConanFile):
             self.options["sysmlv2lib/*"].shared=False
             self.options["yaml-cpp/*"].shared=False
             self.options["libpqxx/*"].shared=False
+            self.options["openssl/*"].shared=False
 
         if platform != "darwin":
             self.options["qt/*"].shared = True

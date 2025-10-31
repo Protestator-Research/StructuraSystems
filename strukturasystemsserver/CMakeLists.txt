@@ -1,6 +1,7 @@
 cmake_minimum_required(VERSION 3.15)
 find_package(Qt6 REQUIRED COMPONENTS Core HttpServer)
 find_package(sysmllib REQUIRED)
+find_package(OpenSSL REQUIRED)
 
 find_package(libpqxx)
 
@@ -14,6 +15,7 @@ set(SOURCES
         src/Controller/ProjectController.hpp
         src/Controller/DataBaseController.h
         src/Controller/DataBaseController.cpp
+        src/Controller/AuthenticationController.hpp
         src/Templates/CrudApi.hpp
         src/Templates/IdMap.hpp
         src/Templates/SessionAPI.hpp
@@ -27,7 +29,9 @@ set(SOURCES
         src/Services/ElementNavigationService.h
         src/Services/ElementNavigationService.cpp
         src/Services/ProjectVersioningService.h
-        src/Services/ProjectVersioningService.cpp)
+        src/Services/ProjectVersioningService.cpp
+        src/Services/AuthenticationService.h
+        src/Services/AuthenticationService.cpp)
 
 add_executable(StructuraSystemsServer ${SOURCES})
 
@@ -40,7 +44,8 @@ target_link_libraries(StructuraSystemsServer PUBLIC
         Qt6::Core
     	Qt6::HttpServer
         sysmllib::sysmllib
-        libpqxx::pqxx)
+        libpqxx::pqxx
+        openssl::openssl)
 
 if (!UNIX)
 set_target_properties(StructuraSystemsServer PROPERTIES

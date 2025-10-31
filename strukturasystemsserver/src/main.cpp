@@ -35,12 +35,15 @@ int main(int argc, char *argv[]) {
     httpServer->route("/", []() {
         return "This is a test.";
     });
+    httpServer->route("/version/", []() {
+        return "3.0.alpha";
+    });
 
     [[maybe_unused]] auto projectController = new StructuraSystems::Server::ProjectController(httpServer);
 
     auto tcpserver = std::make_unique<QTcpServer>();
     if (!tcpserver->listen(QHostAddress::Any, portArg)) {
-        qDebug() << QCoreApplication::translate("QHttpServerExample",
+        qDebug() << QCoreApplication::translate("StructuraSystemsServer",
             "Server failed to listen on a port.");
         return 0;
     }
@@ -50,7 +53,7 @@ int main(int argc, char *argv[]) {
     tcpserver.release();
 
     qDebug() << QCoreApplication::translate(
-        "QHttpServerExample",
+        "StructuraSystemsServer",
         "Running on http://127.0.0.1:%1/ (Press CTRL+C to quit)")
         .arg(port);
 
