@@ -29,7 +29,7 @@ namespace StructuraSystems::Server {
 
 	void AuthenticationService::addUser(std::string username, std::string password)
 	{
-		
+		UsernameHashMap[username] = hashSHA256From(password);
 	}
 
 	std::string AuthenticationService::hashSHA256From(std::string value)

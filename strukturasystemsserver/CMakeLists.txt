@@ -24,6 +24,10 @@ set(SOURCES
         src/Json/FromJsonFactory.hpp
         src/Json/entities/Project.h
         src/Json/entities/Project.cpp
+        src/Json/entities/AuthenticationRequest.h
+        src/Json/entities/AuthenticationRequest.cpp
+        src/Json/entities/AuthenticationResponse.h
+        src/Json/entities/AuthenticationResponse.cpp
         src/Services/ServerProjectService.h
         src/Services/ServerProjectService.cpp
         src/Services/ElementNavigationService.h

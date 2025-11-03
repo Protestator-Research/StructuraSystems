@@ -16,7 +16,10 @@ namespace StructuraSystems::Server
 	protected:
 		void generateRoutes() override
 		{
-			HttpServer->
+			HttpServer->route("/login", QHttpServerRequest::Method::Get, [this]()->
+			{
+
+			});
 		}
 	private:
 		
