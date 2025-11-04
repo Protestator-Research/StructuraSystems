@@ -8,7 +8,9 @@
 #include <QTcpServer>
 #include <QHttpServer>
 
+#include "Controller/AuthenticationController.hpp"
 #include "Controller/ProjectController.hpp"
+#include "Services/ProjectVersioningService.h"
 
 #define SCHEME "http"
 #define HOST "127.0.0.1"
@@ -32,14 +34,19 @@ int main(int argc, char *argv[]) {
         portArg = parser.value("port").toUShort();
 
     QHttpServer* httpServer = new QHttpServer();
-    httpServer->route("/", []() {
-        return "This is a test.";
-    });
-    httpServer->route("/version/", []() {
+    httpServer->route("/version", []() {
+        qDebug() << "Call to /version";
         return "3.0.alpha";
     });
 
+    httpServer->addAfterRequestHandler(httpServer, [](const QHttpServerRequest&, QHttpServerResponse& resp) {
+        auto h = resp.headers();
+        h.append(QHttpHeaders::WellKnownHeader::Server, "Structura Systems Server");
+        resp.setHeaders(std::move(h));
+    });
+
     [[maybe_unused]] auto projectController = new StructuraSystems::Server::ProjectController(httpServer);
+    [[maybe_unused]] auto authController = new StructuraSystems::Server::AuthenticationController(httpServer);
 
     auto tcpserver = std::make_unique<QTcpServer>();
     if (!tcpserver->listen(QHostAddress::Any, portArg)) {

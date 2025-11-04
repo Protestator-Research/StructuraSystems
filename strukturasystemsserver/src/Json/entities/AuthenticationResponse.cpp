@@ -4,15 +4,15 @@
 
 namespace StructuraSystems::Server
 {
-	AuthenticationResponse::AuthenticationResponse()
+	AuthenticationResponse::AuthenticationResponse(std::string barrierString)
 	{
-
+		BarrierString = barrierString;
 	}
 
 	QJsonObject AuthenticationResponse::toJson() const
 	{
 		return QJsonObject{
-			{QString("barrierString"),""}
+			{QString("barrierString"),QString::fromStdString(BarrierString)}
 		};
 	}
 }
