@@ -4,7 +4,7 @@
 
 namespace StructuraSystems::Server
 {
-	class DataBaseController;
+	//class DataBaseController;
 
 	class ServerProjectService : public SysMLv2::API::ProjectService
 	{
@@ -13,7 +13,7 @@ namespace StructuraSystems::Server
 		~ServerProjectService() override = default;
 
 	private:
-		DataBaseController* DBController;
+		//DataBaseController* DBController;
 
 	};
 }

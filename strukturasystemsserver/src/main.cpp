@@ -34,10 +34,13 @@ int main(int argc, char *argv[]) {
         portArg = parser.value("port").toUShort();
 
     QHttpServer* httpServer = new QHttpServer();
-    httpServer->route("/version", []() {
+
+    const auto versionInformation = []() {
         qDebug() << "Call to /version";
         return "3.0.alpha";
-    });
+    };
+    httpServer->route("/version", versionInformation);
+    httpServer->route("/version/", versionInformation);
 
     httpServer->addAfterRequestHandler(httpServer, [](const QHttpServerRequest&, QHttpServerResponse& resp) {
         auto h = resp.headers();

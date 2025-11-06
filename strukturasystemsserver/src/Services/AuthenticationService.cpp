@@ -1,5 +1,6 @@
 #include "AuthenticationService.h"
 
+#include <iomanip>
 #include <boost/uuid/nil_generator.hpp>
 #include <boost/uuid/random_generator.hpp>
 
@@ -39,6 +40,7 @@ namespace StructuraSystems::Server {
 		SHA256_Init(&sha256);
 		SHA256_Update(&sha256, value.c_str(), value.size());
 		SHA256_Final(hash, &sha256);
+
 		std::stringstream ss;
 		for (int i = 0; i < SHA256_DIGEST_LENGTH; i++)
 		{

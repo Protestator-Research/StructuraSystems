@@ -20,6 +20,7 @@ namespace StructuraSystems::Server
 		std::string hashSHA256From(std::string value);
 
 		std::map<std::string, std::string> UsernameHashMap;
+		std::map<std::string, std::string> UsernameSaltMap;
 		std::map<std::string, boost::uuids::uuid> UsernameInstanceMap;
 	};
 }

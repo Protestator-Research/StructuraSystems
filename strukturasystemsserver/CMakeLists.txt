@@ -16,6 +16,8 @@ set(SOURCES
         src/Controller/DataBaseController.h
         src/Controller/DataBaseController.cpp
         src/Controller/AuthenticationController.hpp
+        src/Controller/ElementsController.hpp
+        src/Controller/CommitController.hpp
         src/Templates/CrudApi.hpp
         src/Templates/IdMap.hpp
         src/Templates/SessionAPI.hpp
