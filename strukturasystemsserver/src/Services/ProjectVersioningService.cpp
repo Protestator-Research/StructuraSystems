@@ -10,8 +10,17 @@
 
 namespace StructuraSystems::Server
 {
-	ProjectVersioningService::ProjectVersioningService()
+
+	std::shared_ptr<ProjectVersioningService> ProjectVersioningService::Instance = nullptr;
+
+	std::shared_ptr<ProjectVersioningService> ProjectVersioningService::getInstance()
 	{
+		if (Instance == nullptr) {
+			struct concreteProjectVersioningService : public ProjectVersioningService {};
+			Instance = std::make_shared<concreteProjectVersioningService>();
+		}
+
+		return Instance;
 	}
 
 	std::vector<std::shared_ptr<SysMLv2::REST::Commit>> ProjectVersioningService::getCommits(

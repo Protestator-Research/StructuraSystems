@@ -17,7 +17,7 @@ namespace StructuraSystems::Server
 		ProjectController(QHttpServer* httpServer) : BaseController(httpServer)
 		{
 			generateRoutes();
-			_ProjectService = new ServerProjectService();
+			_ProjectService = ServerProjectService::getInstance();
 		}
 
 		~ProjectController() override = default;
@@ -77,7 +77,7 @@ namespace StructuraSystems::Server
 			return QHttpServerResponse(QString::fromStdString(newProject->serializeToJson()), QHttpServerResponse::StatusCode::Created);
 		}
 
-		ServerProjectService* _ProjectService;
+		std::shared_ptr<ServerProjectService> _ProjectService;
 
 	};
 }

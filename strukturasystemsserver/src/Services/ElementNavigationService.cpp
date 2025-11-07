@@ -9,9 +9,17 @@
 
 namespace StructuraSystems::Server
 {
-	ElementNavigationService::ElementNavigationService()
-	{
+	std::shared_ptr<ElementNavigationService> ElementNavigationService::Instance = nullptr;
 
+
+	std::shared_ptr<ElementNavigationService> ElementNavigationService::getInstance()
+	{
+		if (Instance == nullptr) {
+			struct concreteElementService : public  ElementNavigationService {};
+			Instance = std::make_shared<concreteElementService>();
+		}
+
+		return Instance;
 	}
 
 	std::vector<std::shared_ptr<SysMLv2::REST::Element>> ElementNavigationService::getElements(std::shared_ptr<SysMLv2::REST::Project> , std::shared_ptr<SysMLv2::REST::Commit> commit)

@@ -1,6 +1,11 @@
 #pragma once
 
+#include <sysmlv2/rest/entities/Commit.h>
+#include <sysmlv2/rest/entities/Project.h>
+
 #include "BaseController.hpp"
+#include "../Services/ProjectVersioningService.h"
+#include "../Services/ServerProjectService.h"
 
 namespace StructuraSystems::Server
 {
@@ -11,6 +16,8 @@ namespace StructuraSystems::Server
 		CommitController(QHttpServer *httpServer) : BaseController(httpServer)
 		{
 			generateRoutes();
+			ProjectNavigationService = ServerProjectService::getInstance();
+			ProjectVerService = ProjectVersioningService::getInstance();
 		}
 
 	protected:
@@ -49,14 +56,33 @@ namespace StructuraSystems::Server
 		}
 
 	private:
-		QHttpServerResponse getCommits(const QString& projectId,const QHttpServerRequest& request)
+		QHttpServerResponse getCommits(const QString& projectId,const QHttpServerRequest&)
 		{
-			
+			const auto& project = ProjectNavigationService->getProjectById(boost::uuids::string_generator()(projectId.toStdString()));
+			const auto& commits = ProjectVerService->getCommits(project);
+			std::string returnValue = "[\r\n";
+			for (size_t i = 0; i < commits.size(); i++)
+			{
+				returnValue += commits[i]->serializeToJson();
+				if (i < (commits.size() - 1))
+					returnValue += ",\r\n";
+			}
+			returnValue += "]";
+			QHttpServerResponse response(QString::fromStdString(returnValue));
+			return response;
 		}
 
 		QHttpServerResponse postCommit(const QString& projectId, const QHttpServerRequest& request)
 		{
-
+			const auto& project = ProjectNavigationService->getProjectById(boost::uuids::string_generator()(projectId.toStdString()));
+			const auto& branch = project->getDefaultBranch();
+			if (!request.query().isEmpty())
+			{
+				
+			}
+			const auto commit = ProjectVerService->createCommit(,branch,,project);
+			auto response = QHttpServerResponse(QString::fromStdString(commit->serializeToJson()),QHttpServerResponder::StatusCode::Created);
+			return response;
 		}
 
 		QHttpServerResponse getBranchWithId(const QString& projectId, const QString& branchId, const QHttpServerRequest& request)
@@ -103,5 +129,8 @@ namespace StructuraSystems::Server
 		{
 
 		}
+
+		std::shared_ptr<ProjectVersioningService> ProjectVerService;
+		std::shared_ptr<ServerProjectService> ProjectNavigationService;
 	};
 }

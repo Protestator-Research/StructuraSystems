@@ -17,14 +17,11 @@ namespace StructuraSystems::Server
 
 		AuthenticationController(QHttpServer* httpServer) : BaseController(httpServer)
 		{
-			AuthService = new AuthenticationService();
+			AuthService = AuthenticationService::getInstance();
 			generateRoutes();
 		}
 
-		~AuthenticationController() override
-		{
-			delete AuthService;
-		}
+		~AuthenticationController() override = default;
 
 	protected:
 		void generateRoutes() override
@@ -55,6 +52,6 @@ namespace StructuraSystems::Server
 			}
 		}
 
-		AuthenticationService* AuthService;
+		std::shared_ptr<AuthenticationService> AuthService;
 	};
 }

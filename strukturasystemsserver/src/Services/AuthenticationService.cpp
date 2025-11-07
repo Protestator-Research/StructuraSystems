@@ -7,8 +7,22 @@
 #include <openssl/sha.h>
 
 namespace StructuraSystems::Server {
+	std::shared_ptr<AuthenticationService> AuthenticationService::Instance = nullptr;
+
 	AuthenticationService::AuthenticationService() {
+#ifndef NO_DEBUG
 		addUser("admin", "admin");
+#endif 
+	}
+
+	std::shared_ptr<AuthenticationService> AuthenticationService::getInstance()
+	{
+		if (Instance == nullptr) {
+			struct conreteAuthService : public AuthenticationService {};
+			Instance = std::make_shared<conreteAuthService>();
+		}
+
+		return Instance;
 	}
 
 	boost::uuids::uuid AuthenticationService::authenticateUserWith(std::string name, std::string password) {

@@ -10,7 +10,8 @@ namespace StructuraSystems::Server
 	class ProjectVersioningService : public SysMLv2::API::IProjectVersioningService
 	{
 	public:
-		ProjectVersioningService();
+		static std::shared_ptr<ProjectVersioningService> getInstance();
+
 		virtual ~ProjectVersioningService() = default;
 
 		std::vector<std::shared_ptr<SysMLv2::REST::Commit>>
@@ -83,9 +84,13 @@ namespace StructuraSystems::Server
 			std::vector<SysMLv2::REST::ChangeType> changeType) override;
 
 	private:
+		ProjectVersioningService() = default;
+
 		std::map<boost::uuids::uuid, std::vector<std::shared_ptr<SysMLv2::REST::Commit>>> ProjectIdCommitMap;
 		std::map<boost::uuids::uuid, std::vector<std::shared_ptr<SysMLv2::REST::Branch>>> ProjectIdBranchMap;
 		std::map<boost::uuids::uuid, std::vector<std::shared_ptr<SysMLv2::REST::Tag>>> ProjectIdTagMap;
+
+		static std::shared_ptr<ProjectVersioningService> Instance;
 	};
 
 }
