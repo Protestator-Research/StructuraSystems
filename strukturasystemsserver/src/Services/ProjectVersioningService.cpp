@@ -52,7 +52,7 @@ namespace StructuraSystems::Server
 		std::vector<std::shared_ptr<SysMLv2::REST::Commit>> previousCommits,
 		std::shared_ptr<SysMLv2::REST::Project> project)
 	{
-		const auto commit = std::make_shared<SysMLv2::REST::Commit>("", "", project, previousCommits);
+		const auto commit = std::make_shared<SysMLv2::REST::Commit>("", project, previousCommits);
 		commit->addChange(change);
 
 		ProjectIdCommitMap[project->getId()].push_back(commit);
@@ -65,7 +65,7 @@ namespace StructuraSystems::Server
 		std::shared_ptr<SysMLv2::REST::DataVersion> change, std::shared_ptr<SysMLv2::REST::Branch> branch,
 		std::shared_ptr<SysMLv2::REST::Project> project)
 	{
-		const auto commit = std::make_shared<SysMLv2::REST::Commit>("", "", project);
+		const auto commit = std::make_shared<SysMLv2::REST::Commit>("", project);
 		commit->addChange(change);
 
 		ProjectIdCommitMap[project->getId()].push_back(commit);
@@ -79,7 +79,7 @@ namespace StructuraSystems::Server
 		std::vector<std::shared_ptr<SysMLv2::REST::Commit>> previousCommits,
 		std::shared_ptr<SysMLv2::REST::Project> project)
 	{
-		const auto commit = std::make_shared<SysMLv2::REST::Commit>("", "", project, previousCommits);
+		const auto commit = std::make_shared<SysMLv2::REST::Commit>("", project, previousCommits);
 		commit->addChange(change);
 
 		ProjectIdCommitMap[project->getId()].push_back(commit);
@@ -91,7 +91,7 @@ namespace StructuraSystems::Server
 	std::shared_ptr<SysMLv2::REST::Commit> ProjectVersioningService::createCommit(
 		std::shared_ptr<SysMLv2::REST::DataVersion> change, std::shared_ptr<SysMLv2::REST::Project> project)
 	{
-		const auto commit = std::make_shared<SysMLv2::REST::Commit>("", "", project);
+		const auto commit = std::make_shared<SysMLv2::REST::Commit>("", project);
 		commit->addChange(change);
 
 		ProjectIdCommitMap[project->getId()].push_back(commit);

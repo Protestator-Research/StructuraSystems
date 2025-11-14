@@ -6,8 +6,9 @@
 
 
 #include "CommonmarkParser/cmark.h"
+#include <kerml/root/elements/Element.h>
+#include <kerml/root/annotations/TextualRepresentation.h>
 
-#include <sysmlv2/rest/entities/Element.h>
 #include <QFile>
 #include <regex>
 
@@ -108,7 +109,7 @@ namespace StructuraSystems::Client {
 
     std::shared_ptr<SysMLv2::REST::Element> MarkdownParser::createElement(std::string language, std::string body) {
 
-        std::shared_ptr<SysMLv2::REST::Element> element = std::make_shared<SysMLv2::REST::Element>();
+        std::shared_ptr<KerML::Entities::TextualRepresentation> element = std::make_shared<KerML::Entities::TextualRepresentation>();
         element->setLanguage(language);
         element->setBody(body);
         return element;

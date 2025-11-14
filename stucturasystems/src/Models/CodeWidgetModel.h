@@ -14,7 +14,12 @@
 namespace SysMLv2::REST{
     class Project;
     class Commit;
+}
+
+namespace KerML::Entities {
     class Element;
+    class Relationship;
+    class TextualRepresentation;
 }
 
 namespace StructuraSystems::Client {
@@ -25,7 +30,7 @@ namespace StructuraSystems::Client {
         Q_OBJECT
     public:
         CodeWidgetModel(CodeWidget* codeWidget, std::shared_ptr<SysMLv2::REST::Project> &project, std::shared_ptr<SysMLv2::REST::Commit> &commit);
-        CodeWidgetModel(CodeWidget* codeWidget, std::shared_ptr<SysMLv2::REST::Project> &project, std::vector<std::shared_ptr<SysMLv2::REST::Element>> elements, std::shared_ptr<SysMLv2::REST::Commit> &commit);
+        CodeWidgetModel(CodeWidget* codeWidget, std::shared_ptr<SysMLv2::REST::Project> &project, std::vector<std::shared_ptr<KerML::Entities::Element>> elements, std::shared_ptr<SysMLv2::REST::Commit> &commit);
         ~CodeWidgetModel() override;
 
         void updateItemView(std::shared_ptr<SysMLv2::REST::Project> &project, std::shared_ptr<SysMLv2::REST::Commit> &commit);
@@ -37,29 +42,26 @@ namespace StructuraSystems::Client {
 
         void parseKerMLSysMLModel();
 
-        std::shared_ptr<SysMLv2::REST::Commit> getCommit() const;
-        std::shared_ptr<SysMLv2::REST::Project> getProject() const;
+        [[nodiscard]] std::shared_ptr<SysMLv2::REST::Commit> getCommit() const;
+        [[nodiscard]] std::shared_ptr<SysMLv2::REST::Project> getProject() const;
 
         void setDialogView(bool dialogView);
 
-        std::vector<std::shared_ptr<SysMLv2::REST::Element>> getSelectedElements() const;
+        [[nodiscard]] std::vector<std::shared_ptr<KerML::Entities::Element>> getSelectedElements() const;
+
     signals:
         void tabEdited();
 
     public slots:
 
-
     private slots:
         void elementEdited();
 
     private:
-
-
         std::shared_ptr<SysMLv2::REST::Project> Project;
         std::shared_ptr<SysMLv2::REST::Commit> Commit;
-        std::vector<std::shared_ptr<SysMLv2::REST::Element>> Elements;
+        std::vector<std::shared_ptr<KerML::Entities::Element>> Elements;
         CodeWidget* CodeWidget;
-        //QStandardItemModel *ItemModel;
         std::unique_ptr<SysMLv2::API::ElementNavigationService> ElementService;
         bool DialogView = false;
 

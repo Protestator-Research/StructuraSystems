@@ -2,7 +2,9 @@
 // Created by Moritz Herzog on 09.04.25.
 //
 #include <boost/uuid/uuid.hpp>
-#include <sysmlv2/rest/entities/Element.h>
+#include <kerml/root/elements/Element.h>
+#include <kerml/root/annotations/TextualRepresentation.h>
+#include <sysmlv2/rest/entities/JSONEntities.h>
 #include <sysmlv2/rest/entities/Project.h>
 #include <sysmlv2/rest/entities/Identification.h>
 #include <sysmlv2/Parser.h>
@@ -37,7 +39,7 @@ namespace StructuraSystems::Client {
     }
 
     CodeWidgetModel::CodeWidgetModel(StructuraSystems::Client::CodeWidget *codeWidget, std::shared_ptr<SysMLv2::REST::Project> &project,
-                                     std::vector<std::shared_ptr<SysMLv2::REST::Element>> elements, std::shared_ptr<SysMLv2::REST::Commit> &commit) :
+                                     std::vector<std::shared_ptr<KerML::Entities::Element>> elements, std::shared_ptr<SysMLv2::REST::Commit> &commit) :
             QObject(codeWidget),
             Project(project),
             Commit(commit),
@@ -58,11 +60,14 @@ namespace StructuraSystems::Client {
             Elements = ElementService->getElements(project, commit);
 
         for (const auto &element: Elements) {
-            if(!element->body().empty()) {
-                if ((DialogView)&&((element->language() == "Markdown")||(element->language() == "YaML")))
+            const auto type = element->getType();
+            std::transform(type.begin(), type.end(), type.begin(), ::tolower);
+            if (type == SysMLv2::REST::TEXTUAL_REPRESENTATION_TYPE) {
+                const auto textualRepresentation = std::dynamic_pointer_cast<KerML::Entities::TextualRepresentation>(element);
+                if ((DialogView)&&((textualRepresentation->language() == "Markdown")||(textualRepresentation->language() == "YaML")))
                         continue;
 
-                auto markdownElement = new MarkdownElement(element, codeDisplayWidget);
+                auto markdownElement = new MarkdownElement(textualRepresentation, codeDisplayWidget);
                 auto listItemWidget = new QListWidgetItem(codeDisplayWidget);
                 connect(markdownElement, SIGNAL(elementEdited()), this, SLOT(elementEdited()));
                 listItemWidget->setSizeHint(markdownElement->sizeHint());

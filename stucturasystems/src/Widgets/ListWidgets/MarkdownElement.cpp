@@ -4,10 +4,11 @@
 #include <QMenu>
 #include <QContextMenuEvent>
 #include <yaml-cpp/yaml.h>
+#include <kerml/root/annotations/TextualRepresentation.h>
 
 
 namespace StructuraSystems::Client {
-    MarkdownElement::MarkdownElement(std::shared_ptr<SysMLv2::REST::Element> element, QWidget *parent)
+    MarkdownElement::MarkdownElement(std::shared_ptr<KerML::Entities::TextualRepresentation> element, QWidget *parent)
             : QWidget(parent), ui(new Ui::MarkdownElement) {
         ui->setupUi(this);
         ui->retranslateUi(this);
@@ -22,7 +23,7 @@ namespace StructuraSystems::Client {
         delete ui;
     }
 
-    std::shared_ptr<SysMLv2::REST::Element> MarkdownElement::getElement() const {
+    std::shared_ptr<KerML::Entities::TextualRepresentation> MarkdownElement::getElement() const {
         return Element;
     }
 
@@ -37,8 +38,7 @@ namespace StructuraSystems::Client {
             ui->LanguageCombobox->setCurrentIndex(1);
         }
         if(Element->language() != "YaML") {
-            ui->TextBrowser->setMarkdown(QString::fromStdString(Element->getMarkdownString()));
-            ui->TextEditor->setText(QString::fromStdString(Element->getMarkdownString()));
+
         }
         if((Element->language() == "SysML")||(Element->language() == "SysMLv2")||(Element->language() == "SysMD")) {
             ui->LanguageCombobox->setCurrentIndex(2);

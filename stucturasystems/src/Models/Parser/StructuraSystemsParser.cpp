@@ -19,7 +19,7 @@ namespace StructuraSystems::Client {
 
     }
 
-    std::vector<std::shared_ptr<SysMLv2::REST::Element>> StructuraSystemsParser::readFile(QString filePath) {
+    std::vector<std::shared_ptr<KerML::Entities::Element>> StructuraSystemsParser::readFile(QString filePath) {
         if(filePath.contains(".md"))
             return readMarkdownFile(filePath);
 
@@ -38,31 +38,31 @@ namespace StructuraSystems::Client {
         throw std::runtime_error("No Valid Filepath.");
     }
 
-    std::vector<std::shared_ptr<SysMLv2::REST::Element>> StructuraSystemsParser::readMarkdownFile(QString filePath) {
+    std::vector<std::shared_ptr<KerML::Entities::Element>> StructuraSystemsParser::readMarkdownFile(QString filePath) {
         MarkdownParser parser;
         parser.parseMarkdownFile(filePath);
         return parser.getElementsOfProject();
     }
 
-    std::vector<std::shared_ptr<SysMLv2::REST::Element>> StructuraSystemsParser::readXmlFile(QString ) {
+    std::vector<std::shared_ptr<KerML::Entities::Element>> StructuraSystemsParser::readXmlFile(QString ) {
 
-        return std::vector<std::shared_ptr<SysMLv2::REST::Element>>();
+        return std::vector<std::shared_ptr<KerML::Entities::Element>>();
     }
 
-    std::vector<std::shared_ptr<SysMLv2::REST::Element>> StructuraSystemsParser::readSysMLv2File(QString filePath) {
+    std::vector<std::shared_ptr<KerML::Entities::Element>> StructuraSystemsParser::readSysMLv2File(QString filePath) {
         QFile file = QFile(filePath);
         file.open(QIODevice::ReadOnly);
         QByteArray array = file.readAll();
         file.close();
         std::string body = QString(array.data()).toStdString();
 
-        std::shared_ptr<SysMLv2::REST::Element> element = std::make_shared<SysMLv2::REST::Element>();
+        std::shared_ptr<KerML::Entities::Element> element = std::make_shared<KerML::Entities::Element>();
         element->setLanguage("SysMLv2");
         element->setBody(body);
         return {element};
     }
 
-    std::vector<std::shared_ptr<SysMLv2::REST::Element>> StructuraSystemsParser::readKerMLFile(QString filePath) {
+    std::vector<std::shared_ptr<KerML::Entities::Element>> StructuraSystemsParser::readKerMLFile(QString filePath) {
         QFile file = QFile(filePath);
         file.open(QIODevice::ReadOnly);
         QByteArray array = file.readAll();
@@ -75,12 +75,12 @@ namespace StructuraSystems::Client {
         return {element};
     }
 
-    std::vector<std::shared_ptr<SysMLv2::REST::Element>> StructuraSystemsParser::readJsonFile(QString ) {
-        return std::vector<std::shared_ptr<SysMLv2::REST::Element>>();
+    std::vector<std::shared_ptr<KerML::Entities::Element>> StructuraSystemsParser::readJsonFile(QString ) {
+        return std::vector<std::shared_ptr<KerML::Entities::Element>>();
     }
 
     void StructuraSystemsParser::writeFile(QString filePath,
-                                           std::vector<std::shared_ptr<SysMLv2::REST::Element>> elements) {
+                                           std::vector<std::shared_ptr<KerML::Entities::Element>> elements) {
         if(filePath.contains(".md"))
             writeMarkdownFile(filePath, elements);
 
@@ -99,16 +99,16 @@ namespace StructuraSystems::Client {
     }
 
     void StructuraSystemsParser::writeJsonFile(QString ,
-                                               std::vector<std::shared_ptr<SysMLv2::REST::Element>> ) {
+                                               std::vector<std::shared_ptr<KerML::Entities::Element>> ) {
 
     }
 
-    void StructuraSystemsParser::writeXmlFile(QString , std::vector<std::shared_ptr<SysMLv2::REST::Element>> ) {
+    void StructuraSystemsParser::writeXmlFile(QString , std::vector<std::shared_ptr<KerML::Entities::Element>> ) {
 
     }
 
     void StructuraSystemsParser::writeKerMLFile(QString filePath,
-                                                std::vector<std::shared_ptr<SysMLv2::REST::Element>> elements) {
+                                                std::vector<std::shared_ptr<KerML::Entities::Element>> elements) {
 
         QFile file;
         file.setFileName(filePath);
@@ -124,7 +124,7 @@ namespace StructuraSystems::Client {
     }
 
     void StructuraSystemsParser::writeSysMLv2File(QString filePath,
-                                                  std::vector<std::shared_ptr<SysMLv2::REST::Element>> elements) {
+                                                  std::vector<std::shared_ptr<KerML::Entities::Element>> elements) {
         QFile file;
         file.setFileName(filePath);
         if (file.open(QIODevice::ReadWrite)) {
@@ -137,7 +137,7 @@ namespace StructuraSystems::Client {
     }
 
     void StructuraSystemsParser::writeMarkdownFile(QString filePath,
-                                                   std::vector<std::shared_ptr<SysMLv2::REST::Element>> elements) {
+                                                   std::vector<std::shared_ptr<KerML::Entities::Element>> elements) {
         QFile file;
         file.setFileName(filePath);
         if (file.open(QIODevice::ReadWrite)) {

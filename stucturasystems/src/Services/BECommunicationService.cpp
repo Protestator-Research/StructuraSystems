@@ -13,7 +13,7 @@
 #include <sysmlv2/rest/entities/Project.h>
 #include <sysmlv2/rest/entities/Commit.h>
 #include <sysmlv2/rest/entities/Branch.h>
-#include <sysmlv2/rest/entities/Element.h>
+#include <kerml/root/annotations/TextualRepresentation.h>
 #include "entities/DigitalTwin.h"
 #include <sysmlv2/service/online/SysMLAPIImplementation.h>
 #include <boost/uuid/uuid_io.hpp>
