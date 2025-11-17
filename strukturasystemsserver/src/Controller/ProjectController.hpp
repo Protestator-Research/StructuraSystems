@@ -41,6 +41,7 @@ namespace StructuraSystems::Server
 	private:
 		QHttpServerResponse getProjects(const QHttpServerRequest& ) const
 		{
+			qDebug() << "Call to GET /projects";
 			const auto& projects = _ProjectService->getProjects();
 			std::string returnValue = "[\r\n";
 			for (size_t i = 0; i < projects.size(); i++)
@@ -56,6 +57,7 @@ namespace StructuraSystems::Server
 
 		QHttpServerResponse getProjectWithId(const QString& projectId, const QHttpServerRequest& ) const
 		{
+			qDebug() << "Call to GET /projects/<arg>";
 			const auto stringValue = _ProjectService->getProjectById(boost::uuids::string_generator()(projectId.toStdString()))->serializeToJson();
 			QHttpServerResponse response(QString::fromStdString(stringValue));
 			return response;
@@ -63,6 +65,7 @@ namespace StructuraSystems::Server
 
 		QHttpServerResponse deleteProjectWithId(const QString& projectId, const QHttpServerRequest&) const
 		{
+			qDebug() << "Call to DELETE /projects/<arg>";
 			const auto stringValue = _ProjectService->deleteProject(boost::uuids::string_generator()(projectId.toStdString()))->serializeToJson();
 			QHttpServerResponse response(QString::fromStdString(stringValue));
 			return response;
@@ -70,6 +73,7 @@ namespace StructuraSystems::Server
 
 		QHttpServerResponse createProject(const QHttpServerRequest& request) const
 		{
+			qDebug() << "Call to POST /projects";
 			auto jsonDocument = QJsonDocument::fromJson(request.body());
 			QJsonObject requestObject = jsonDocument.object();
 			const auto newProject = _ProjectService->createProject(requestObject["name"].toString().toStdString(), requestObject["description"].toString().toStdString());

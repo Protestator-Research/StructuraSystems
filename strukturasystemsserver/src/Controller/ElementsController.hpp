@@ -3,8 +3,11 @@
 #include <boost/lexical_cast.hpp>
 #include <boost/uuid/string_generator.hpp>
 #include <boost/uuid/uuid_io.hpp>
+#include <kerml/root/elements/Element.h>
 
 #include "BaseController.hpp"
+#include "../Services/ProjectVersioningService.h"
+#include "../Services/ServerProjectService.h"
 #include "../Services/ElementNavigationService.h"
 
 
@@ -12,11 +15,14 @@ namespace StructuraSystems::Server
 {
 	class ElementsController : public BaseController
 	{
+	public:
 		ElementsController() = delete;
 
 		ElementsController(QHttpServer* httpServer) : BaseController(httpServer)
 		{
-			ElementNavService = new ElementNavigationService();
+			ElementNavService = ElementNavigationService::getInstance();
+			ProjectService = ServerProjectService::getInstance();
+			ProjectVerService = ProjectVersioningService::getInstance();
 			generateRoutes();
 		}
 	protected:
@@ -39,27 +45,47 @@ namespace StructuraSystems::Server
 		QHttpServerResponse getElements(const QString& projectId, const QString& commitId,const QHttpServerRequest& )
 		{
 			auto string_generator = boost::uuids::string_generator();
-			const auto elements = ElementNavService->getElements(string_generator(projectId.toStdString()), string_generator(commitId.toStdString()));
+			const auto project = ProjectService->getProjectById(string_generator(projectId.toStdString()));
+			const auto commit = ProjectVerService->getCommitById(project, string_generator(commitId.toStdString()));
+			const auto elements = ElementNavService->getElements(project, commit);
 			
+			std::string returnValue = "[\r\n";
+			for (size_t i = 0; i < elements.size(); i++)
+			{
+				returnValue += elements[i]->serializeToJson();
+				if (i < (elements.size() - 1))
+					returnValue += ",\r\n";
+			}
+			returnValue += "]";
 
-
+			return QHttpServerResponse(QString::fromStdString(returnValue));
 		}
 
 		QHttpServerResponse getElementWithId(QString projectId, QString commitId, QString elementId, const QHttpServerRequest& request)
 		{
+			auto string_generator = boost::uuids::string_generator();
 
+			const auto project = ProjectService->getProjectById(string_generator(projectId.toStdString()));
+			const auto commit = ProjectVerService->getCommitById(project, string_generator(commitId.toStdString()));
+			const auto element = ElementNavService->getElementById(project,commit,boost::uuids::string_generator()(elementId.toStdString()));
+
+			return QHttpServerResponse(QString::fromStdString(element->serializeToJson()));
 		}
 
 		QHttpServerResponse getRelationshipsByRelatedElement(QString projectId, QString commitId, QString relatedElementId, const QHttpServerRequest& request)
 		{
-
+			//TODO Not yet implemented.
+			QHttpServerResponse("TODO Not yet implemented");
 		}
 
 		QHttpServerResponse getRootElements(QString projectId, QString commitId, const QHttpServerRequest& request)
 		{
-			
+			//TODO Not yet implemented.
+			QHttpServerResponse("TODO Not yet implemented");
 		}
 
-		ElementNavigationService* ElementNavService;
+		std::shared_ptr<ElementNavigationService> ElementNavService;
+		std::shared_ptr<ServerProjectService> ProjectService;
+		std::shared_ptr<ProjectVersioningService> ProjectVerService;
 	};
 }

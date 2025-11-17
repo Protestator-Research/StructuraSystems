@@ -10,8 +10,8 @@
 
 #include "Controller/AuthenticationController.hpp"
 #include "Controller/ProjectController.hpp"
-#include "Services/ProjectVersioningService.h"
-
+#include "Controller/CommitController.hpp"
+#include "Controller/ElementsController.hpp"
 #define SCHEME "http"
 #define HOST "127.0.0.1"
 #define PORT 8080
@@ -49,6 +49,8 @@ int main(int argc, char *argv[]) {
     });
 
     [[maybe_unused]] auto projectController = new StructuraSystems::Server::ProjectController(httpServer);
+    [[maybe_unused]] auto commitController = new StructuraSystems::Server::CommitController(httpServer);
+    [[maybe_unused]] auto elementsController = new StructuraSystems::Server::ElementsController(httpServer);
     [[maybe_unused]] auto authController = new StructuraSystems::Server::AuthenticationController(httpServer);
 
     auto tcpserver = std::make_unique<QTcpServer>();

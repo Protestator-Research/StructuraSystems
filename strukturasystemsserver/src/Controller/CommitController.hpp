@@ -1,6 +1,7 @@
 #pragma once
 
 #include <sysmlv2/rest/entities/Commit.h>
+#include <sysmlv2/rest/entities/CommitRequest.h>
 #include <sysmlv2/rest/entities/Project.h>
 
 #include "BaseController.hpp"
@@ -74,11 +75,12 @@ namespace StructuraSystems::Server
 
 		QHttpServerResponse postCommit(const QString& projectId, const QHttpServerRequest& request)
 		{
-			const auto& project = ProjectNavigationService->getProjectById(boost::uuids::string_generator()(projectId.toStdString()));
+			const auto commitRequest = std::make_shared<SysMLv2::REST::CommitRequest>(request.body().toStdString());
+			const auto project = ProjectNavigationService->getProjectById(boost::uuids::string_generator()(projectId.toStdString()));
 			const auto& branch = project->getDefaultBranch();
 			if (!request.query().isEmpty())
 			{
-				
+				const auto branches = ProjectVerService->getBranches(project);
 			}
 			const auto commit = ProjectVerService->createCommit(,branch,,project);
 			auto response = QHttpServerResponse(QString::fromStdString(commit->serializeToJson()),QHttpServerResponder::StatusCode::Created);
@@ -95,17 +97,12 @@ namespace StructuraSystems::Server
 
 		}
 
-		QHttpServerResponse getCommitId(const QString& projectId, const QString& commitId, const QHttpServerRequest& request)
-		{
-
-		}
-
 		QHttpServerResponse getCommitChange(const QString& projectId, const QString& commitId, const QHttpServerRequest& request)
 		{
 
 		}
 
-		QHttpServerResponse getCommitChangeById(const QString& projectId, const QString& commitId, const QHttpServerRequest& request)
+		QHttpServerResponse getCommitChangeById(const QString& projectId, const QString& commitId,QString changeId, const QHttpServerRequest& request)
 		{
 
 		}
