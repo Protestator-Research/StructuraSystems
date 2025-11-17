@@ -60,7 +60,7 @@ namespace StructuraSystems::Client {
             Elements = ElementService->getElements(project, commit);
 
         for (const auto &element: Elements) {
-            const auto type = element->getType();
+            auto type = element->getType();
             std::transform(type.begin(), type.end(), type.begin(), ::tolower);
             if (type == SysMLv2::REST::TEXTUAL_REPRESENTATION_TYPE) {
                 const auto textualRepresentation = std::dynamic_pointer_cast<KerML::Entities::TextualRepresentation>(element);
@@ -110,8 +110,9 @@ namespace StructuraSystems::Client {
 
     void CodeWidgetModel::parseKerMLSysMLModel() {
         for(const auto& element : Elements){
-            if(element->language()=="KerML")
-                auto parsedModel = SysMLv2::Files::Parser::parseKerML(element->body());
+            if (std::dynamic_pointer_cast<KerML::Entities::TextualRepresentation>(element) != nullptr)
+                if(std::dynamic_pointer_cast<KerML::Entities::TextualRepresentation>(element)->language()=="KerML")
+                    auto parsedModel = SysMLv2::Files::Parser::parseKerML(std::dynamic_pointer_cast<KerML::Entities::TextualRepresentation>(element)->body());
         }
 
     }
@@ -129,12 +130,12 @@ namespace StructuraSystems::Client {
         updateItemView(Project, Commit);
     }
 
-    std::vector<std::shared_ptr<SysMLv2::REST::Element>> CodeWidgetModel::getSelectedElements() const {
+    std::vector<std::shared_ptr<KerML::Entities::Element>> CodeWidgetModel::getSelectedElements() const {
         const auto codeDisplayWidget = CodeWidget->getListWidget();
 
         const auto selectedItems = codeDisplayWidget->selectedItems();
 
-        std::vector<std::shared_ptr<SysMLv2::REST::Element>> result;
+        std::vector<std::shared_ptr<KerML::Entities::Element>> result;
         for (const auto& index : selectedItems) {
             const auto& markdownWidget = dynamic_cast<MarkdownElement*>(index);
             result.push_back(markdownWidget->getElement());
@@ -147,7 +148,7 @@ namespace StructuraSystems::Client {
     void CodeWidgetModel::createProjectAndCommit(CommunicationService* communicationService) {
         Project = communicationService->postProject(Project->getName(), Project->getDescription(), "Main");
 
-        Commit = std::make_shared<SysMLv2::REST::Commit>("Upload from Local Project, by Structura Systems", "Upload from Local Project, by Structura Systems", Project);
+        Commit = std::make_shared<SysMLv2::REST::Commit>("Upload from Local Project, by Structura Systems", Project);
         for (const auto &element : Elements) {
             auto dataVersion = std::make_shared<SysMLv2::REST::DataVersion>(boost::uuids::random_generator()(), element);
             Commit->addChange(dataVersion);

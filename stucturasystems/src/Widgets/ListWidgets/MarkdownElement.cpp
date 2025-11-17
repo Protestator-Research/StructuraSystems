@@ -94,7 +94,7 @@ namespace StructuraSystems::Client {
             EditationState = true;
         } else if(EditationState) {
             Element->setBody(ui->TextEditor->toPlainText().toStdString());
-            ui->TextBrowser->setMarkdown(QString::fromStdString(Element->getMarkdownString()));
+            ui->TextBrowser->setMarkdown(QString::fromStdString(Element->body()));
             ui->TextEditor->setVisible(false);
             ui->TextBrowser->setVisible(true);
             ui->actionEdit->setText(tr("Edit"));

@@ -21,7 +21,7 @@
 #include <sysmlv2/rest/entities/Commit.h>
 #include <sysmlv2/rest/entities/DataVersion.h>
 #include <sysmlv2/rest/entities/Data.h>
-#include <sysmlv2/rest/entities/Element.h>
+#include <kerml/root/elements/Element.h>
 #include <sysmlv2/rest/entities/Project.h>
 #include <sysmlv2/rest/entities/Branch.h>
 
@@ -62,7 +62,7 @@ namespace StructuraSystems::Client {
                                                                "Created from Filesystem");
         StructuraSystemsParser parser;
         auto elements = parser.readFile(filePath);
-        auto commit = std::make_shared<SysMLv2::REST::Commit>("Created from Filesystem", "Created from Filesystem",
+        auto commit = std::make_shared<SysMLv2::REST::Commit>("Created from Filesystem",
                                                                   project);
         for (auto element: elements) {
             auto dataVersion = std::make_shared<SysMLv2::REST::DataVersion>(boost::uuids::random_generator()(), element);
@@ -185,7 +185,7 @@ namespace StructuraSystems::Client {
         int index = MainWindow->getActiveTabIndex();
         const auto modelName = MainWindow->getTabTitle(index+1);
         const auto model = CodeWidgetModelMap[modelName];
-        std::vector<std::shared_ptr<SysMLv2::REST::Element>> elements = BackendConnection->getAllElements(model->getCommit()->getId(), model->getProject()->getId());
+        std::vector<std::shared_ptr<KerML::Entities::Element>> elements = BackendConnection->getAllElements(model->getCommit()->getId(), model->getProject()->getId());
         auto wizzard = DigitalTwinCreationWizzard(model->getProject(),model->getCommit(), elements, MainWindow);
         wizzard.show();
         if (wizzard.exec()==QDialog::Accepted) {

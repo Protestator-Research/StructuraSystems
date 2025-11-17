@@ -14,6 +14,9 @@
 namespace SysMLv2::REST{
     class Project;
     class Commit;
+}
+
+namespace KerML::Entities {
     class Element;
 }
 
@@ -29,7 +32,7 @@ namespace StructuraSystems::Client {
 
     public:
         explicit CodeWidget(std::shared_ptr<SysMLv2::REST::Project> project, std::shared_ptr<SysMLv2::REST::Commit> commit, QWidget *parent = nullptr);
-        explicit CodeWidget(std::shared_ptr<SysMLv2::REST::Project> project, std::shared_ptr<SysMLv2::REST::Commit> commit, std::vector<std::shared_ptr<SysMLv2::REST::Element>> entities, QWidget *parent = nullptr);
+        explicit CodeWidget(std::shared_ptr<SysMLv2::REST::Project> project, std::shared_ptr<SysMLv2::REST::Commit> commit, std::vector<std::shared_ptr<KerML::Entities::Element>> entities, QWidget *parent = nullptr);
         ~CodeWidget() override;
 
         QListWidget* getListWidget();
@@ -40,7 +43,7 @@ namespace StructuraSystems::Client {
 
         void decorateDialogView();
 
-        std::vector<std::shared_ptr<SysMLv2::REST::Element>> getSelectedElements();
+        std::vector<std::shared_ptr<KerML::Entities::Element>> getSelectedElements();
     private:
         void decorateWidget();
 

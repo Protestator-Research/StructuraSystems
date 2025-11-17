@@ -8,9 +8,12 @@
 #include <QWizard>
 namespace SysMLv2::REST {
     class Project;
-    class Element;
     class Commit;
     class DigitalTwin;
+}
+
+namespace KerML::Entities {
+    class Element;
 }
 
 namespace StructuraSystems::Client {
@@ -21,7 +24,7 @@ namespace StructuraSystems::Client {
     }
     class DigitalTwinCreationWizzard : public QWizard{
     public:
-        DigitalTwinCreationWizzard(std::shared_ptr<SysMLv2::REST::Project> project, std::shared_ptr<SysMLv2::REST::Commit> commit, std::vector<std::shared_ptr<SysMLv2::REST::Element>> elements, QWidget *parent);
+        DigitalTwinCreationWizzard(std::shared_ptr<SysMLv2::REST::Project> project, std::shared_ptr<SysMLv2::REST::Commit> commit, std::vector<std::shared_ptr<KerML::Entities::Element>> elements, QWidget *parent);
         ~DigitalTwinCreationWizzard() override;
 
         std::shared_ptr<SysMLv2::REST::DigitalTwin> generateDigitalTwin();
@@ -32,7 +35,7 @@ namespace StructuraSystems::Client {
         Ui::CreateDTWizard *ui;
         std::shared_ptr<SysMLv2::REST::Project> Project;
         std::shared_ptr<SysMLv2::REST::Commit> Commit;
-        std::vector<std::shared_ptr<SysMLv2::REST::Element>> Elements;
+        std::vector<std::shared_ptr<KerML::Entities::Element>> Elements;
 
         CodeWidget *_CodeWidget;
     };

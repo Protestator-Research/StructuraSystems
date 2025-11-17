@@ -9,6 +9,7 @@
 #include <stdexcept>
 #include <QFile>
 #include <QTextStream>
+#include <kerml/root/annotations/TextualRepresentation.h>
 
 namespace StructuraSystems::Client {
     StructuraSystemsParser::StructuraSystemsParser() {
@@ -56,7 +57,7 @@ namespace StructuraSystems::Client {
         file.close();
         std::string body = QString(array.data()).toStdString();
 
-        std::shared_ptr<KerML::Entities::Element> element = std::make_shared<KerML::Entities::Element>();
+        std::shared_ptr<KerML::Entities::TextualRepresentation> element = std::make_shared<KerML::Entities::TextualRepresentation>();
         element->setLanguage("SysMLv2");
         element->setBody(body);
         return {element};
@@ -69,7 +70,7 @@ namespace StructuraSystems::Client {
         file.close();
         std::string body = QString(array.data()).toStdString();
 
-        std::shared_ptr<SysMLv2::REST::Element> element = std::make_shared<SysMLv2::REST::Element>();
+        std::shared_ptr<KerML::Entities::TextualRepresentation> element = std::make_shared<KerML::Entities::TextualRepresentation>();
         element->setLanguage("KerML");
         element->setBody(body);
         return {element};
@@ -107,46 +108,48 @@ namespace StructuraSystems::Client {
 
     }
 
-    void StructuraSystemsParser::writeKerMLFile(QString filePath,
-                                                std::vector<std::shared_ptr<KerML::Entities::Element>> elements) {
+    void StructuraSystemsParser::writeKerMLFile(QString ,
+                                                std::vector<std::shared_ptr<KerML::Entities::Element>> ) {
 
-        QFile file;
-        file.setFileName(filePath);
-        if (file.open(QIODevice::ReadWrite)) {
-            QTextStream stream(&file);
-            for(const auto & elem : elements) {
-                QString value = QString::fromStdString(elem->body());
-                stream << value << "\r\n";
-            }
-        }
-        file.flush();
-        file.close();
+        // QFile file;
+        // file.setFileName(filePath);
+        // if (file.open(QIODevice::ReadWrite)) {
+        //     QTextStream stream(&file);
+        //     for(const auto & elem : elements) {
+        //         if (std::dynamic_pointer_cast<KerML::Entities::TextualRepresentation>(elem) != nullptr) {
+        //             QString value = QString::fromStdString(std::dynamic_pointer_cast<KerML::Entities::TextualRepresentation>(elem)->body());
+        //             stream << value << "\r\n";
+        //         }
+        //     }
+        // }
+        // file.flush();
+        // file.close();
     }
 
-    void StructuraSystemsParser::writeSysMLv2File(QString filePath,
-                                                  std::vector<std::shared_ptr<KerML::Entities::Element>> elements) {
-        QFile file;
-        file.setFileName(filePath);
-        if (file.open(QIODevice::ReadWrite)) {
-            QTextStream stream(&file);
-            for(const auto & elem : elements)
-                stream << QString::fromStdString(elem->body()) << "\r\n";
-        }
-        file.flush();
-        file.close();
+    void StructuraSystemsParser::writeSysMLv2File(QString ,
+                                                  std::vector<std::shared_ptr<KerML::Entities::Element>> ) {
+        // QFile file;
+        // file.setFileName(filePath);
+        // if (file.open(QIODevice::ReadWrite)) {
+        //     QTextStream stream(&file);
+        //     for(const auto & elem : elements)
+        //         stream << QString::fromStdString(elem->body()) << "\r\n";
+        // }
+        // file.flush();
+        // file.close();
     }
 
-    void StructuraSystemsParser::writeMarkdownFile(QString filePath,
-                                                   std::vector<std::shared_ptr<KerML::Entities::Element>> elements) {
-        QFile file;
-        file.setFileName(filePath);
-        if (file.open(QIODevice::ReadWrite)) {
-            QTextStream stream(&file);
-            for(const auto & elem : elements)
-                stream << QString::fromStdString(elem->getMarkdownString()) << "\r\n";
-        }
-        file.flush();
-        file.close();
+    void StructuraSystemsParser::writeMarkdownFile(QString ,
+                                                   std::vector<std::shared_ptr<KerML::Entities::Element>> ) {
+        // QFile file;
+        // file.setFileName(filePath);
+        // if (file.open(QIODevice::ReadWrite)) {
+        //     QTextStream stream(&file);
+        //     for(const auto & elem : elements)
+        //         stream << QString::fromStdString(elem->getMarkdownString()) << "\r\n";
+        // }
+        // file.flush();
+        // file.close();
     }
 
 } // StructuraSystems::Client

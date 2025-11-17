@@ -38,8 +38,8 @@ namespace StructuraSystems::Client {
         return QString::fromStdString(MarkdownString);
     }
 
-    std::vector<std::shared_ptr<SysMLv2::REST::Element>> MarkdownParser::getElementsOfProject() {
-        std::vector<std::shared_ptr<SysMLv2::REST::Element>> returnValue;
+    std::vector<std::shared_ptr<KerML::Entities::Element>> MarkdownParser::getElementsOfProject() {
+        std::vector<std::shared_ptr<KerML::Entities::Element>> returnValue;
         auto child = cmark_node_first_child(MarkdownDocument);
         switch (cmark_node_get_type(child)) {
             case CMARK_NODE_NONE:
@@ -107,7 +107,7 @@ namespace StructuraSystems::Client {
         MarkdownDocument = cmark_parse_document(MarkdownString.c_str(),MarkdownString.size(),0);
     }
 
-    std::shared_ptr<SysMLv2::REST::Element> MarkdownParser::createElement(std::string language, std::string body) {
+    std::shared_ptr<KerML::Entities::Element> MarkdownParser::createElement(std::string language, std::string body) {
 
         std::shared_ptr<KerML::Entities::TextualRepresentation> element = std::make_shared<KerML::Entities::TextualRepresentation>();
         element->setLanguage(language);

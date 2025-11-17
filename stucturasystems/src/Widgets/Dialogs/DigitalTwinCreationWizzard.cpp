@@ -6,7 +6,7 @@
 
 #include <sysmlv2/rest/entities/Project.h>
 #include <sysmlv2/rest/entities/Commit.h>
-#include <sysmlv2/rest/entities/Element.h>
+#include <kerml/root/elements/Element.h>
 #include <boost/uuid/uuid.hpp>
 
 #include "ui_DigitalTwinCreationWizzard.h"
@@ -15,7 +15,7 @@
 
 
 namespace StructuraSystems::Client {
-    DigitalTwinCreationWizzard::DigitalTwinCreationWizzard(std::shared_ptr<SysMLv2::REST::Project> project, std::shared_ptr<SysMLv2::REST::Commit> commit, std::vector<std::shared_ptr<SysMLv2::REST::Element>> elements, QWidget *parent) :
+    DigitalTwinCreationWizzard::DigitalTwinCreationWizzard(std::shared_ptr<SysMLv2::REST::Project> project, std::shared_ptr<SysMLv2::REST::Commit> commit, std::vector<std::shared_ptr<KerML::Entities::Element>> elements, QWidget *parent) :
     QWizard(parent),
     ui(new Ui::CreateDTWizard){
         ui->setupUi(this);
