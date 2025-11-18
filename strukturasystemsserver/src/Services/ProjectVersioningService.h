@@ -28,6 +28,8 @@ namespace StructuraSystems::Server
 			std::vector<std::shared_ptr<SysMLv2::REST::Commit>> previousCommits,
 			std::shared_ptr<SysMLv2::REST::Project> project) override;
 
+		std::shared_ptr<SysMLv2::REST::Commit> createCommit(std::string description,std::vector<std::shared_ptr<SysMLv2::REST::DataVersion>>change, std::shared_ptr<SysMLv2::REST::Project> project, std::shared_ptr<SysMLv2::REST::Branch> branch);
+
 		std::shared_ptr<SysMLv2::REST::Commit> createCommit(std::shared_ptr<SysMLv2::REST::DataVersion> change,
 			std::shared_ptr<SysMLv2::REST::Branch> branch, std::shared_ptr<SysMLv2::REST::Project> project) override;
 

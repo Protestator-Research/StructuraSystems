@@ -61,6 +61,19 @@ namespace StructuraSystems::Server
 		return commit;
 	}
 
+	std::shared_ptr<SysMLv2::REST::Commit> ProjectVersioningService::createCommit(std::string description,
+		std::vector<std::shared_ptr<SysMLv2::REST::DataVersion>> change, std::shared_ptr<SysMLv2::REST::Project> project,
+		std::shared_ptr<SysMLv2::REST::Branch> branch) {
+		std::vector<std::shared_ptr<SysMLv2::REST::Commit>> previousCommits = { branch->getHead() };
+		const auto commit = std::make_shared<SysMLv2::REST::Commit>(description, project, previousCommits);
+		commit->setChange(change);
+
+		ProjectIdCommitMap[project->getId()].push_back(commit);
+		branch->setHead(commit);
+
+		return commit;
+	}
+
 	std::shared_ptr<SysMLv2::REST::Commit> ProjectVersioningService::createCommit(
 		std::shared_ptr<SysMLv2::REST::DataVersion> change, std::shared_ptr<SysMLv2::REST::Branch> branch,
 		std::shared_ptr<SysMLv2::REST::Project> project)
