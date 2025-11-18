@@ -61,7 +61,7 @@ namespace StructuraSystems::Server
 			return QHttpServerResponse(QString::fromStdString(returnValue));
 		}
 
-		QHttpServerResponse getElementWithId(QString projectId, QString commitId, QString elementId, const QHttpServerRequest& request)
+		QHttpServerResponse getElementWithId(QString projectId, QString commitId, QString elementId, const QHttpServerRequest&)
 		{
 			auto string_generator = boost::uuids::string_generator();
 
@@ -72,16 +72,16 @@ namespace StructuraSystems::Server
 			return QHttpServerResponse(QString::fromStdString(element->serializeToJson()));
 		}
 
-		QHttpServerResponse getRelationshipsByRelatedElement(QString projectId, QString commitId, QString relatedElementId, const QHttpServerRequest& request)
+		QHttpServerResponse getRelationshipsByRelatedElement(QString , QString , QString , const QHttpServerRequest& )
 		{
 			//TODO Not yet implemented.
-			QHttpServerResponse("TODO Not yet implemented");
+			return QHttpServerResponse("TODO Not yet implemented", QHttpServerResponder::StatusCode::NotImplemented);
 		}
 
-		QHttpServerResponse getRootElements(QString projectId, QString commitId, const QHttpServerRequest& request)
+		QHttpServerResponse getRootElements(QString , QString , const QHttpServerRequest& )
 		{
 			//TODO Not yet implemented.
-			QHttpServerResponse("TODO Not yet implemented");
+			return QHttpServerResponse("TODO Not yet implemented", QHttpServerResponder::StatusCode::NotImplemented);
 		}
 
 		std::shared_ptr<ElementNavigationService> ElementNavService;

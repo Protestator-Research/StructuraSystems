@@ -94,7 +94,7 @@ namespace StructuraSystems::Server
 			return response;
 		}
 
-		QHttpServerResponse getBranchWithId(const QString& projectId, const QString& branchId, const QHttpServerRequest& request)
+		QHttpServerResponse getBranchWithId(const QString& projectId, const QString& branchId, const QHttpServerRequest&)
 		{
 			const auto project = ProjectNavigationService->getProjectById(boost::uuids::string_generator()(projectId.toStdString()));
 			auto _branchId = boost::uuids::string_generator()(branchId.toStdString());
@@ -102,7 +102,7 @@ namespace StructuraSystems::Server
 			return QHttpServerResponse(QString::fromStdString(branch->serializeToJson()));
 		}
 
-		QHttpServerResponse getCommitId(const QString& projectId, const QString& commitId, const QHttpServerRequest& request)
+		QHttpServerResponse getCommitId(const QString& projectId, const QString& commitId, const QHttpServerRequest&)
 		{
 			const auto project = ProjectNavigationService->getProjectById(boost::uuids::string_generator()(projectId.toStdString()));
 			auto _commitId = boost::uuids::string_generator()(commitId.toStdString());
@@ -139,7 +139,7 @@ namespace StructuraSystems::Server
 			return QHttpServerResponse(QString::fromStdString(returnValue));
 		}
 
-		QHttpServerResponse getCommitChangeById(const QString& projectId, const QString& commitId,QString changeId, const QHttpServerRequest& request)
+		QHttpServerResponse getCommitChangeById(const QString& projectId, const QString& commitId,QString changeId, const QHttpServerRequest&)
 		{
 			const auto project = ProjectNavigationService->getProjectById(boost::uuids::string_generator()(projectId.toStdString()));
 			auto _commitId = boost::uuids::string_generator()(commitId.toStdString());
@@ -157,7 +157,7 @@ namespace StructuraSystems::Server
 			return QHttpServerResponse(QString::fromStdString(branch->serializeToJson()));
 		}
 
-		QHttpServerResponse deleteBranch(const QString& projectId, const QString& branchId, const QHttpServerRequest& request)
+		QHttpServerResponse deleteBranch(const QString& projectId, const QString& branchId, const QHttpServerRequest&)
 		{
 			const auto& project = ProjectNavigationService->getProjectById(boost::uuids::string_generator()(projectId.toStdString()));
 			auto branchID = boost::uuids::string_generator()(branchId.toStdString());
@@ -165,7 +165,7 @@ namespace StructuraSystems::Server
 			return QHttpServerResponse(QString::fromStdString(branch->serializeToJson()));
 		}
 
-		QHttpServerResponse getTags(const QString& projectId, const QHttpServerRequest& request)
+		QHttpServerResponse getTags(const QString& projectId, const QHttpServerRequest&)
 		{
 			const auto& project = ProjectNavigationService->getProjectById(boost::uuids::string_generator()(projectId.toStdString()));
 			auto tags = ProjectVerService->getTags(project);
@@ -181,11 +181,12 @@ namespace StructuraSystems::Server
 			return QHttpServerResponse(QString::fromStdString(returnValue));
 		}
 
-		QHttpServerResponse getTagsById(const QString& projectId, const QString& tagId, const QHttpServerRequest& request)
+		QHttpServerResponse getTagsById(const QString& projectId, const QString& tagId, const QHttpServerRequest&)
 		{
 			const auto& project = ProjectNavigationService->getProjectById(boost::uuids::string_generator()(projectId.toStdString()));
 			auto tagID = boost::uuids::string_generator()(tagId.toStdString());
 			const auto& tag = ProjectVerService->getTagById(project,tagID);
+			return QHttpServerResponse(QString::fromStdString(tag->serializeToJson()));
 		}
 
 		std::shared_ptr<ProjectVersioningService> ProjectVerService;
