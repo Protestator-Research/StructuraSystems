@@ -37,6 +37,7 @@ class CppStructuraSystemsRecipe(ConanFile):
         self.requires("yaml-cpp/0.8.0")
         self.requires("libpqxx/7.10.1")
         self.requires("openssl/3.6.0")
+        self.requires("mongo-c-driver/1.30.3")
 
 
     def config_options(self):
@@ -56,6 +57,7 @@ class CppStructuraSystemsRecipe(ConanFile):
             self.options["yaml-cpp/*"].shared=True
             self.options["libpqxx/*"].shared=True
             self.options["openssl/*"].shared=True
+            self.options["mongo-cxx-driver/*"].shared=True
         else:
             self.options["boost/*"].shared = False
             self.options["gtest/*"].shared = False
@@ -65,6 +67,7 @@ class CppStructuraSystemsRecipe(ConanFile):
             self.options["yaml-cpp/*"].shared=False
             self.options["libpqxx/*"].shared=False
             self.options["openssl/*"].shared=False
+            self.options["mongo-cxx-driver/*"].shared=False
 
         if platform != "darwin":
             self.options["qt/*"].shared = True

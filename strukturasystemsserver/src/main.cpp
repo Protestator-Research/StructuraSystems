@@ -14,7 +14,7 @@
 #include "Controller/ElementsController.hpp"
 #define SCHEME "http"
 #define HOST "127.0.0.1"
-#define PORT 8080
+#define PORT 8088
 
 int main(int argc, char *argv[]) {
     QCoreApplication app(argc,argv);
@@ -23,6 +23,8 @@ int main(int argc, char *argv[]) {
     QCoreApplication::setApplicationVersion("1.0");
     QCoreApplication::setOrganizationName("Working Group Cyber Physical Systems");
     QCoreApplication::setOrganizationDomain("https://cps.cs.rptu.de/");
+
+
 
     QCommandLineParser parser;
     parser.addOptions({ {"port", QCoreApplication::translate("main", "The port the server listens on."), "port"} });

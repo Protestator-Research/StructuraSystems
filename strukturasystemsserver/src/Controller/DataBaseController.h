@@ -34,9 +34,9 @@ namespace StructuraSystems::Server
 		static DataBaseController* Instance;
 
 
-		// mongocxx::uri uri;
-		// mongocxx::client client;
-		// mongocxx::database database;
+		mongocxx::uri uri;
+		mongocxx::client client;
+		mongocxx::database database;
 
 		void initializeDatabaseIfNotAvailable();
 

@@ -41,12 +41,12 @@ namespace StructuraSystems::Server
 
 	void DataBaseController::addMultibleProjects(std::vector<std::shared_ptr<SysMLv2::REST::Project>>)
 	{
-		// std::vector<bsoncxx::document::value> dbProjects;
-		// for (const auto& project : projects)
-		// {
-		// 	dbProjects.push_back(bsoncxx::builder::basic::make_document(bsoncxx::from_json(project->serializeToJson())));
-		// }
-		// database["projects"].insert_many(dbProjects);
+		std::vector<bsoncxx::document::value> dbProjects;
+		for (const auto& project : projects)
+		{
+		 	dbProjects.push_back(bsoncxx::builder::basic::make_document(bsoncxx::from_json(project->serializeToJson())));
+		 }
+		database["projects"].insert_many(dbProjects);
 	}
 
 	void DataBaseController::addProject(std::shared_ptr<SysMLv2::REST::Project>)
@@ -81,45 +81,45 @@ namespace StructuraSystems::Server
 
 	DataBaseController::DataBaseController(std::string, std::string, std::string)
 	{
-		// std::string uri_string = "";
-		//
-		// if (username.empty())
-		// 	uri_string += "mongodb://" + dBAddress;
-		// else
-		// 	uri_string += "mongodb + srv://" + username + ":" + password + "@" + dBAddress;
-		//
-		//
-		// uri = mongocxx::uri(uri_string);
-		// client = mongocxx::client(uri);
-		//
-		//
-		//
-		// database = client["structura_systems"];
+		std::string uri_string = "";
+
+		if (username.empty())
+			uri_string += "mongodb://" + dBAddress;
+		else
+			uri_string += "mongodb + srv://" + username + ":" + password + "@" + dBAddress;
+
+
+		uri = mongocxx::uri(uri_string);
+		client = mongocxx::client(uri);
+
+
+
+		database = client["structura_systems"];
 
 #ifdef _DEBUG
-		// deleteDatabaseIfDebug();
+		deleteDatabaseIfDebug();
 #endif
-		// initializeDatabaseIfNotAvailable();
+		initializeDatabaseIfNotAvailable();
 	}
 
 	void DataBaseController::initializeDatabaseIfNotAvailable()
 	{
-		// if (database.list_collection_names().size()>0)
-		// 	return;
+		if (database.list_collection_names().size()>0)
+		 	return;
+
+		database.create_collection("projects");
+		database.create_collection("data_elements");
+		database.create_collection("commits");
+		database.create_collection("tags");
+		database.create_collection("branches");
+
+		std::vector<std::shared_ptr<SysMLv2::REST::Project>> projects = {
+		std::make_shared<SysMLv2::REST::Project>("ISO26262", "Preloaded Project", "Main"),
+		std::make_shared<SysMLv2::REST::Project>("SysMLv2 Introduction", "Preloaded Project", "Main"),
+		std::make_shared<SysMLv2::REST::Project>("SI", "Preloaded Project", "Main")
+		};
 		//
-		// database.create_collection("projects");
-		// database.create_collection("data_elements");
-		// database.create_collection("commits");
-		// database.create_collection("tags");
-		// database.create_collection("branches");
-		//
-		// std::vector<std::shared_ptr<SysMLv2::REST::Project>> projects = {
-		// 	std::make_shared<SysMLv2::REST::Project>("ISO26262", "Preloaded Project", "Main"),
-		// 	std::make_shared<SysMLv2::REST::Project>("SysMLv2 Introduction", "Preloaded Project", "Main"),
-		// 	std::make_shared<SysMLv2::REST::Project>("SI", "Preloaded Project", "Main")
-		// };
-		//
-		// addMultibleProjects(projects);
+		addMultibleProjects(projects);
 	}
 
 	void DataBaseController::deleteDatabaseIfDebug()
