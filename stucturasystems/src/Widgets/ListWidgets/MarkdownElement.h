@@ -2,7 +2,10 @@
 #define MARKDOWNELEMENT_H
 
 #include <QWidget>
-#include <sysmlv2/rest/entities/Element.h>
+
+namespace KerML::Entities {
+    class TextualRepresentation;
+}
 
 namespace StructuraSystems::Client {
     namespace Ui {
@@ -13,10 +16,10 @@ namespace StructuraSystems::Client {
     Q_OBJECT
 
     public:
-        explicit MarkdownElement(std::shared_ptr<SysMLv2::REST::Element> element, QWidget *parent = nullptr);
+        explicit MarkdownElement(std::shared_ptr<KerML::Entities::TextualRepresentation> element, QWidget *parent = nullptr);
         ~MarkdownElement();
 
-        std::shared_ptr<SysMLv2::REST::Element> getElement() const;
+        std::shared_ptr<KerML::Entities::TextualRepresentation> getElement() const;
 
     signals:
         void moveElementUp();
@@ -39,7 +42,7 @@ namespace StructuraSystems::Client {
         void makeConnections();
         void redecorateMarkdownElement();
         Ui::MarkdownElement *ui;
-        std::shared_ptr<SysMLv2::REST::Element> Element;
+        std::shared_ptr<KerML::Entities::TextualRepresentation> Element;
         bool EditationState=false;
     };
 }

@@ -1,22 +1,21 @@
 //
 // Created by Moritz Herzog on 09.04.25.
 //
-
-#include <sysmlv2/rest/entities/Element.h>
+#include <boost/uuid/uuid.hpp>
+#include <kerml/root/elements/Element.h>
+#include <kerml/root/annotations/TextualRepresentation.h>
+#include <sysmlv2/rest/entities/JSONEntities.h>
 #include <sysmlv2/rest/entities/Project.h>
 #include <sysmlv2/rest/entities/Identification.h>
-#include <sysmlv2/file/Parser.h>
-#include <QStandardItem>
-#include <QListWidget>
-#include <QMessageBox>
+#include <sysmlv2/Parser.h>
 #include <utility>
 #include <boost/uuid/uuid.hpp>
 #include <boost/uuid/random_generator.hpp>
+#include <memory>
 
 #include "CodeWidgetModel.h"
 
 #include <sysmlv2/rest/entities/Commit.h>
-#include <sysmlv2/rest/entities/DataIdentity.h>
 #include <sysmlv2/rest/entities/DataVersion.h>
 
 #include "../Widgets/CodeWidget.h"
@@ -25,7 +24,6 @@
 #include "../Widgets/ListWidgets/AddElementWidget.h"
 #include "Parser/StructuraSystemsParser.h"
 #include "../Services/BECommunicationService.h"
-#include "../Widgets/ListWidgets/MarkdownElement.h"
 
 
 namespace StructuraSystems::Client {
@@ -41,7 +39,7 @@ namespace StructuraSystems::Client {
     }
 
     CodeWidgetModel::CodeWidgetModel(StructuraSystems::Client::CodeWidget *codeWidget, std::shared_ptr<SysMLv2::REST::Project> &project,
-                                     std::vector<std::shared_ptr<SysMLv2::REST::Element>> elements, std::shared_ptr<SysMLv2::REST::Commit> &commit) :
+                                     std::vector<std::shared_ptr<KerML::Entities::Element>> elements, std::shared_ptr<SysMLv2::REST::Commit> &commit) :
             QObject(codeWidget),
             Project(project),
             Commit(commit),
@@ -62,11 +60,14 @@ namespace StructuraSystems::Client {
             Elements = ElementService->getElements(project, commit);
 
         for (const auto &element: Elements) {
-            if(!element->body().empty()) {
-                if ((DialogView)&&((element->language() == "Markdown")||(element->language() == "YaML")))
+            auto type = element->getType();
+            std::transform(type.begin(), type.end(), type.begin(), ::tolower);
+            if (type == SysMLv2::REST::TEXTUAL_REPRESENTATION_TYPE) {
+                const auto textualRepresentation = std::dynamic_pointer_cast<KerML::Entities::TextualRepresentation>(element);
+                if ((DialogView)&&((textualRepresentation->language() == "Markdown")||(textualRepresentation->language() == "YaML")))
                         continue;
 
-                auto markdownElement = new MarkdownElement(element, codeDisplayWidget);
+                auto markdownElement = new MarkdownElement(textualRepresentation, codeDisplayWidget);
                 auto listItemWidget = new QListWidgetItem(codeDisplayWidget);
                 connect(markdownElement, SIGNAL(elementEdited()), this, SLOT(elementEdited()));
                 listItemWidget->setSizeHint(markdownElement->sizeHint());
@@ -109,8 +110,9 @@ namespace StructuraSystems::Client {
 
     void CodeWidgetModel::parseKerMLSysMLModel() {
         for(const auto& element : Elements){
-            if(element->language()=="KerML")
-                auto parsedModel = SysMLv2::Files::Parser::parseKerML(element->body());
+            if (std::dynamic_pointer_cast<KerML::Entities::TextualRepresentation>(element) != nullptr)
+                if(std::dynamic_pointer_cast<KerML::Entities::TextualRepresentation>(element)->language()=="KerML")
+                    auto parsedModel = SysMLv2::Files::Parser::parseKerML(std::dynamic_pointer_cast<KerML::Entities::TextualRepresentation>(element)->body());
         }
 
     }
@@ -128,12 +130,12 @@ namespace StructuraSystems::Client {
         updateItemView(Project, Commit);
     }
 
-    std::vector<std::shared_ptr<SysMLv2::REST::Element>> CodeWidgetModel::getSelectedElements() const {
+    std::vector<std::shared_ptr<KerML::Entities::Element>> CodeWidgetModel::getSelectedElements() const {
         const auto codeDisplayWidget = CodeWidget->getListWidget();
 
         const auto selectedItems = codeDisplayWidget->selectedItems();
 
-        std::vector<std::shared_ptr<SysMLv2::REST::Element>> result;
+        std::vector<std::shared_ptr<KerML::Entities::Element>> result;
         for (const auto& index : selectedItems) {
             const auto& markdownWidget = dynamic_cast<MarkdownElement*>(index);
             result.push_back(markdownWidget->getElement());
@@ -146,9 +148,9 @@ namespace StructuraSystems::Client {
     void CodeWidgetModel::createProjectAndCommit(CommunicationService* communicationService) {
         Project = communicationService->postProject(Project->getName(), Project->getDescription(), "Main");
 
-        Commit = std::make_shared<SysMLv2::REST::Commit>("Upload from Local Project, by Structura Systems", "Upload from Local Project, by Structura Systems", Project);
+        Commit = std::make_shared<SysMLv2::REST::Commit>("Upload from Local Project, by Structura Systems", Project);
         for (const auto &element : Elements) {
-            auto dataVersion = std::make_shared<SysMLv2::REST::DataVersion>(std::make_shared<SysMLv2::REST::DataIdentity>(boost::uuids::random_generator()()),element);
+            auto dataVersion = std::make_shared<SysMLv2::REST::DataVersion>(boost::uuids::random_generator()(), element);
             Commit->addChange(dataVersion);
         }
 

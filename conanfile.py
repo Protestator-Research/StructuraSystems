@@ -21,21 +21,24 @@ class CppStructuraSystemsRecipe(ConanFile):
     # Binary configuration
     settings = "os", "compiler", "build_type", "arch"
     options = {"shared": [True, False], "fPIC": [True, False]}
-    default_options = {"shared": True, "fPIC": False}
+    default_options = {"shared": False, "fPIC": False}
 
     # Sources are located in the same place as this recipe, copy them to the recipe
     exports_sources = "CMakeLists.txt", "CppDigitalTwin/*"
 
     def requirements(self):
-        self.requires("boost/1.86.0")
-        self.requires("libcurl/8.4.0")
-        self.requires("nlohmann_json/3.11.3")
+        self.requires("boost/[>=1.86.0 <2]")
+        self.requires("libcurl/[>=8.4.0 <9]")
+        self.requires("nlohmann_json/[>=3.11.3 <3.13]")
         if platform != "darwin":
-            self.requires("qt/6.7.3")
+            self.requires("qt/6.8.3")
         self.requires("md4c/0.4.8")
-        self.requires("sysmllib/1.0-beta-3-wip")
+        self.requires("sysmllib/1.0-beta-4-main")
         self.requires("yaml-cpp/0.8.0")
-        self.requires("mongo-cxx-driver/4.0.0")
+        self.requires("libpqxx/7.10.1")
+        self.requires("openssl/3.6.0")
+        self.requires("mongo-cxx-driver/4.1.4")
+
 
     def config_options(self):
         if self.settings.os == "Windows":
@@ -52,6 +55,8 @@ class CppStructuraSystemsRecipe(ConanFile):
             self.options["nlohmann_json/*"].shared = True
             self.options["sysmlv2lib/*"].shared=True
             self.options["yaml-cpp/*"].shared=True
+            self.options["libpqxx/*"].shared=True
+            self.options["openssl/*"].shared=True
             self.options["mongo-cxx-driver/*"].shared=True
         else:
             self.options["boost/*"].shared = False
@@ -60,6 +65,8 @@ class CppStructuraSystemsRecipe(ConanFile):
             self.options["nlohmann_json/*"].shared = False
             self.options["sysmlv2lib/*"].shared=False
             self.options["yaml-cpp/*"].shared=False
+            self.options["libpqxx/*"].shared=False
+            self.options["openssl/*"].shared=False
             self.options["mongo-cxx-driver/*"].shared=False
 
         if platform != "darwin":
@@ -87,7 +94,7 @@ class CppStructuraSystemsRecipe(ConanFile):
         self.tool_requires("cmake/3.30.0")
         self.tool_requires("icu/74.2")
         if platform != "darwin":
-            self.tool_requires("qt/6.7.3")
+            self.tool_requires("qt/6.8.3")
         self.test_requires("gtest/1.14.0")
 
     def test(self):

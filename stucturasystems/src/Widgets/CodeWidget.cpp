@@ -34,7 +34,7 @@ namespace StructuraSystems::Client {
     }
 
     CodeWidget::CodeWidget(std::shared_ptr<SysMLv2::REST::Project> project, std::shared_ptr<SysMLv2::REST::Commit> commit,
-                           std::vector<std::shared_ptr<SysMLv2::REST::Element>> entities, QWidget *parent) :
+                           std::vector<std::shared_ptr<KerML::Entities::Element>> entities, QWidget *parent) :
                            QWidget(parent), ui(new Ui::CodeWidget){
         ui->setupUi(this);
         ui->retranslateUi(this);
@@ -56,7 +56,7 @@ namespace StructuraSystems::Client {
         Model->setDialogView(true);
     }
 
-    std::vector<std::shared_ptr<SysMLv2::REST::Element>> CodeWidget::getSelectedElements() {
+    std::vector<std::shared_ptr<KerML::Entities::Element>> CodeWidget::getSelectedElements() {
         return Model->getSelectedElements();
     }
 } // StructuraSystems::Client

@@ -2,10 +2,10 @@
 
 #include <string>
 #include <memory>
-
-#include <mongocxx/client.hpp>
-#include <mongocxx/instance.hpp>
+#include <vector>
 #include <mongocxx/uri.hpp>
+#include <mongocxx/client.hpp>
+#include <mongocxx/database.hpp>
 
 namespace SysMLv2::REST
 {
@@ -35,7 +35,7 @@ namespace StructuraSystems::Server
  
 		static DataBaseController* Instance;
 
-		mongocxx::instance instance;
+
 		mongocxx::uri uri;
 		mongocxx::client client;
 		mongocxx::database database;

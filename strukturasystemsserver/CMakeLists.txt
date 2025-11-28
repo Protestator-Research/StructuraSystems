@@ -1,7 +1,10 @@
 cmake_minimum_required(VERSION 3.15)
 find_package(Qt6 REQUIRED COMPONENTS Core HttpServer)
 find_package(sysmllib REQUIRED)
+find_package(OpenSSL REQUIRED)
 find_package(mongocxx REQUIRED)
+
+find_package(libpqxx)
 
 qt_standard_project_setup()
 
@@ -13,6 +16,9 @@ set(SOURCES
         src/Controller/ProjectController.hpp
         src/Controller/DataBaseController.h
         src/Controller/DataBaseController.cpp
+        src/Controller/AuthenticationController.hpp
+        src/Controller/ElementsController.hpp
+        src/Controller/CommitController.hpp
         src/Templates/CrudApi.hpp
         src/Templates/IdMap.hpp
         src/Templates/SessionAPI.hpp
@@ -21,12 +27,18 @@ set(SOURCES
         src/Json/FromJsonFactory.hpp
         src/Json/entities/Project.h
         src/Json/entities/Project.cpp
-        src/Services/ProjectService.h
-        src/Services/ProjectService.cpp
+        src/Json/entities/AuthenticationRequest.h
+        src/Json/entities/AuthenticationRequest.cpp
+        src/Json/entities/AuthenticationResponse.h
+        src/Json/entities/AuthenticationResponse.cpp
+        src/Services/ServerProjectService.h
+        src/Services/ServerProjectService.cpp
         src/Services/ElementNavigationService.h
         src/Services/ElementNavigationService.cpp
         src/Services/ProjectVersioningService.h
-        src/Services/ProjectVersioningService.cpp)
+        src/Services/ProjectVersioningService.cpp
+        src/Services/AuthenticationService.h
+        src/Services/AuthenticationService.cpp)
 
 add_executable(StructuraSystemsServer ${SOURCES})
 
@@ -34,13 +46,23 @@ add_executable(StructuraSystemsServer ${SOURCES})
 
 target_include_directories(StructuraSystemsServer PUBLIC
         "${CMAKE_CURRENT_BINARY_DIR}/")
-
-target_link_libraries(StructuraSystemsServer PUBLIC
-        Qt6::Core
-    	Qt6::HttpServer
-        sysmllib::sysmllib
-        mongo::bsoncxx_shared
-        mongo::mongocxx_shared)
+if(TARGET mongo::mongocxx_shared)
+    target_link_libraries(StructuraSystemsServer PUBLIC
+            Qt6::Core
+    	    Qt6::HttpServer
+            sysmllib::sysmllib
+            libpqxx::pqxx
+            openssl::openssl
+            mongo::mongocxx_shared)
+else()
+    target_link_libraries(StructuraSystemsServer PUBLIC
+            Qt6::Core
+            Qt6::HttpServer
+            sysmllib::sysmllib
+            libpqxx::pqxx
+            openssl::openssl
+            mongo::mongocxx_static)
+endif()
 
 if (!UNIX)
 set_target_properties(StructuraSystemsServer PROPERTIES
