@@ -1,4 +1,4 @@
-name: ContiniousBuild
+name: ContinuousBuild
 
 on:
   push:
@@ -24,7 +24,7 @@ jobs:
       run: |
        mkdir build && cd build
        conan install ..
-    - name: build sysmlv2lib
+    - name: build structura systems
       run: |
         ls -al
         cd build
