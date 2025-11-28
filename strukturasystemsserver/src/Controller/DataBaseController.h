@@ -3,7 +3,9 @@
 #include <string>
 #include <memory>
 #include <vector>
-
+#include <mongocxx/uri.hpp>
+#include <mongocxx/client.hpp>
+#include <mongocxx/database.hpp>
 
 namespace SysMLv2::REST
 {

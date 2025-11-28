@@ -21,7 +21,7 @@ class CppStructuraSystemsRecipe(ConanFile):
     # Binary configuration
     settings = "os", "compiler", "build_type", "arch"
     options = {"shared": [True, False], "fPIC": [True, False]}
-    default_options = {"shared": True, "fPIC": False}
+    default_options = {"shared": False, "fPIC": False}
 
     # Sources are located in the same place as this recipe, copy them to the recipe
     exports_sources = "CMakeLists.txt", "CppDigitalTwin/*"
@@ -33,11 +33,11 @@ class CppStructuraSystemsRecipe(ConanFile):
         if platform != "darwin":
             self.requires("qt/6.8.3")
         self.requires("md4c/0.4.8")
-        self.requires("sysmllib/1.0-beta-4-wip")
+        self.requires("sysmllib/1.0-beta-4-main")
         self.requires("yaml-cpp/0.8.0")
         self.requires("libpqxx/7.10.1")
         self.requires("openssl/3.6.0")
-        self.requires("mongo-c-driver/1.30.3")
+        self.requires("mongo-cxx-driver/4.1.4")
 
 
     def config_options(self):

@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.15)
 find_package(Qt6 REQUIRED COMPONENTS Core HttpServer)
 find_package(sysmllib REQUIRED)
 find_package(OpenSSL REQUIRED)
+find_package(mongocxx REQUIRED)
 
 find_package(libpqxx)
 
@@ -45,13 +46,23 @@ add_executable(StructuraSystemsServer ${SOURCES})
 
 target_include_directories(StructuraSystemsServer PUBLIC
         "${CMAKE_CURRENT_BINARY_DIR}/")
-
-target_link_libraries(StructuraSystemsServer PUBLIC
-        Qt6::Core
-    	Qt6::HttpServer
-        sysmllib::sysmllib
-        libpqxx::pqxx
-        openssl::openssl)
+if(TARGET mongo::mongocxx_shared)
+    target_link_libraries(StructuraSystemsServer PUBLIC
+            Qt6::Core
+    	    Qt6::HttpServer
+            sysmllib::sysmllib
+            libpqxx::pqxx
+            openssl::openssl
+            mongo::mongocxx_shared)
+else()
+    target_link_libraries(StructuraSystemsServer PUBLIC
+            Qt6::Core
+            Qt6::HttpServer
+            sysmllib::sysmllib
+            libpqxx::pqxx
+            openssl::openssl
+            mongo::mongocxx_static)
+endif()
 
 if (!UNIX)
 set_target_properties(StructuraSystemsServer PROPERTIES
