@@ -46,8 +46,6 @@ class CppStructuraSystemsRecipe(ConanFile):
 
     def configure(self):
         if self.options.shared:
-            # If os=Windows, fPIC will have been removed in config_options()
-            # use rm_safe to avoid double delete errors
             self.options.rm_safe("fPIC")
             self.options["boost/*"].shared = True
             self.options["gtest/*"].shared = True
@@ -58,6 +56,7 @@ class CppStructuraSystemsRecipe(ConanFile):
             self.options["libpqxx/*"].shared=True
             self.options["openssl/*"].shared=True
             self.options["mongo-cxx-driver/*"].shared=True
+            self.options["qt/*"].shared = True
         else:
             self.options["boost/*"].shared = False
             self.options["gtest/*"].shared = False
@@ -68,9 +67,9 @@ class CppStructuraSystemsRecipe(ConanFile):
             self.options["libpqxx/*"].shared=False
             self.options["openssl/*"].shared=False
             self.options["mongo-cxx-driver/*"].shared=False
+            self.options["qt/*"].shared = False
 
         if platform != "darwin":
-            self.options["qt/*"].shared = True
             self.options["qt/*"].qtcharts = True
             self.options["qt/*"].qthttpserver = True
 
@@ -91,11 +90,11 @@ class CppStructuraSystemsRecipe(ConanFile):
         cmake.build()
 
     def build_requirements(self):
-        self.tool_requires("cmake/3.30.0")
-        self.tool_requires("icu/74.2")
+        self.tool_requires("cmake/[>=3.30.0 <5]")
+        self.tool_requires("icu/[>=74.2 <80]")
         if platform != "darwin":
             self.tool_requires("qt/6.8.3")
-        self.test_requires("gtest/1.14.0")
+        self.test_requires("gtest/[>=1.14.0 <2]")
 
     def test(self):
         cmd = os.path.join(self.cpp.build.bindir, "CppDigitalTwin/CpsBaseLib/tests/CpsBaseLibTests")
