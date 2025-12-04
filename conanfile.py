@@ -8,7 +8,6 @@ from sys import platform
 
 class CppStructuraSystemsRecipe(ConanFile):
     name = "StructuraSystems"
-    version = "2501"
     package_type = "application"
 
     # Optional metadata
