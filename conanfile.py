@@ -35,7 +35,6 @@ class CppStructuraSystemsRecipe(ConanFile):
         self.requires("md4c/0.4.8")
         self.requires("sysmllib/1.0-beta-4-main")
         self.requires("yaml-cpp/0.8.0")
-        self.requires("libpqxx/7.10.1")
         self.requires("openssl/3.6.0")
         self.requires("mongo-cxx-driver/4.1.4")
 
