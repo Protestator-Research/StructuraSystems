@@ -4,8 +4,6 @@ find_package(sysmllib REQUIRED)
 find_package(OpenSSL REQUIRED)
 find_package(mongocxx REQUIRED)
 
-find_package(libpqxx)
-
 qt_standard_project_setup()
 
 set(CMAKE_AUTOMOC ON)
@@ -51,7 +49,6 @@ if(TARGET mongo::mongocxx_shared)
             Qt6::Core
     	    Qt6::HttpServer
             sysmllib::sysmllib
-            libpqxx::pqxx
             openssl::openssl
             mongo::mongocxx_shared)
 else()
@@ -59,7 +56,6 @@ else()
             Qt6::Core
             Qt6::HttpServer
             sysmllib::sysmllib
-            libpqxx::pqxx
             openssl::openssl
             mongo::mongocxx_static)
 endif()
