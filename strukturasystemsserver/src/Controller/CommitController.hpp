@@ -117,7 +117,7 @@ namespace StructuraSystems::Server
 			const auto commit = ProjectVerService->getCommitById(project, _commitId);
 			std::vector<std::shared_ptr<SysMLv2::REST::DataVersion>> change;
 			if (request.query().hasQueryItem("change_type")&&(!request.query().queryItemValue("change_type").isEmpty())) {
-				std::vector<SysMLv2::REST::ChangeType> changeTypes;
+				std::vector<int> changeTypes;
 				if (request.query().queryItemValue("change_type").contains("CREATED"))
 					changeTypes.push_back(SysMLv2::REST::CREATED);
 				if (request.query().queryItemValue("change_type").contains("UPDATED"))

@@ -42,7 +42,7 @@ namespace StructuraSystems::Server
 
 		std::vector<std::shared_ptr<SysMLv2::REST::DataVersion>> getCommitChange(
 			std::shared_ptr<SysMLv2::REST::Project> project, std::shared_ptr<SysMLv2::REST::Commit> commit,
-			std::vector<SysMLv2::REST::ChangeType>) override;
+			std::vector<int>) override;
 
 		std::shared_ptr<SysMLv2::REST::DataVersion> getCommitChangeById(std::shared_ptr<SysMLv2::REST::Project> project,
 			std::shared_ptr<SysMLv2::REST::Commit> commit, boost::uuids::uuid &changeId) override;
@@ -83,7 +83,7 @@ namespace StructuraSystems::Server
 
 		std::vector<std::shared_ptr<SysMLv2::REST::DataDifference>> diffCommits(
 			std::shared_ptr<SysMLv2::REST::Commit> baseCommit, std::shared_ptr<SysMLv2::REST::Commit> compareCommit,
-			std::vector<SysMLv2::REST::ChangeType> changeType) override;
+			std::vector<int> changeType) override;
 
 	private:
 		ProjectVersioningService() = default;

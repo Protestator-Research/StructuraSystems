@@ -41,6 +41,7 @@ class CppStructuraSystemsRecipe(ConanFile):
     def config_options(self):
         if self.settings.os == "Windows":
             del self.options.fPIC
+            self.options.shared=True
 
     def configure(self):
         if self.options.shared:
@@ -89,9 +90,6 @@ class CppStructuraSystemsRecipe(ConanFile):
 
     def build_requirements(self):
         self.tool_requires("cmake/[>=3.30.0 <5]")
-        self.tool_requires("icu/[>=74.2 <80]")
-        if platform != "darwin":
-            self.tool_requires("qt/6.8.3")
         self.test_requires("gtest/[>=1.14.0 <2]")
 
     def test(self):

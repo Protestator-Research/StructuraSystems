@@ -115,7 +115,7 @@ namespace StructuraSystems::Server
 
 	std::vector<std::shared_ptr<SysMLv2::REST::DataVersion>> ProjectVersioningService::getCommitChange(
 		std::shared_ptr<SysMLv2::REST::Project> , std::shared_ptr<SysMLv2::REST::Commit> ,
-		std::vector<SysMLv2::REST::ChangeType> )
+		std::vector<int> )
 	{
 		std::vector<std::shared_ptr<SysMLv2::REST::DataVersion>> returnValue;
 
@@ -245,7 +245,7 @@ namespace StructuraSystems::Server
 
 	std::vector<std::shared_ptr<SysMLv2::REST::DataDifference>> ProjectVersioningService::diffCommits(
 		std::shared_ptr<SysMLv2::REST::Commit>, std::shared_ptr<SysMLv2::REST::Commit>,
-		std::vector<SysMLv2::REST::ChangeType>)
+		std::vector<int>)
 	{
 		return std::vector<std::shared_ptr<SysMLv2::REST::DataDifference>>();
 	}
