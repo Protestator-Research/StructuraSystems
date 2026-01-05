@@ -36,7 +36,8 @@ set(SOURCES
         src/Services/ProjectVersioningService.h
         src/Services/ProjectVersioningService.cpp
         src/Services/AuthenticationService.h
-        src/Services/AuthenticationService.cpp)
+        src/Services/AuthenticationService.cpp
+        ../resources/sysml.qrc)
 
 add_executable(StructuraSystemsServer ${SOURCES})
 

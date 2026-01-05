@@ -1,0 +1,98 @@
+<RCC>
+    <qresource prefix="/sysml">
+        <file>sysml/Domain Libraries/Analysis/AnalysisTooling.sysml</file>
+        <file>sysml/Domain Libraries/Analysis/SampledFunctions.sysml</file>
+        <file>sysml/Domain Libraries/Analysis/StateSpaceRepresentation.sysml</file>
+        <file>sysml/Domain Libraries/Analysis/TradeStudies.sysml</file>
+        <file>sysml/Domain Libraries/Cause and Effect/CausationConnections.sysml</file>
+        <file>sysml/Domain Libraries/Cause and Effect/CauseAndEffect.sysml</file>
+        <file>sysml/Domain Libraries/Geometry/ShapeItems.sysml</file>
+        <file>sysml/Domain Libraries/Geometry/SpatialItems.sysml</file>
+        <file>sysml/Domain Libraries/Metadata/ImageMetadata.sysml</file>
+        <file>sysml/Domain Libraries/Metadata/ModelingMetadata.sysml</file>
+        <file>sysml/Domain Libraries/Metadata/ParametersOfInterestMetadata.sysml</file>
+        <file>sysml/Domain Libraries/Metadata/RiskMetadata.sysml</file>
+        <file>sysml/Domain Libraries/Quantities and Units/ISQ.sysml</file>
+        <file>sysml/Domain Libraries/Quantities and Units/ISQAcoustics.sysml</file>
+        <file>sysml/Domain Libraries/Quantities and Units/ISQAtomicNuclear.sysml</file>
+        <file>sysml/Domain Libraries/Quantities and Units/ISQBase.sysml</file>
+        <file>sysml/Domain Libraries/Quantities and Units/ISQCharacteristicNumbers.sysml</file>
+        <file>sysml/Domain Libraries/Quantities and Units/ISQChemistryMolecular.sysml</file>
+        <file>sysml/Domain Libraries/Quantities and Units/ISQCondensedMatter.sysml</file>
+        <file>sysml/Domain Libraries/Quantities and Units/ISQElectromagnetism.sysml</file>
+        <file>sysml/Domain Libraries/Quantities and Units/ISQInformation.sysml</file>
+        <file>sysml/Domain Libraries/Quantities and Units/ISQLight.sysml</file>
+        <file>sysml/Domain Libraries/Quantities and Units/ISQMechanics.sysml</file>
+        <file>sysml/Domain Libraries/Quantities and Units/ISQSpaceTime.sysml</file>
+        <file>sysml/Domain Libraries/Quantities and Units/ISQThermodynamics.sysml</file>
+        <file>sysml/Domain Libraries/Quantities and Units/MeasurementRefCalculations.sysml</file>
+        <file>sysml/Domain Libraries/Quantities and Units/MeasurementReferences.sysml</file>
+        <file>sysml/Domain Libraries/Quantities and Units/Quantities.sysml</file>
+        <file>sysml/Domain Libraries/Quantities and Units/QuantityCalculations.sysml</file>
+        <file>sysml/Domain Libraries/Quantities and Units/SI.sysml</file>
+        <file>sysml/Domain Libraries/Quantities and Units/SIPrefixes.sysml</file>
+        <file>sysml/Domain Libraries/Quantities and Units/TensorCalculations.sysml</file>
+        <file>sysml/Domain Libraries/Quantities and Units/Time.sysml</file>
+        <file>sysml/Domain Libraries/Quantities and Units/USCustomaryUnits.sysml</file>
+        <file>sysml/Domain Libraries/Quantities and Units/VectorCalculations.sysml</file>
+        <file>sysml/Domain Libraries/Requirement Derivation/DerivationConnections.sysml</file>
+        <file>sysml/Domain Libraries/Requirement Derivation/RequirementDerivation.sysml</file>
+        <file>sysml/Kernel Libraries/Kernel Data Type Library/Collections.kerml</file>
+        <file>sysml/Kernel Libraries/Kernel Data Type Library/ScalarValues.kerml</file>
+        <file>sysml/Kernel Libraries/Kernel Data Type Library/VectorValues.kerml</file>
+        <file>sysml/Kernel Libraries/Kernel Function Library/BaseFunctions.kerml</file>
+        <file>sysml/Kernel Libraries/Kernel Function Library/BooleanFunctions.kerml</file>
+        <file>sysml/Kernel Libraries/Kernel Function Library/CollectionFunctions.kerml</file>
+        <file>sysml/Kernel Libraries/Kernel Function Library/ComplexFunctions.kerml</file>
+        <file>sysml/Kernel Libraries/Kernel Function Library/ControlFunctions.kerml</file>
+        <file>sysml/Kernel Libraries/Kernel Function Library/DataFunctions.kerml</file>
+        <file>sysml/Kernel Libraries/Kernel Function Library/IntegerFunctions.kerml</file>
+        <file>sysml/Kernel Libraries/Kernel Function Library/NaturalFunctions.kerml</file>
+        <file>sysml/Kernel Libraries/Kernel Function Library/NumericalFunctions.kerml</file>
+        <file>sysml/Kernel Libraries/Kernel Function Library/OccurrenceFunctions.kerml</file>
+        <file>sysml/Kernel Libraries/Kernel Function Library/RationalFunctions.kerml</file>
+        <file>sysml/Kernel Libraries/Kernel Function Library/RealFunctions.kerml</file>
+        <file>sysml/Kernel Libraries/Kernel Function Library/ScalarFunctions.kerml</file>
+        <file>sysml/Kernel Libraries/Kernel Function Library/SequenceFunctions.kerml</file>
+        <file>sysml/Kernel Libraries/Kernel Function Library/StringFunctions.kerml</file>
+        <file>sysml/Kernel Libraries/Kernel Function Library/TrigFunctions.kerml</file>
+        <file>sysml/Kernel Libraries/Kernel Function Library/VectorFunctions.kerml</file>
+        <file>sysml/Kernel Libraries/Kernel Semantic Library/Base.kerml</file>
+        <file>sysml/Kernel Libraries/Kernel Semantic Library/Clocks.kerml</file>
+        <file>sysml/Kernel Libraries/Kernel Semantic Library/ControlPerformances.kerml</file>
+        <file>sysml/Kernel Libraries/Kernel Semantic Library/FeatureReferencingPerformances.kerml</file>
+        <file>sysml/Kernel Libraries/Kernel Semantic Library/KerML.kerml</file>
+        <file>sysml/Kernel Libraries/Kernel Semantic Library/Links.kerml</file>
+        <file>sysml/Kernel Libraries/Kernel Semantic Library/Metaobjects.kerml</file>
+        <file>sysml/Kernel Libraries/Kernel Semantic Library/Objects.kerml</file>
+        <file>sysml/Kernel Libraries/Kernel Semantic Library/Observation.kerml</file>
+        <file>sysml/Kernel Libraries/Kernel Semantic Library/Occurrences.kerml</file>
+        <file>sysml/Kernel Libraries/Kernel Semantic Library/Performances.kerml</file>
+        <file>sysml/Kernel Libraries/Kernel Semantic Library/SpatialFrames.kerml</file>
+        <file>sysml/Kernel Libraries/Kernel Semantic Library/StatePerformances.kerml</file>
+        <file>sysml/Kernel Libraries/Kernel Semantic Library/Transfers.kerml</file>
+        <file>sysml/Kernel Libraries/Kernel Semantic Library/TransitionPerformances.kerml</file>
+        <file>sysml/Kernel Libraries/Kernel Semantic Library/Triggers.kerml</file>
+        <file>sysml/Systems Library/Actions.sysml</file>
+        <file>sysml/Systems Library/Allocations.sysml</file>
+        <file>sysml/Systems Library/AnalysisCases.sysml</file>
+        <file>sysml/Systems Library/Attributes.sysml</file>
+        <file>sysml/Systems Library/Calculations.sysml</file>
+        <file>sysml/Systems Library/Cases.sysml</file>
+        <file>sysml/Systems Library/Connections.sysml</file>
+        <file>sysml/Systems Library/Constraints.sysml</file>
+        <file>sysml/Systems Library/Flows.sysml</file>
+        <file>sysml/Systems Library/Interfaces.sysml</file>
+        <file>sysml/Systems Library/Items.sysml</file>
+        <file>sysml/Systems Library/Metadata.sysml</file>
+        <file>sysml/Systems Library/Parts.sysml</file>
+        <file>sysml/Systems Library/Ports.sysml</file>
+        <file>sysml/Systems Library/Requirements.sysml</file>
+        <file>sysml/Systems Library/StandardViewDefinitions.sysml</file>
+        <file>sysml/Systems Library/States.sysml</file>
+        <file>sysml/Systems Library/SysML.sysml</file>
+        <file>sysml/Systems Library/UseCases.sysml</file>
+        <file>sysml/Systems Library/VerificationCases.sysml</file>
+        <file>sysml/Systems Library/Views.sysml</file>
+    </qresource>
+</RCC>

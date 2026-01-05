@@ -11,6 +11,7 @@
 #include "Controller/AuthenticationController.hpp"
 #include "Controller/ProjectController.hpp"
 #include "Controller/CommitController.hpp"
+#include "Controller/DataBaseController.h"
 #include "Controller/ElementsController.hpp"
 #define SCHEME "http"
 #define HOST "127.0.0.1"
@@ -24,12 +25,12 @@ int main(int argc, char *argv[]) {
     QCoreApplication::setOrganizationName("Working Group Cyber Physical Systems");
     QCoreApplication::setOrganizationDomain("https://cps.cs.rptu.de/");
 
-
-
     QCommandLineParser parser;
     parser.addOptions({ {"port", QCoreApplication::translate("main", "The port the server listens on."), "port"} });
     parser.addHelpOption();
     parser.process(app);
+
+    [[maybe_unused]] auto dbController = StructuraSystems::Server::DataBaseController::createInstance("localhost:27017", "root", "password");
 
     quint16 portArg = PORT;
     if (!parser.value("port").isEmpty())

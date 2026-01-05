@@ -3,6 +3,7 @@
 #include <string>
 #include <memory>
 #include <vector>
+#include <mongocxx/instance.hpp>
 #include <mongocxx/uri.hpp>
 #include <mongocxx/client.hpp>
 #include <mongocxx/database.hpp>
@@ -35,7 +36,7 @@ namespace StructuraSystems::Server
  
 		static DataBaseController* Instance;
 
-
+		mongocxx::instance inst;
 		mongocxx::uri uri;
 		mongocxx::client client;
 		mongocxx::database database;
@@ -43,6 +44,7 @@ namespace StructuraSystems::Server
 		void initializeDatabaseIfNotAvailable();
 
 		void deleteDatabaseIfDebug();
+		bool replace(std::string& str, const std::string& from, const std::string& to);
 	};
 }
 

@@ -8,6 +8,8 @@
 #include <sysmlv2/rest/entities/BranchRequest.h>
 #include <sysmlv2/rest/entities/Tag.h>
 
+#include <string>
+
 #include "BaseController.hpp"
 #include "../Services/ProjectVersioningService.h"
 #include "../Services/ServerProjectService.h"

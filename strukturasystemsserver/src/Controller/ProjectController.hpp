@@ -4,6 +4,7 @@
 #include <boost/uuid/string_generator.hpp>
 #include <QJsonObject>
 #include <QJsonDocument>
+#include <QDebug>
 
 #include "BaseController.hpp"
 #include "../Services/ServerProjectService.h"

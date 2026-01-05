@@ -69,6 +69,7 @@ set(SOURCES
         src/Widgets/Dialogs/EditProjectDialog.h
         src/Widgets/Dialogs/EditProjectDialog.cpp
         resources/Resources.qrc
+        ../resources/sysml.qrc
         src/Models/SettingsModel.cpp
         src/Models/SettingsModel.h
         src/Widgets/Dialogs/SettingsDialog.cpp

@@ -6,8 +6,11 @@
 
 #include <vector>
 #include <memory>
+#include <qlogging.h>
+#include <QString>
 #include <stdexcept>
 #include <boost/uuid/uuid_io.hpp>
+#include <sysmlv2/rest/entities/Branch.h>
 #include <sysmlv2/rest/entities/JSONEntities.h>
 #include <sysmlv2/rest/entities/Project.h>
 
@@ -31,10 +34,13 @@ namespace StructuraSystems::Server
 		 std::vector<std::shared_ptr<SysMLv2::REST::Project>> returnValue;
 		 for (auto && doc: cursor)
 		 {
-		 	const auto project = std::make_shared<SysMLv2::REST::Project>(bsoncxx::to_json(doc));
+		 	std::string dbString = bsoncxx::to_json(doc);
+		 	replace(dbString, "_id", "@id");
+		 	std::cout << dbString << std::endl;
+		 	const auto project = std::make_shared<SysMLv2::REST::Project>(dbString);
 		 	returnValue.push_back(project);
 		 }
-		 std::cout << returnValue.size() << " Projekts loaded from Database." << std::endl;
+		 std::cout << returnValue.size() << " Projects loaded from Database." << std::endl;
 		 return returnValue;
 	}
 
@@ -43,27 +49,28 @@ namespace StructuraSystems::Server
 		std::vector<bsoncxx::document::value> dbProjects;
 		for (const auto& project : projects)
 		{
-		 	//dbProjects.push_back(bsoncxx::builder::basic::make_document(bsoncxx::from_json(project->serializeToJson())));
+		 	dbProjects.push_back(bsoncxx::builder::basic::make_document(bsoncxx::builder::basic::kvp("_id",boost::uuids::to_string(project->getId())),bsoncxx::builder::basic::kvp("name",project->getName()),bsoncxx::builder::basic::kvp("description",project->getDescription()),bsoncxx::builder::basic::kvp("defaultBranch", "{\"@id\":" + boost::uuids::to_string(project->getDefaultBranch()->getId()) + "}")));
 		 }
 		database["projects"].insert_many(dbProjects);
 	}
 
 	void DataBaseController::addProject(std::shared_ptr<SysMLv2::REST::Project> project)
 	{
-		database["projects"].insert_one(bsoncxx::builder::basic::make_document(bsoncxx::from_json(project->serializeToJson())));
+		database["projects"].insert_one(bsoncxx::builder::basic::make_document(bsoncxx::builder::basic::kvp("_id", boost::uuids::to_string(project->getId())), bsoncxx::builder::basic::kvp("name", project->getName()), bsoncxx::builder::basic::kvp("description", project->getDescription()), bsoncxx::builder::basic::kvp("defaultBranch", "{\"@id\":" + boost::uuids::to_string(project->getDefaultBranch()->getId()) + "}")));
 	}
 
 	void DataBaseController::updateProject(std::shared_ptr<SysMLv2::REST::Project> project)
 	{
-		 auto query_filter = bsoncxx::builder::basic::make_document(bsoncxx::builder::basic::kvp(SysMLv2::REST::JSON_ID_ENTITY, boost::uuids::to_string(project->getId())));
-		 auto update_project = bsoncxx::builder::basic::make_document(bsoncxx::builder::basic::kvp("$set",bsoncxx::builder::basic::make_document(bsoncxx::from_json(project->serializeToJson()))));
+		 auto query_filter = bsoncxx::builder::basic::make_document(bsoncxx::builder::basic::kvp("_id", boost::uuids::to_string(project->getId())));
+		 auto update_project = bsoncxx::builder::basic::make_document(bsoncxx::builder::basic::kvp("$set",
+			 bsoncxx::builder::basic::make_document(bsoncxx::builder::basic::kvp("_id", boost::uuids::to_string(project->getId())), bsoncxx::builder::basic::kvp("name", project->getName()), bsoncxx::builder::basic::kvp("description", project->getDescription()), bsoncxx::builder::basic::kvp("defaultBranch", "{\"@id\":" + boost::uuids::to_string(project->getDefaultBranch()->getId()) + "}"))));
 		
 		 auto result = database["projects"].update_one(query_filter.view(), update_project.view());
 	}
 
 	bool DataBaseController::deleteProject(std::shared_ptr<SysMLv2::REST::Project> project)
 	{
-		 auto result = database["projects"].delete_one(bsoncxx::builder::basic::make_document(bsoncxx::from_json(project->serializeToJson())));
+		 auto result = database["projects"].delete_one(bsoncxx::builder::basic::make_document(bsoncxx::builder::basic::kvp("_id", boost::uuids::to_string(project->getId())), bsoncxx::builder::basic::kvp("name", project->getName()), bsoncxx::builder::basic::kvp("description", project->getDescription()), bsoncxx::builder::basic::kvp("defaultBranch", "{\"@id\":" + boost::uuids::to_string(project->getDefaultBranch()->getId()) + "}")));
 		 return (result.has_value() && (result.value().deleted_count() > 0));
 	}
 
@@ -84,7 +91,7 @@ namespace StructuraSystems::Server
 		if (username.empty())
 			uri_string += "mongodb://" + dBAddress;
 		else
-			uri_string += "mongodb + srv://" + username + ":" + password + "@" + dBAddress;
+			uri_string += "mongodb://" + username + ":" + password + "@" + dBAddress;
 
 
 		uri = mongocxx::uri(uri_string);
@@ -102,8 +109,13 @@ namespace StructuraSystems::Server
 
 	void DataBaseController::initializeDatabaseIfNotAvailable()
 	{
-		if (database.list_collection_names().size()>0)
-		 	return;
+		try
+		{
+			if (database.list_collection_names().size() > 0)
+				return;
+		}
+		catch (...)
+		{ }
 
 		database.create_collection("projects");
 		database.create_collection("data_elements");
@@ -116,12 +128,24 @@ namespace StructuraSystems::Server
 		std::make_shared<SysMLv2::REST::Project>("SysMLv2 Introduction", "Preloaded Project", "Main"),
 		std::make_shared<SysMLv2::REST::Project>("SI", "Preloaded Project", "Main")
 		};
-		//
+		
 		addMultibleProjects(projects);
 	}
 
 	void DataBaseController::deleteDatabaseIfDebug()
 	{
-		// database.drop();
+		database.drop();
+	}
+
+	bool DataBaseController::replace(std::string& str, const std::string& from, const std::string& to)
+	{
+		size_t start_pos = str.find(from);
+
+		if (start_pos == std::string::npos)
+			return false;
+
+		str.replace(start_pos, from.length(), to);
+
+		return true;
 	}
 }

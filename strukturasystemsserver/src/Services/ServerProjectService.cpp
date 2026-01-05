@@ -1,6 +1,7 @@
 #include "ServerProjectService.h"
 
 #include "../Controller/DataBaseController.h"
+#include <sysmlv2/rest/entities/Project.h>
 
 namespace StructuraSystems::Server
 {
@@ -17,6 +18,11 @@ namespace StructuraSystems::Server
 
 	ServerProjectService::ServerProjectService() : ProjectService()
 	{
-		//DBController = DataBaseController::getInstance();
+		DBController = DataBaseController::getInstance();
+		const auto projects = DBController->getAllProjects();
+		for (const auto project : projects)
+		{
+			ProjectMap.insert(std::make_pair(project->getId(), project));
+		}
 	}
 }

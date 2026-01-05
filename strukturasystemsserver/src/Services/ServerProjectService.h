@@ -1,10 +1,11 @@
 #pragma once
 
 #include <sysmlv2/service/implementation/ProjectService.h>
+#include <vector>
 
 namespace StructuraSystems::Server
 {
-	//class DataBaseController;
+	class DataBaseController;
 
 	class ServerProjectService : public SysMLv2::API::ProjectService
 	{
@@ -16,7 +17,7 @@ namespace StructuraSystems::Server
 		ServerProjectService();
 		static std::shared_ptr<ServerProjectService> Instance;
 
-		//DataBaseController* DBController;
+		DataBaseController* DBController;
 
 	};
 }
