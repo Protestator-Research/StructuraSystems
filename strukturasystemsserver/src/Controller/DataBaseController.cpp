@@ -134,7 +134,15 @@ namespace StructuraSystems::Server
 
 	void DataBaseController::deleteDatabaseIfDebug()
 	{
-		database.drop();
+		try
+		{
+			database.drop();
+		}
+		catch (...)
+		{
+			std::cout << "Could not delete DB, since no DB avaiable" << std::endl;
+		}
+		
 	}
 
 	bool DataBaseController::replace(std::string& str, const std::string& from, const std::string& to)

@@ -53,6 +53,7 @@ namespace StructuraSystems::Server
 			}
 			returnValue += "]";
 			QHttpServerResponse response(QString::fromStdString(returnValue));
+			qDebug() << QString::fromStdString(returnValue);
 			return response;
 		}
 

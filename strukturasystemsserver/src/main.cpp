@@ -26,11 +26,26 @@ int main(int argc, char *argv[]) {
     QCoreApplication::setOrganizationDomain("https://cps.cs.rptu.de/");
 
     QCommandLineParser parser;
-    parser.addOptions({ {"port", QCoreApplication::translate("main", "The port the server listens on."), "port"} });
-    parser.addHelpOption();
+    parser.addOption( {"port", QCoreApplication::translate("main", "The port the server listens on."), "port"} );
+    parser.addOption({ "dbAddress", QCoreApplication::translate("main","The mongodb instance the server connects to."),"dbAddress" });
+	parser.addOption({ "dbUsername", QCoreApplication::translate("main","The mongodb username the server connects with."),"dbUsername" });
+    parser.addOption({ "dbPassword", QCoreApplication::translate("main","The mongodb password the server connects with."),"dbPassword" });
+	parser.addHelpOption();
     parser.process(app);
 
-    [[maybe_unused]] auto dbController = StructuraSystems::Server::DataBaseController::createInstance("localhost:27017", "root", "password");
+    std::string dbAddressArg = "localhost:27017";
+    if (!parser.value("dbAddress").isEmpty())
+        dbAddressArg = parser.value("dbAddress").toUShort();
+
+    std::string dbUsernameArg = "";
+    if (!parser.value("dbUsername").isEmpty())
+        dbUsernameArg = parser.value("dbUsername").toUShort();
+
+    std::string dbPasswordArg = "";
+    if (!parser.value("dbPassword").isEmpty())
+        dbPasswordArg = parser.value("dbPassword").toUShort();
+
+    [[maybe_unused]] auto dbController = StructuraSystems::Server::DataBaseController::createInstance(dbAddressArg, dbUsernameArg, dbPasswordArg);
 
     quint16 portArg = PORT;
     if (!parser.value("port").isEmpty())

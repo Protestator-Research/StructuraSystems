@@ -15,6 +15,7 @@
 
 #include "CodeWidgetModel.h"
 
+#include <qlayout.h>
 #include <sysmlv2/rest/entities/Commit.h>
 #include <sysmlv2/rest/entities/DataVersion.h>
 
@@ -52,9 +53,7 @@ namespace StructuraSystems::Client {
     void CodeWidgetModel::updateItemView(std::shared_ptr<SysMLv2::REST::Project> &project,
                                          std::shared_ptr<SysMLv2::REST::Commit> &commit) {
 
-        const auto codeDisplayWidget = CodeWidget->getListWidget();
-
-        codeDisplayWidget->clear();
+        const auto scrollAreaWidget = CodeWidget->getScrollAreaWidget();
 
         if (Elements.empty() && (Commit != nullptr))
             Elements = ElementService->getElements(project, commit);
@@ -64,29 +63,15 @@ namespace StructuraSystems::Client {
             std::transform(type.begin(), type.end(), type.begin(), ::tolower);
             if (type == SysMLv2::REST::TEXTUAL_REPRESENTATION_TYPE) {
                 const auto textualRepresentation = std::dynamic_pointer_cast<KerML::Entities::TextualRepresentation>(element);
-                if ((DialogView)&&((textualRepresentation->language() == "Markdown")||(textualRepresentation->language() == "YaML")))
-                        continue;
 
-                auto markdownElement = new MarkdownElement(textualRepresentation, codeDisplayWidget);
-                auto listItemWidget = new QListWidgetItem(codeDisplayWidget);
+                auto markdownElement = new MarkdownElement(textualRepresentation, scrollAreaWidget);
+                scrollAreaWidget->layout()->addWidget(markdownElement);
+                markdownElement->repaint();
+
                 connect(markdownElement, SIGNAL(elementEdited()), this, SLOT(elementEdited()));
-                listItemWidget->setSizeHint(markdownElement->sizeHint());
-                codeDisplayWidget->setItemWidget(listItemWidget, markdownElement);
-
-                if (DialogView) {
-                    listItemWidget->setFlags(listItemWidget->flags() | Qt::ItemIsUserCheckable);
-                    listItemWidget->setCheckState(Qt::Unchecked);
-                }
             }
         }
-
-        if (!DialogView) {
-            auto addElementWidget = new AddElementWidget(codeDisplayWidget);
-            auto listItemWidget = new QListWidgetItem(codeDisplayWidget);
-            listItemWidget->setSizeHint(addElementWidget->sizeHint());
-            codeDisplayWidget->setItemWidget(listItemWidget, addElementWidget);
-        }
-
+        scrollAreaWidget->repaint();
     }
 
     CodeWidgetModel::~CodeWidgetModel() {
@@ -131,15 +116,15 @@ namespace StructuraSystems::Client {
     }
 
     std::vector<std::shared_ptr<KerML::Entities::Element>> CodeWidgetModel::getSelectedElements() const {
-        const auto codeDisplayWidget = CodeWidget->getListWidget();
+        //const auto codeDisplayWidget = CodeWidget->getListWidget();
 
-        const auto selectedItems = codeDisplayWidget->selectedItems();
+        //const auto selectedItems = codeDisplayWidget->selectedItems();
 
         std::vector<std::shared_ptr<KerML::Entities::Element>> result;
-        for (const auto& index : selectedItems) {
-            const auto& markdownWidget = dynamic_cast<MarkdownElement*>(index);
-            result.push_back(markdownWidget->getElement());
-        }
+        //for (const auto& index : selectedItems) {
+        //    const auto& markdownWidget = dynamic_cast<MarkdownElement*>(index);
+        //    result.push_back(markdownWidget->getElement());
+        //}
 
 
         return result;
