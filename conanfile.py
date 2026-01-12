@@ -36,6 +36,7 @@ class CppStructuraSystemsRecipe(ConanFile):
         self.requires("yaml-cpp/0.8.0")
         self.requires("openssl/3.6.0")
         self.requires("mongo-cxx-driver/4.1.4")
+        self.requires("libsodium/1.0.20")
 
 
     def config_options(self):

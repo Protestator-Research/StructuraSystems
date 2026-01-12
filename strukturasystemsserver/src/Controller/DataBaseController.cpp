@@ -3,16 +3,22 @@
 
 #include <bsoncxx/builder/basic/document.hpp>
 #include <bsoncxx/json.hpp>
+#include <nlohmann/json.hpp>
 
 #include <vector>
 #include <memory>
 #include <qlogging.h>
 #include <QString>
 #include <stdexcept>
+#include <boost/uuid/string_generator.hpp>
 #include <boost/uuid/uuid_io.hpp>
+#include <nlohmann/json_fwd.hpp>
+#include <nlohmann/detail/meta/std_fs.hpp>
 #include <sysmlv2/rest/entities/Branch.h>
 #include <sysmlv2/rest/entities/JSONEntities.h>
 #include <sysmlv2/rest/entities/Project.h>
+#include <sysmlv2/rest/entities/Branch.h>
+#include <sysmlv2/rest/entities/Commit.h>
 
 namespace StructuraSystems::Server
 {
@@ -28,20 +34,20 @@ namespace StructuraSystems::Server
 
 	std::vector<std::shared_ptr<SysMLv2::REST::Project>> DataBaseController::getAllProjects()
 	{
-		 auto collection = database["projects"];
-		 auto cursor = collection.find({});
-		
-		 std::vector<std::shared_ptr<SysMLv2::REST::Project>> returnValue;
-		 for (auto && doc: cursor)
-		 {
-		 	std::string dbString = bsoncxx::to_json(doc);
-		 	replace(dbString, "_id", "@id");
-		 	std::cout << dbString << std::endl;
-		 	const auto project = std::make_shared<SysMLv2::REST::Project>(dbString);
-		 	returnValue.push_back(project);
-		 }
-		 std::cout << returnValue.size() << " Projects loaded from Database." << std::endl;
-		 return returnValue;
+		auto collection = database["projects"];
+		auto cursor = collection.find({});
+
+		std::vector<std::shared_ptr<SysMLv2::REST::Project>> returnValue;
+		for (auto&& doc : cursor)
+		{
+			std::string dbString = bsoncxx::to_json(doc);
+			replace(dbString, "_id", "@id");
+			std::cout << dbString << std::endl;
+			const auto project = std::make_shared<SysMLv2::REST::Project>(dbString);
+			returnValue.push_back(project);
+		}
+		std::cout << returnValue.size() << " Projects loaded from Database." << std::endl;
+		return returnValue;
 	}
 
 	void DataBaseController::addMultibleProjects(std::vector<std::shared_ptr<SysMLv2::REST::Project>> projects)
@@ -49,8 +55,8 @@ namespace StructuraSystems::Server
 		std::vector<bsoncxx::document::value> dbProjects;
 		for (const auto& project : projects)
 		{
-		 	dbProjects.push_back(bsoncxx::builder::basic::make_document(bsoncxx::builder::basic::kvp("_id",boost::uuids::to_string(project->getId())),bsoncxx::builder::basic::kvp("name",project->getName()),bsoncxx::builder::basic::kvp("description",project->getDescription()),bsoncxx::builder::basic::kvp("defaultBranch", "{\"@id\":" + boost::uuids::to_string(project->getDefaultBranch()->getId()) + "}")));
-		 }
+			dbProjects.push_back(bsoncxx::builder::basic::make_document(bsoncxx::builder::basic::kvp("_id", boost::uuids::to_string(project->getId())), bsoncxx::builder::basic::kvp("name", project->getName()), bsoncxx::builder::basic::kvp("description", project->getDescription()), bsoncxx::builder::basic::kvp("defaultBranch", "{\"@id\":" + boost::uuids::to_string(project->getDefaultBranch()->getId()) + "}")));
+		}
 		database["projects"].insert_many(dbProjects);
 	}
 
@@ -61,17 +67,96 @@ namespace StructuraSystems::Server
 
 	void DataBaseController::updateProject(std::shared_ptr<SysMLv2::REST::Project> project)
 	{
-		 auto query_filter = bsoncxx::builder::basic::make_document(bsoncxx::builder::basic::kvp("_id", boost::uuids::to_string(project->getId())));
-		 auto update_project = bsoncxx::builder::basic::make_document(bsoncxx::builder::basic::kvp("$set",
-			 bsoncxx::builder::basic::make_document(bsoncxx::builder::basic::kvp("_id", boost::uuids::to_string(project->getId())), bsoncxx::builder::basic::kvp("name", project->getName()), bsoncxx::builder::basic::kvp("description", project->getDescription()), bsoncxx::builder::basic::kvp("defaultBranch", "{\"@id\":" + boost::uuids::to_string(project->getDefaultBranch()->getId()) + "}"))));
-		
-		 auto result = database["projects"].update_one(query_filter.view(), update_project.view());
+		auto query_filter = bsoncxx::builder::basic::make_document(bsoncxx::builder::basic::kvp("_id", boost::uuids::to_string(project->getId())));
+		auto update_project = bsoncxx::builder::basic::make_document(bsoncxx::builder::basic::kvp("$set",
+			bsoncxx::builder::basic::make_document(bsoncxx::builder::basic::kvp("_id", boost::uuids::to_string(project->getId())), bsoncxx::builder::basic::kvp("name", project->getName()), bsoncxx::builder::basic::kvp("description", project->getDescription()), bsoncxx::builder::basic::kvp("defaultBranch", "{\"@id\":" + boost::uuids::to_string(project->getDefaultBranch()->getId()) + "}"))));
+
+		auto result = database["projects"].update_one(query_filter.view(), update_project.view());
 	}
 
 	bool DataBaseController::deleteProject(std::shared_ptr<SysMLv2::REST::Project> project)
 	{
-		 auto result = database["projects"].delete_one(bsoncxx::builder::basic::make_document(bsoncxx::builder::basic::kvp("_id", boost::uuids::to_string(project->getId())), bsoncxx::builder::basic::kvp("name", project->getName()), bsoncxx::builder::basic::kvp("description", project->getDescription()), bsoncxx::builder::basic::kvp("defaultBranch", "{\"@id\":" + boost::uuids::to_string(project->getDefaultBranch()->getId()) + "}")));
-		 return (result.has_value() && (result.value().deleted_count() > 0));
+		auto result = database["projects"].delete_one(bsoncxx::builder::basic::make_document(bsoncxx::builder::basic::kvp("_id", boost::uuids::to_string(project->getId())), bsoncxx::builder::basic::kvp("name", project->getName()), bsoncxx::builder::basic::kvp("description", project->getDescription()), bsoncxx::builder::basic::kvp("defaultBranch", "{\"@id\":" + boost::uuids::to_string(project->getDefaultBranch()->getId()) + "}")));
+		return (result.has_value() && (result.value().deleted_count() > 0));
+	}
+
+	void DataBaseController::addMultibleBranches(
+		std::map<boost::uuids::uuid, std::shared_ptr<SysMLv2::REST::Branch>> projectBranchMap)
+	{
+		std::vector<bsoncxx::document::value> dbBranches;
+		for (const auto element : projectBranchMap)
+		{
+			dbBranches.push_back(bsoncxx::builder::basic::make_document(
+				bsoncxx::builder::basic::kvp("_id", boost::uuids::to_string(element.second->getId())),
+				bsoncxx::builder::basic::kvp("name", element.second->getName()),
+				//bsoncxx::builder::basic::kvp("head", element.second->getHead()->serializeIdentification()),
+				//bsoncxx::builder::basic::kvp("created",element.second->created()),
+				//bsoncxx::builder::basic::kvp("deleted", element.second->deleted()),
+				bsoncxx::builder::basic::kvp("_project_id",boost::uuids::to_string(element.first))			
+			)); 
+		}
+		database["branches"].insert_many(dbBranches);
+	}
+
+	void DataBaseController::addBranch(boost::uuids::uuid projectId, std::shared_ptr<SysMLv2::REST::Branch> branch)
+	{
+		database["branches"].insert_one(bsoncxx::builder::basic::make_document(
+			bsoncxx::builder::basic::kvp("_id", boost::uuids::to_string(branch->getId())),
+			bsoncxx::builder::basic::kvp("name", branch->getName()),
+			//bsoncxx::builder::basic::kvp("head", branch->getHead()->serializeIdentification()),
+			//bsoncxx::builder::basic::kvp("created", branch->created()),
+			//bsoncxx::builder::basic::kvp("deleted", branch->deleted()),
+			bsoncxx::builder::basic::kvp("_project_id", boost::uuids::to_string(projectId))
+		));
+	}
+
+	std::map<boost::uuids::uuid, std::shared_ptr<SysMLv2::REST::Branch>> DataBaseController::getAllBranches()
+	{
+		std::map<boost::uuids::uuid, std::shared_ptr<SysMLv2::REST::Branch>> returnValue;
+
+		auto collection = database["branches"];
+		auto cursor = collection.find({});
+
+		for (auto&& doc : cursor)
+		{
+			std::string dbString = bsoncxx::to_json(doc);
+			replace(dbString, "_id", "@id");
+			std::cout << dbString << std::endl;
+			nlohmann::json json = nlohmann::json::parse(dbString);
+			auto projectID = boost::uuids::string_generator()(json["_project_id"].get<std::string>());
+			json.erase("_project_id");
+			const auto branch = std::make_shared<SysMLv2::REST::Branch>(json.dump());
+			returnValue.insert(std::make_pair(projectID,branch));
+		}
+		std::cout << returnValue.size() << " Branches loaded from Database." << std::endl;
+		return returnValue;
+	}
+
+	void DataBaseController::addUser(std::string username, std::string securityString)
+	{
+
+
+		database["users"].insert_one(bsoncxx::builder::basic::make_document(
+			bsoncxx::builder::basic::kvp("_id",username),
+			bsoncxx::builder::basic::kvp("securityString", securityString)
+		));
+	}
+
+	std::map<std::string, std::string> DataBaseController::getAllUser()
+	{
+		auto collection = database["users"];
+		auto cursor = collection.find({});
+		std::map<std::string, std::string> returnValue;
+		for (auto&& doc : cursor)
+		{
+			std::string dbString = bsoncxx::to_json(doc);
+			nlohmann::json json = nlohmann::json::parse(dbString);
+			returnValue.insert(std::make_pair(
+				json["_id"].get<std::string>(),
+				json["securityString"].get<std::string>()
+			));
+		}
+		return returnValue;
 	}
 
 
@@ -115,25 +200,37 @@ namespace StructuraSystems::Server
 				return;
 		}
 		catch (...)
-		{ }
+		{
+		}
 
 		database.create_collection("projects");
 		database.create_collection("data_elements");
 		database.create_collection("commits");
 		database.create_collection("tags");
 		database.create_collection("branches");
+		database.create_collection("users");
 
 		std::vector<std::shared_ptr<SysMLv2::REST::Project>> projects = {
 		std::make_shared<SysMLv2::REST::Project>("ISO26262", "Preloaded Project", "Main"),
 		std::make_shared<SysMLv2::REST::Project>("SysMLv2 Introduction", "Preloaded Project", "Main"),
 		std::make_shared<SysMLv2::REST::Project>("SI", "Preloaded Project", "Main")
 		};
-		
+
 		addMultibleProjects(projects);
+		std::map<boost::uuids::uuid, std::shared_ptr<SysMLv2::REST::Branch>> projectBranchMap;
+		for (const auto& project : projects)
+		{
+			projectBranchMap.insert(std::make_pair(project->getId(), project->getDefaultBranch()));
+		}
+		addMultibleBranches(projectBranchMap);
 	}
 
 	void DataBaseController::deleteDatabaseIfDebug()
 	{
+		std::cout << "\033[31m" << "----------------------------------------------------------------------" << std::endl;
+		std::cout << "       Deleting Database." << std::endl;
+		std::cout << "----------------------------------------------------------------------" << "\033[0m" << std::endl;
+
 		try
 		{
 			database.drop();
@@ -142,7 +239,6 @@ namespace StructuraSystems::Server
 		{
 			std::cout << "Could not delete DB, since no DB avaiable" << std::endl;
 		}
-		
 	}
 
 	bool DataBaseController::replace(std::string& str, const std::string& from, const std::string& to)

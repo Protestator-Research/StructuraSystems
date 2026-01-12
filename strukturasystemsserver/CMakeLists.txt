@@ -3,6 +3,7 @@ find_package(Qt6 REQUIRED COMPONENTS Core HttpServer)
 find_package(sysmllib REQUIRED)
 find_package(OpenSSL REQUIRED)
 find_package(mongocxx REQUIRED)
+find_package(libsodium REQUIRED)
 
 qt_standard_project_setup()
 
@@ -51,14 +52,16 @@ if(TARGET mongo::mongocxx_shared)
     	    Qt6::HttpServer
             sysmllib::sysmllib
             openssl::openssl
-            mongo::mongocxx_shared)
+            mongo::mongocxx_shared
+            libsodium::libsodium)
 else()
     target_link_libraries(StructuraSystemsServer PUBLIC
             Qt6::Core
             Qt6::HttpServer
             sysmllib::sysmllib
             openssl::openssl
-            mongo::mongocxx_static)
+            mongo::mongocxx_static
+            libsodium::libsodium)
 endif()
 
 if (!UNIX)

@@ -17,7 +17,7 @@ namespace StructuraSystems::Server
 		ProjectController() = delete;
 		ProjectController(QHttpServer* httpServer) : BaseController(httpServer)
 		{
-			generateRoutes();
+			ProjectController::generateRoutes();
 			_ProjectService = ServerProjectService::getInstance();
 		}
 

@@ -7,6 +7,8 @@
 
 namespace StructuraSystems::Server
 {
+	class DataBaseController;
+
 	class AuthenticationService
 	{
 	public:
@@ -22,12 +24,12 @@ namespace StructuraSystems::Server
 		static std::shared_ptr<AuthenticationService> Instance;
 
 		AuthenticationService();
-
-		std::string hashSHA256From(std::string value);
+		void readUserFromDatabase();
 
 		std::map<std::string, std::string> UsernameHashMap;
-		std::map<std::string, std::string> UsernameSaltMap;
 		std::map<std::string, boost::uuids::uuid> UsernameInstanceMap;
+
+		DataBaseController* DBController;
 	};
 
 }

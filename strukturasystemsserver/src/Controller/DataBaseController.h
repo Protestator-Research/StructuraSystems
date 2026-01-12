@@ -3,6 +3,9 @@
 #include <string>
 #include <memory>
 #include <vector>
+#include <map>
+#include <tuple>
+#include <boost/uuid/uuid.hpp>
 #include <mongocxx/instance.hpp>
 #include <mongocxx/uri.hpp>
 #include <mongocxx/client.hpp>
@@ -11,6 +14,7 @@
 namespace SysMLv2::REST
 {
 	class Project;
+	class Branch;
 }
 
 namespace StructuraSystems::Server
@@ -29,7 +33,12 @@ namespace StructuraSystems::Server
 		void updateProject(std::shared_ptr<SysMLv2::REST::Project> project);
 		bool deleteProject(std::shared_ptr<SysMLv2::REST::Project> project);
 
+		void addMultibleBranches(std::map<boost::uuids::uuid, std::shared_ptr<SysMLv2::REST::Branch>> projectBranchMap);
+		void addBranch(boost::uuids::uuid projectId, std::shared_ptr<SysMLv2::REST::Branch> branch);
+		std::map<boost::uuids::uuid, std::shared_ptr<SysMLv2::REST::Branch>> getAllBranches();
 
+		void addUser(std::string username, std::string securityString);
+		std::map<std::string, std::string> getAllUser();
 
 	private:
 		DataBaseController(std::string dBAddress, std::string username, std::string password);

@@ -48,6 +48,9 @@ namespace StructuraSystems::Server
 			HttpServer->route("/projects/<arg>/branches", QHttpServerRequest::Method::Post, [this](QString projectId, const QHttpServerRequest& request)->QHttpServerResponse { return postBranch(projectId, request); });
 			HttpServer->route("/projects/<arg>/branches/", QHttpServerRequest::Method::Post, [this](QString projectId, const QHttpServerRequest& request)->QHttpServerResponse { return postBranch(projectId, request); });
 
+			HttpServer->route("/projects/<arg>/branches", QHttpServerRequest::Method::Get, [this](QString projectId, const QHttpServerRequest& request)->QHttpServerResponse { return getBranches(projectId, request); });
+			HttpServer->route("/projects/<arg>/branches/", QHttpServerRequest::Method::Get, [this](QString projectId, const QHttpServerRequest& request)->QHttpServerResponse { return getBranches(projectId, request); });
+
 			HttpServer->route("/projects/<arg>/branches/<arg>", QHttpServerRequest::Method::Get, [this](QString projectId, QString branchId, const QHttpServerRequest& request)->QHttpServerResponse { return getBranchWithId(projectId, branchId, request); });
 			HttpServer->route("/projects/<arg>/branches/<arg>/", QHttpServerRequest::Method::Get, [this](QString projectId, QString branchId, const QHttpServerRequest& request)->QHttpServerResponse { return getBranchWithId(projectId, branchId, request); });
 
@@ -165,6 +168,23 @@ namespace StructuraSystems::Server
 			auto branchID = boost::uuids::string_generator()(branchId.toStdString());
 			const auto branch = ProjectVerService->deleteBranch(project,branchID);
 			return QHttpServerResponse(QString::fromStdString(branch->serializeToJson()));
+		}
+
+		QHttpServerResponse getBranches(const QString& projectId, const QHttpServerRequest&)
+		{
+			const auto& project = ProjectNavigationService->getProjectById(boost::uuids::string_generator()(projectId.toStdString()));
+			const auto branches = ProjectVerService->getBranches(project);
+
+			std::string returnValue = "[\r\n";
+			for (size_t i = 0; i < branches.size(); i++)
+			{
+				returnValue += branches[i]->serializeToJson();
+				if (i < (branches.size() - 1))
+					returnValue += ",\r\n";
+			}
+			returnValue += "]";
+
+			return QHttpServerResponse(QString::fromStdString(returnValue));
 		}
 
 		QHttpServerResponse getTags(const QString& projectId, const QHttpServerRequest&)

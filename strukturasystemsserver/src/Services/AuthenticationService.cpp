@@ -1,18 +1,36 @@
 #include "AuthenticationService.h"
 
+#include <tuple>
 #include <iomanip>
 #include <boost/uuid/nil_generator.hpp>
 #include <boost/uuid/random_generator.hpp>
 
-#include <openssl/sha.h>
+#include <sodium.h>
+
+#include "../Controller/DataBaseController.h"
 
 namespace StructuraSystems::Server {
 	std::shared_ptr<AuthenticationService> AuthenticationService::Instance = nullptr;
 
 	AuthenticationService::AuthenticationService() {
+		DBController = DataBaseController::getInstance();
+		readUserFromDatabase();
+
 #ifndef NO_DEBUG
-		addUser("admin", "admin");
+		if (UsernameHashMap.size()<=0)
+			addUser("admin", "admin");
 #endif 
+	}
+
+	void AuthenticationService::readUserFromDatabase()
+	{
+		const auto dbRead = DBController->getAllUser();
+		for (const auto& element : dbRead)
+		{
+			const auto [username, securityString] = element;
+
+			UsernameHashMap.insert(std::make_pair(username, securityString));
+		}
 	}
 
 	std::shared_ptr<AuthenticationService> AuthenticationService::getInstance()
@@ -26,8 +44,17 @@ namespace StructuraSystems::Server {
 	}
 
 	boost::uuids::uuid AuthenticationService::authenticateUserWith(std::string name, std::string password) {
-		auto hashedPassword = hashSHA256From(password);
-		if (UsernameHashMap[name] == hashedPassword)
+
+		if (!UsernameHashMap.contains(name))
+			throw new std::runtime_error("Username or password wrong.");
+
+		
+		auto check_value = crypto_pwhash_str_verify(
+			UsernameHashMap[name].c_str(),
+			password.c_str(),
+			password.size()
+		);
+		if (check_value==0)
 		{
 			if (UsernameInstanceMap[name]!=boost::uuids::nil_uuid())
 			{
@@ -44,23 +71,17 @@ namespace StructuraSystems::Server {
 
 	void AuthenticationService::addUser(std::string username, std::string password)
 	{
-		UsernameHashMap[username] = hashSHA256From(password);
-	}
-
-	std::string AuthenticationService::hashSHA256From(std::string value)
-	{
-		// unsigned char hash[SHA256_DIGEST_LENGTH];
-		// SHA256_CTX sha256;
-		// SHA256_Init(&sha256);
-		// SHA256_Update(&sha256, value.c_str(), value.size());
-		// SHA256_Final(hash, &sha256);
-
-		// std::stringstream ss;
-		// for (int i = 0; i < SHA256_DIGEST_LENGTH; i++)
-		// {
-			// ss << std::hex << std::setw(2) << std::setfill('0') << (int)hash[i];
-		// }
-		// return ss.str();
-		return value;
+		char securityString[crypto_pwhash_STRBYTES];
+		if (crypto_pwhash_str(
+			securityString,
+			password.c_str(),
+			password.size(),
+			crypto_pwhash_OPSLIMIT_INTERACTIVE,
+			crypto_pwhash_MEMLIMIT_INTERACTIVE) != 0) {
+			std::cerr << "crypto_pwhash_str failed (out of memory?)\n";
+			return;
+		}
+		UsernameHashMap[username] = std::string(securityString);
+		DBController->addUser(username, UsernameHashMap[username]);
 	}
 }
