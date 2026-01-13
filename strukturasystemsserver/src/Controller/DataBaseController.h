@@ -15,6 +15,7 @@ namespace SysMLv2::REST
 {
 	class Project;
 	class Branch;
+	class Commit;
 }
 
 namespace StructuraSystems::Server
@@ -36,6 +37,12 @@ namespace StructuraSystems::Server
 		void addMultibleBranches(std::map<boost::uuids::uuid, std::shared_ptr<SysMLv2::REST::Branch>> projectBranchMap);
 		void addBranch(boost::uuids::uuid projectId, std::shared_ptr<SysMLv2::REST::Branch> branch);
 		std::map<boost::uuids::uuid, std::shared_ptr<SysMLv2::REST::Branch>> getAllBranches();
+
+		void addMultibleCommits(std::map<boost::uuids::uuid, std::shared_ptr<SysMLv2::REST::Commit>> projectCommitMap);
+		void addCommit(std::shared_ptr<SysMLv2::REST::Commit> commit);
+		std::map<boost::uuids::uuid, std::shared_ptr<SysMLv2::REST::Commit>> getAllCommits();
+
+		void addMultibleDataVersions();
 
 		void addUser(std::string username, std::string securityString);
 		std::map<std::string, std::string> getAllUser();
