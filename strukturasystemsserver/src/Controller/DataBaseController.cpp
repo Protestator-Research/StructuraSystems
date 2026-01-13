@@ -1,14 +1,10 @@
 ﻿#include "DataBaseController.h"
-#include "DataBaseController.h"
-
 #include <bsoncxx/builder/basic/document.hpp>
 #include <bsoncxx/json.hpp>
 #include <nlohmann/json.hpp>
 
 #include <vector>
 #include <memory>
-#include <QFile>
-#include <qlogging.h>
 #include <QString>
 #include <QFile>
 #include <stdexcept>
@@ -16,11 +12,9 @@
 #include <boost/uuid/uuid_io.hpp>
 #include <kerml/root/annotations/TextualRepresentation.h>
 #include <nlohmann/json_fwd.hpp>
-#include <nlohmann/detail/meta/std_fs.hpp>
 #include <sysmlv2/rest/entities/Branch.h>
 #include <sysmlv2/rest/entities/JSONEntities.h>
 #include <sysmlv2/rest/entities/Project.h>
-#include <sysmlv2/rest/entities/Branch.h>
 #include <sysmlv2/rest/entities/Commit.h>
 #include <sysmlv2/rest/entities/DataVersion.h>
 #include <sysmlv2/rest/serialization/Utilities.h>
