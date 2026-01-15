@@ -13,6 +13,16 @@
 
 namespace SysMLv2::REST
 {
+	class Data;
+}
+
+namespace SysMLv2::REST
+{
+	class DataVersion;
+}
+
+namespace SysMLv2::REST
+{
 	class Project;
 	class Branch;
 	class Commit;
@@ -34,15 +44,21 @@ namespace StructuraSystems::Server
 		void updateProject(std::shared_ptr<SysMLv2::REST::Project> project);
 		bool deleteProject(std::shared_ptr<SysMLv2::REST::Project> project);
 
-		void addMultibleBranches(std::map<boost::uuids::uuid, std::shared_ptr<SysMLv2::REST::Branch>> projectBranchMap);
+		void addMultibleBranches(std::map<boost::uuids::uuid, std::vector<std::shared_ptr<SysMLv2::REST::Branch>>> projectBranchMap);
 		void addBranch(boost::uuids::uuid projectId, std::shared_ptr<SysMLv2::REST::Branch> branch);
-		std::map<boost::uuids::uuid, std::shared_ptr<SysMLv2::REST::Branch>> getAllBranches();
+		std::map<boost::uuids::uuid, std::vector<std::shared_ptr<SysMLv2::REST::Branch>>> getAllBranches();
 
-		void addMultibleCommits(std::map<boost::uuids::uuid, std::shared_ptr<SysMLv2::REST::Commit>> projectCommitMap);
+		void addMultibleCommits(std::map<boost::uuids::uuid, std::vector<std::shared_ptr<SysMLv2::REST::Commit>>> projectCommitMap);
 		void addCommit(std::shared_ptr<SysMLv2::REST::Commit> commit);
-		std::map<boost::uuids::uuid, std::shared_ptr<SysMLv2::REST::Commit>> getAllCommits();
+		std::map<boost::uuids::uuid, std::vector<std::shared_ptr<SysMLv2::REST::Commit>>> getAllCommits();
 
-		void addMultibleDataVersions();
+		void addMultibleDataVersions(std::map<boost::uuids::uuid, std::shared_ptr<SysMLv2::REST::DataVersion>> commitIdDataVersions);
+		void addDataVersion(boost::uuids::uuid commitId, std::shared_ptr<SysMLv2::REST::DataVersion> dataVersion);
+		std::map<boost::uuids::uuid, std::shared_ptr<SysMLv2::REST::DataVersion>> getAllDataVersions();
+
+		void addMultibleElements(std::map<boost::uuids::uuid, std::shared_ptr<SysMLv2::REST::Data>> projectIDElementData);
+		void addElement(boost::uuids::uuid projectId, std::shared_ptr<SysMLv2::REST::Data> elementData);
+		std::map<boost::uuids::uuid, std::shared_ptr<SysMLv2::REST::Data>> getAllElements();
 
 		void addUser(std::string username, std::string securityString);
 		std::map<std::string, std::string> getAllUser();

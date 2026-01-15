@@ -19,6 +19,7 @@
 #include <sysmlv2/rest/entities/DataVersion.h>
 #include <sysmlv2/rest/serialization/Utilities.h>
 #include <sysmlv2/service/implementation/ElementNavigationService.h>
+#include <sysmlv2/rest/serialization/SysMLv2Deserializer.h>
 
 #include "CommitController.hpp"
 
@@ -82,39 +83,35 @@ namespace StructuraSystems::Server
 		return (result.has_value() && (result.value().deleted_count() > 0));
 	}
 
-	void DataBaseController::addMultibleBranches(
-		std::map<boost::uuids::uuid, std::shared_ptr<SysMLv2::REST::Branch>> projectBranchMap)
+	void DataBaseController::addMultibleBranches(std::map<boost::uuids::uuid, std::vector<std::shared_ptr<SysMLv2::REST::Branch>>> projectBranchMap)
 	{
 		std::vector<bsoncxx::document::value> dbBranches;
-		for (const auto element : projectBranchMap)
+		for (const auto [projectId , branches] : projectBranchMap)
 		{
-			dbBranches.push_back(bsoncxx::builder::basic::make_document(
-				bsoncxx::builder::basic::kvp("_id", boost::uuids::to_string(element.second->getId())),
-				bsoncxx::builder::basic::kvp("name", element.second->getName()),
-				bsoncxx::builder::basic::kvp("head", element.second->getHead()->serializeIdentification()),
-				bsoncxx::builder::basic::kvp("created", SysMLv2::REST::Utilities::toIso8601(element.second->created())),
-				bsoncxx::builder::basic::kvp("deleted", SysMLv2::REST::Utilities::toIso8601(element.second->deleted())),
-				bsoncxx::builder::basic::kvp("_project_id",boost::uuids::to_string(element.first))			
-			)); 
+			for (const auto branch : branches) {
+				std::string jsonString = branch->serializeToJson();
+				replace(jsonString, "@id", "_id");
+				nlohmann::json json = nlohmann::json::parse(jsonString);
+				json["_project_id"] = boost::uuids::to_string(projectId);
+				dbBranches.push_back(bsoncxx::from_json(json.dump()));
+			}
 		}
 		database["branches"].insert_many(dbBranches);
 	}
 
 	void DataBaseController::addBranch(boost::uuids::uuid projectId, std::shared_ptr<SysMLv2::REST::Branch> branch)
 	{
-		database["branches"].insert_one(bsoncxx::builder::basic::make_document(
-			bsoncxx::builder::basic::kvp("_id", boost::uuids::to_string(branch->getId())),
-			bsoncxx::builder::basic::kvp("name", branch->getName()),
-			bsoncxx::builder::basic::kvp("head", branch->getHead()->serializeIdentification()),
-			bsoncxx::builder::basic::kvp("created", SysMLv2::REST::Utilities::toIso8601(branch->created())),
-			bsoncxx::builder::basic::kvp("deleted", SysMLv2::REST::Utilities::toIso8601(branch->deleted())),
-			bsoncxx::builder::basic::kvp("_project_id", boost::uuids::to_string(projectId))
-		));
+		std::string jsonString = branch->serializeToJson();
+		replace(jsonString, "@id", "_id");
+		nlohmann::json json = nlohmann::json::parse(jsonString);
+		json["_project_id"] = boost::uuids::to_string(projectId);
+		database["branches"].insert_one(bsoncxx::from_json(json.dump()));
 	}
 
-	std::map<boost::uuids::uuid, std::shared_ptr<SysMLv2::REST::Branch>> DataBaseController::getAllBranches()
+	std::map<boost::uuids::uuid, std::vector<std::shared_ptr<SysMLv2::REST::Branch>>> DataBaseController::getAllBranches()
 	{
-		std::map<boost::uuids::uuid, std::shared_ptr<SysMLv2::REST::Branch>> returnValue;
+		std::cout << "DataBaseController::getAllBranches()" << std::endl;
+		std::map<boost::uuids::uuid, std::vector<std::shared_ptr<SysMLv2::REST::Branch>>> returnValue;
 
 		auto collection = database["branches"];
 		auto cursor = collection.find({});
@@ -128,80 +125,44 @@ namespace StructuraSystems::Server
 			auto projectID = boost::uuids::string_generator()(json["_project_id"].get<std::string>());
 			json.erase("_project_id");
 			const auto branch = std::make_shared<SysMLv2::REST::Branch>(json.dump());
-			returnValue.insert(std::make_pair(projectID,branch));
+
+			if (!returnValue.contains(projectID))
+				returnValue.insert(std::make_pair(projectID, std::vector<std::shared_ptr<SysMLv2::REST::Branch>>()));
+
+			returnValue.at(projectID).push_back(branch);
 		}
 		std::cout << returnValue.size() << " Branches loaded from Database." << std::endl;
 		return returnValue;
 	}
 
-	void DataBaseController::addMultibleCommits(std::map<boost::uuids::uuid, std::shared_ptr<SysMLv2::REST::Commit>> projectCommitMap)
+	void DataBaseController::addMultibleCommits(std::map<boost::uuids::uuid, std::vector<std::shared_ptr<SysMLv2::REST::Commit>>> projectCommitMap)
 	{
 		std::vector<bsoncxx::document::value> dbCommits;
-		for (const auto& [proj_id, commit] : projectCommitMap)
+		for (const auto& [proj_id, commits] : projectCommitMap)
 		{
-			std::string dataVersionString = "[\r\n";
-			for (size_t i = 0; i < commit->getDataVersion().size(); i++)
-			{
-				dataVersionString += commit->getDataVersion()[i]->serializeIdentification();
-				if (i != (commit->getDataVersion().size() - 1))
-					dataVersionString += ",\r\n";
+			for (const auto& commit : commits) {
+
+				std::string commitJsonString = commit->serializeToJson();
+				replace(commitJsonString, "@id", "_id");
+
+				dbCommits.push_back(bsoncxx::from_json(commitJsonString));
+
 			}
-			dataVersionString += "]\r\n";
-
-			std::string jsonElementsPrevCommits = "[\r\n";
-			for (size_t i = 0; i < commit->getPreviusCommits().size(); i++) {
-				jsonElementsPrevCommits += commit->getPreviusCommits()[i]->serializeIdentification();
-
-				if (i != (commit->getPreviusCommits().size() - 1))
-					jsonElementsPrevCommits += ",\r\n";
-			}
-			jsonElementsPrevCommits += "]\r\n";
-
-			dbCommits.push_back(bsoncxx::builder::basic::make_document(
-				bsoncxx::builder::basic::kvp("_id", boost::uuids::to_string(commit->getId())),
-				bsoncxx::builder::basic::kvp(SysMLv2::REST::JSON_DESCRIPTION_ENTITY, commit->getDescription()),
-				bsoncxx::builder::basic::kvp(SysMLv2::REST::JSON_CHANGE_ENTITY, dataVersionString),
-				bsoncxx::builder::basic::kvp(SysMLv2::REST::JSON_OWNING_PROJECT, commit->getOwningProject()->serializeIdentification()),
-				bsoncxx::builder::basic::kvp(SysMLv2::REST::JSON_TIMESTAMP_ENTITY, SysMLv2::REST::Utilities::toIso8601(commit->getCreated())),
-				bsoncxx::builder::basic::kvp(SysMLv2::REST::JSON_PREV_COMMITS, jsonElementsPrevCommits)
-			));
 		}
 		database["commits"].insert_many(dbCommits);
 	}
 
 	void DataBaseController::addCommit(std::shared_ptr<SysMLv2::REST::Commit> commit)
 	{
-		std::string dataVersionString = "[\r\n";
-		for (size_t i = 0; i < commit->getDataVersion().size(); i++)
-		{
-			dataVersionString += commit->getDataVersion()[i]->serializeIdentification();
-			if (i != (commit->getDataVersion().size() - 1))
-				dataVersionString += ",\r\n";
-		}
-		dataVersionString += "]\r\n";
+		std::string commitJsonString = commit->serializeToJson();
+		replace(commitJsonString, "@id", "_id");
 
-		std::string jsonElementsPrevCommits = "[\r\n";
-		for (size_t i = 0; i < commit->getPreviusCommits().size(); i++) {
-			jsonElementsPrevCommits += commit->getPreviusCommits()[i]->serializeIdentification();
-
-			if (i != (commit->getPreviusCommits().size() - 1))
-				jsonElementsPrevCommits += ",\r\n";
-		}
-		jsonElementsPrevCommits += "]\r\n";
-
-		database["commits"].insert_one(bsoncxx::builder::basic::make_document(
-			bsoncxx::builder::basic::kvp("_id", boost::uuids::to_string(commit->getId())),
-			bsoncxx::builder::basic::kvp(SysMLv2::REST::JSON_DESCRIPTION_ENTITY, commit->getDescription()),
-			bsoncxx::builder::basic::kvp(SysMLv2::REST::JSON_CHANGE_ENTITY, dataVersionString),
-			bsoncxx::builder::basic::kvp(SysMLv2::REST::JSON_OWNING_PROJECT, commit->getOwningProject()->serializeIdentification()),
-			bsoncxx::builder::basic::kvp(SysMLv2::REST::JSON_TIMESTAMP_ENTITY, SysMLv2::REST::Utilities::toIso8601(commit->getCreated())),
-			bsoncxx::builder::basic::kvp(SysMLv2::REST::JSON_PREV_COMMITS, jsonElementsPrevCommits)
-		));
+		database["commits"].insert_one(bsoncxx::from_json(commitJsonString));
 	}
 
-	std::map<boost::uuids::uuid, std::shared_ptr<SysMLv2::REST::Commit>> DataBaseController::getAllCommits()
+	std::map<boost::uuids::uuid, std::vector<std::shared_ptr<SysMLv2::REST::Commit>>> DataBaseController::getAllCommits()
 	{
-		std::map<boost::uuids::uuid, std::shared_ptr<SysMLv2::REST::Commit>> returnValue;
+		std::map<boost::uuids::uuid, std::vector<std::shared_ptr<SysMLv2::REST::Commit>>> returnValue;
 
 		auto collection = database["commits"];
 		auto cursor = collection.find({});
@@ -213,10 +174,100 @@ namespace StructuraSystems::Server
 			std::cout << dbString << std::endl;
 			nlohmann::json json = nlohmann::json::parse(dbString);
 			const auto commit = std::make_shared<SysMLv2::REST::Commit>(json.dump());
-			returnValue.insert(std::make_pair(commit->getOwningProject()->getId(), commit));
+
+			if (!returnValue.contains(commit->getOwningProject()->getId()))
+				returnValue.insert(std::make_pair(commit->getOwningProject()->getId(), std::vector<std::shared_ptr<SysMLv2::REST::Commit>>()));
+
+			returnValue.at(commit->getOwningProject()->getId()).push_back(commit);
 		}
 		std::cout << returnValue.size() << " Commits loaded from Database." << std::endl;
 		return returnValue;
+	}
+
+	void DataBaseController::addMultibleDataVersions(std::map<boost::uuids::uuid, std::shared_ptr<SysMLv2::REST::DataVersion>> commitIdDataVersions)
+	{
+		std::vector<bsoncxx::document::value> dbDataVersions;
+		for (const auto& [commitId, dataVersion] : commitIdDataVersions)
+		{
+			dbDataVersions.push_back(
+				bsoncxx::builder::basic::make_document(
+					bsoncxx::builder::basic::kvp("_id", boost::uuids::to_string(dataVersion->getId())),
+					bsoncxx::builder::basic::kvp(SysMLv2::REST::JSON_PAYLOAD_ENTITY, dataVersion->getPayload()->serializeToJson()),
+					bsoncxx::builder::basic::kvp("_id_commit", boost::uuids::to_string(commitId))
+				));
+		}
+		database["data_versions"].insert_many(dbDataVersions);
+	}
+
+	void DataBaseController::addDataVersion(boost::uuids::uuid commitId, std::shared_ptr<SysMLv2::REST::DataVersion> dataVersion)
+	{
+		database["data_versions"].insert_one(bsoncxx::builder::basic::make_document(
+			bsoncxx::builder::basic::kvp("_id", boost::uuids::to_string(dataVersion->getId())),
+			bsoncxx::builder::basic::kvp(SysMLv2::REST::JSON_PAYLOAD_ENTITY, dataVersion->getPayload()->serializeToJson()),
+			bsoncxx::builder::basic::kvp("_id_commit", boost::uuids::to_string(commitId))
+		));
+	}
+
+	std::map<boost::uuids::uuid, std::shared_ptr<SysMLv2::REST::DataVersion>> DataBaseController::getAllDataVersions()
+	{
+		auto collection = database["data_versions"];
+		auto cursor = collection.find({});
+		std::map<boost::uuids::uuid, std::shared_ptr<SysMLv2::REST::DataVersion>> returnValue;
+
+		for (auto&& doc : cursor)
+		{
+			std::string dbString = bsoncxx::to_json(doc);
+			replace(dbString, "_id", "@id");
+			nlohmann::json json = nlohmann::json::parse(dbString);
+			const auto& commitId = boost::uuids::string_generator()(json["_id_commit"].get<std::string>());
+			json.erase("_id_commit");
+			const auto& dataVersion = std::make_shared<SysMLv2::REST::DataVersion>(json.dump());
+			returnValue.insert(std::make_pair(commitId, dataVersion));
+		}
+
+		return returnValue;
+	}
+
+	void DataBaseController::addMultibleElements(std::map<boost::uuids::uuid, std::shared_ptr<SysMLv2::REST::Data>> projectIDElementData)
+	{
+		std::vector<bsoncxx::document::value> dbElements;
+		for (const auto& [projectId, dataElement]: projectIDElementData)
+		{
+			std::string jsonString = dataElement->serializeToJson();
+			replace(jsonString, "@id", "_id");
+			nlohmann::json json = nlohmann::json::parse(jsonString);
+			json["_project_id"] = boost::uuids::to_string(projectId);
+			dbElements.push_back(bsoncxx::from_json(json.dump()));
+		}
+
+		database["data_elements"].insert_many(dbElements);
+	}
+
+	void DataBaseController::addElement(boost::uuids::uuid projectId, std::shared_ptr<SysMLv2::REST::Data> elementData)
+	{
+		std::string jsonString = elementData->serializeToJson();
+		replace(jsonString, "@id", "_id");
+		nlohmann::json json = nlohmann::json::parse(jsonString);
+		json["_project_id"] = boost::uuids::to_string(projectId);
+		database["data_elements"].insert_one(bsoncxx::from_json(json.dump()));
+	}
+
+	std::map<boost::uuids::uuid, std::shared_ptr<SysMLv2::REST::Data>> DataBaseController::getAllElements()
+	{
+		auto collection = database["data_elements"];
+		auto cursor = collection.find({});
+		std::map<boost::uuids::uuid, std::shared_ptr<SysMLv2::REST::Data>> elementProijectIDMap;
+		for (auto&& doc : cursor)
+		{
+			std::string dbString = bsoncxx::to_json(doc);
+			replace(dbString, "_id", "@id");
+			nlohmann::json json = nlohmann::json::parse(dbString);
+			const auto& projectId = boost::uuids::string_generator()(json["_project_id"].get<std::string>());
+			json.erase("_project_id");
+			const auto& element = std::dynamic_pointer_cast<SysMLv2::REST::Data>(SysMLv2::SysMLv2Deserializer::deserializeJsonString(json.dump()));
+			elementProijectIDMap.insert(std::make_pair(projectId, element));
+		}
+		return elementProijectIDMap;
 	}
 
 	void DataBaseController::addUser(std::string username, std::string securityString)
@@ -263,11 +314,8 @@ namespace StructuraSystems::Server
 		else
 			uri_string += "mongodb://" + username + ":" + password + "@" + dBAddress;
 
-
 		uri = mongocxx::uri(uri_string);
 		client = mongocxx::client(uri);
-
-
 
 		database = client["structura_systems"];
 
@@ -307,7 +355,6 @@ namespace StructuraSystems::Server
 			std::make_shared<SysMLv2::REST::Project>("SpatialItems", "Preloaded Project", "Main"),
 			std::make_shared<SysMLv2::REST::Project>("ImageMetadata", "Preloaded Project", "Main"),
 			std::make_shared<SysMLv2::REST::Project>("ModelingMetadata", "Preloaded Project", "Main"),
-
 			std::make_shared<SysMLv2::REST::Project>("ParametersOfInterest", "Preloaded Project", "Main"),
 			std::make_shared<SysMLv2::REST::Project>("RiskMetadata", "Preloaded Project", "Main"),
 			std::make_shared<SysMLv2::REST::Project>("ISQ", "Preloaded Project", "Main"),
@@ -318,7 +365,6 @@ namespace StructuraSystems::Server
 			std::make_shared<SysMLv2::REST::Project>("ISQChemistryMolecular", "Preloaded Project", "Main"),
 			std::make_shared<SysMLv2::REST::Project>("ISQCondensedMatter", "Preloaded Project", "Main"),
 			std::make_shared<SysMLv2::REST::Project>("ISQElectromagnetism", "Preloaded Project", "Main"),
-
 			std::make_shared<SysMLv2::REST::Project>("ISQInformation", "Preloaded Project", "Main"),
 			std::make_shared<SysMLv2::REST::Project>("ISQLight", "Preloaded Project", "Main"),
 			std::make_shared<SysMLv2::REST::Project>("ISQMechanics", "Preloaded Project", "Main"),
@@ -330,7 +376,6 @@ namespace StructuraSystems::Server
 			std::make_shared<SysMLv2::REST::Project>("QuantityCalculations", "Preloaded Project", "Main"),
 			std::make_shared<SysMLv2::REST::Project>("SI", "Preloaded Project", "Main"),
 			std::make_shared<SysMLv2::REST::Project>("SIPrefixes", "Preloaded Project", "Main"),
-
 			std::make_shared<SysMLv2::REST::Project>("TensorCalculations", "Preloaded Project", "Main"),
 			std::make_shared<SysMLv2::REST::Project>("Time", "Preloaded Project", "Main"),
 			std::make_shared<SysMLv2::REST::Project>("USCustomaryUnits", "Preloaded Project", "Main"),
@@ -341,7 +386,6 @@ namespace StructuraSystems::Server
 			std::make_shared<SysMLv2::REST::Project>("ScalarValues", "Preloaded Project", "Main"),
 			std::make_shared<SysMLv2::REST::Project>("VectorValues", "Preloaded Project", "Main"),
 			std::make_shared<SysMLv2::REST::Project>("BaseFunctions", "Preloaded Project", "Main"),
-
 			std::make_shared<SysMLv2::REST::Project>("BooleanFunctions", "Preloaded Project", "Main"),
 			std::make_shared<SysMLv2::REST::Project>("CollectionFunctions", "Preloaded Project", "Main"),
 			std::make_shared<SysMLv2::REST::Project>("ComplexFunctions", "Preloaded Project", "Main"),
@@ -351,7 +395,6 @@ namespace StructuraSystems::Server
 			std::make_shared<SysMLv2::REST::Project>("NaturalFunctions", "Preloaded Project", "Main"),
 			std::make_shared<SysMLv2::REST::Project>("NumericalFunctions", "Preloaded Project", "Main"),
 			std::make_shared<SysMLv2::REST::Project>("OccurrenceFunctions", "Preloaded Project", "Main"),
-
 			std::make_shared<SysMLv2::REST::Project>("RationalFunctions", "Preloaded Project", "Main"),
 			std::make_shared<SysMLv2::REST::Project>("RealFunctions", "Preloaded Project", "Main"),
 			std::make_shared<SysMLv2::REST::Project>("ScalarFunctions", "Preloaded Project", "Main"),
@@ -362,7 +405,6 @@ namespace StructuraSystems::Server
 			std::make_shared<SysMLv2::REST::Project>("Base", "Preloaded Project", "Main"),
 			std::make_shared<SysMLv2::REST::Project>("Clocks", "Preloaded Project", "Main"),
 			std::make_shared<SysMLv2::REST::Project>("ControlPerformances", "Preloaded Project", "Main"),
-
 			std::make_shared<SysMLv2::REST::Project>("FeatureReferencingPerformances", "Preloaded Project", "Main"),
 			std::make_shared<SysMLv2::REST::Project>("KerML", "Preloaded Project", "Main"),
 			std::make_shared<SysMLv2::REST::Project>("Links", "Preloaded Project", "Main"),
@@ -373,7 +415,6 @@ namespace StructuraSystems::Server
 			std::make_shared<SysMLv2::REST::Project>("Performances", "Preloaded Project", "Main"),
 			std::make_shared<SysMLv2::REST::Project>("SpatialFrames", "Preloaded Project", "Main"),
 			std::make_shared<SysMLv2::REST::Project>("StatePerformances", "Preloaded Project", "Main"),
-
 			std::make_shared<SysMLv2::REST::Project>("Transfers", "Preloaded Project", "Main"),
 			std::make_shared<SysMLv2::REST::Project>("TransitionPerformances", "Preloaded Project", "Main"),
 			std::make_shared<SysMLv2::REST::Project>("Triggers", "Preloaded Project", "Main"),
@@ -384,7 +425,6 @@ namespace StructuraSystems::Server
 			std::make_shared<SysMLv2::REST::Project>("Calculations", "Preloaded Project", "Main"),
 			std::make_shared<SysMLv2::REST::Project>("Cases", "Preloaded Project", "Main"),
 			std::make_shared<SysMLv2::REST::Project>("Connections", "Preloaded Project", "Main"),
-
 			std::make_shared<SysMLv2::REST::Project>("Constraints", "Preloaded Project", "Main"),
 			std::make_shared<SysMLv2::REST::Project>("Flows", "Preloaded Project", "Main"),
 			std::make_shared<SysMLv2::REST::Project>("Interfaces", "Preloaded Project", "Main"),
@@ -395,7 +435,6 @@ namespace StructuraSystems::Server
 			std::make_shared<SysMLv2::REST::Project>("Requirements", "Preloaded Project", "Main"),
 			std::make_shared<SysMLv2::REST::Project>("StandardViewDefinitions", "Preloaded Project", "Main"),
 			std::make_shared<SysMLv2::REST::Project>("States", "Preloaded Project", "Main"),
-
 			std::make_shared<SysMLv2::REST::Project>("SysML", "Preloaded Project", "Main"),
 			std::make_shared<SysMLv2::REST::Project>("UseCases", "Preloaded Project", "Main"),
 			std::make_shared<SysMLv2::REST::Project>("VerificationCases", "Preloaded Project", "Main"),
@@ -403,36 +442,43 @@ namespace StructuraSystems::Server
 		};
 		addMultibleProjects(projects);
 
-		std::map<boost::uuids::uuid, std::shared_ptr<SysMLv2::REST::Branch>> projectBranchMap;
+		std::map<boost::uuids::uuid, std::vector<std::shared_ptr<SysMLv2::REST::Branch>>> projectBranchMap;
 		for (const auto& project : projects)
 		{
-			projectBranchMap.insert(std::make_pair(project->getId(), project->getDefaultBranch()));
+			projectBranchMap.insert(std::make_pair(project->getId(), std::vector<std::shared_ptr<SysMLv2::REST::Branch>>{project->getDefaultBranch()}));
 		}
-		
 
-		std::map<boost::uuids::uuid, std::shared_ptr<SysMLv2::REST::Commit>> commitProjectMap;
+		std::map<boost::uuids::uuid, std::vector<std::shared_ptr<SysMLv2::REST::Commit>>> commitProjectMap;
+		std::map<boost::uuids::uuid, std::shared_ptr<SysMLv2::REST::DataVersion>> commitIdDataVersionMap;
+		std::map<boost::uuids::uuid, std::shared_ptr<SysMLv2::REST::Data>> projectIdElementsMap;
+
 		for (const auto& project : projects)
 		{
-
 			QFile file(QString::fromStdString(":/sysml/" + project->getName()));
 			if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
 			{
 				std::cerr << "Could not open file: " << project->getName() << std::endl;
-				break;
+				std::cerr << "Reason: " << file.errorString().toStdString() << std::endl;
+				continue;
 			}
 			QTextStream in(&file);
 			QString readFile = in.readAll();
 
 			auto commit = std::make_shared<SysMLv2::REST::Commit>("Initial Commit from Structura Systems",project);
-			auto change = std::make_shared<SysMLv2::REST::DataVersion>();
-			change->setPayload(std::make_shared<KerML::Entities::TextualRepresentation>("SysML v2", readFile.toStdString()));
+			const auto& payload = std::make_shared<KerML::Entities::TextualRepresentation>("SysML v2", readFile.toStdString());
+			auto change = std::make_shared<SysMLv2::REST::DataVersion>(boost::uuids::random_generator()(),payload);
 			commit->addChange(change);
-			commitProjectMap.insert(std::make_pair(project->getId(), commit));
+			commitProjectMap.insert(std::make_pair(project->getId(), std::vector<std::shared_ptr<SysMLv2::REST::Commit>>{ commit }));
 			project->getDefaultBranch()->setHead(commit);
+			project->getDefaultBranch()->setReferencedCommit(commit);
+			projectIdElementsMap.insert(std::make_pair(project->getId(), change->getPayload()));
+			commitIdDataVersionMap.insert(std::make_pair(commit->getId(), commit->getDataVersion()[0]));
 		}
 
 		addMultibleBranches(projectBranchMap);
 		addMultibleCommits(commitProjectMap);
+		addMultibleDataVersions(commitIdDataVersionMap);
+		addMultibleElements(projectIdElementsMap);
 	}
 
 	void DataBaseController::deleteDatabaseIfDebug()

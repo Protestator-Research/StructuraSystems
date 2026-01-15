@@ -4,6 +4,7 @@
 #include <boost/uuid.hpp>
 #include <sysmlv2/service/interfaces/IProjectVersioningService.h>
 #include <sysmlv2/rest/entities/ChangeType.h>
+#include "../Controller/DataBaseController.h"
 
 namespace StructuraSystems::Server
 {
@@ -86,13 +87,14 @@ namespace StructuraSystems::Server
 			std::vector<int> changeType) override;
 
 	private:
-		ProjectVersioningService() = default;
+		ProjectVersioningService();
 
 		std::map<boost::uuids::uuid, std::vector<std::shared_ptr<SysMLv2::REST::Commit>>> ProjectIdCommitMap;
 		std::map<boost::uuids::uuid, std::vector<std::shared_ptr<SysMLv2::REST::Branch>>> ProjectIdBranchMap;
 		std::map<boost::uuids::uuid, std::vector<std::shared_ptr<SysMLv2::REST::Tag>>> ProjectIdTagMap;
 
 		static std::shared_ptr<ProjectVersioningService> Instance;
+		DataBaseController* DBController;
 	};
 
 }

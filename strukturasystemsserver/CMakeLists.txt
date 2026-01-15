@@ -8,6 +8,7 @@ find_package(libsodium REQUIRED)
 qt_standard_project_setup()
 
 set(CMAKE_AUTOMOC ON)
+set(CMAKE_AUTORCC ON)
 
 set(SOURCES
         src/main.cpp

@@ -249,4 +249,12 @@ namespace StructuraSystems::Server
 	{
 		return std::vector<std::shared_ptr<SysMLv2::REST::DataDifference>>();
 	}
+
+	ProjectVersioningService::ProjectVersioningService()
+	{
+		DBController = DataBaseController::getInstance();
+
+		ProjectIdBranchMap = DBController->getAllBranches();
+		ProjectIdCommitMap = DBController->getAllCommits();
+	}
 }
