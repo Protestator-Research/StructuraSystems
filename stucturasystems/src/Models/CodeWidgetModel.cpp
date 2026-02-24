@@ -7,6 +7,7 @@
 #include <sysmlv2/rest/entities/JSONEntities.h>
 #include <sysmlv2/rest/entities/Project.h>
 #include <sysmlv2/rest/entities/Identification.h>
+#include <sysmlv2/rest/entities/CommitRequest.h>
 #include <sysmlv2/Parser.h>
 #include <utility>
 #include <boost/uuid/uuid.hpp>
@@ -18,6 +19,7 @@
 #include <qlayout.h>
 #include <sysmlv2/rest/entities/Commit.h>
 #include <sysmlv2/rest/entities/DataVersion.h>
+#include <sysmlv2/service/online/SysMLAPIImplementation.h>
 
 #include "../Widgets/CodeWidget.h"
 #include "Parser/Markdown/MarkdownParser.h"
@@ -82,8 +84,8 @@ namespace StructuraSystems::Client {
         emit tabEdited();
     }
 
-    void CodeWidgetModel::createCommit(CommunicationService* communicationService) {
-        communicationService->postCommitWithId(Project->getId(), Commit);
+    void CodeWidgetModel::createCommit([[maybe_unused]] CommunicationService* communicationService) {
+        //communicationService->postCommitWithId(Project->getId(), Commit);
         //TODO
     }
 
@@ -133,13 +135,15 @@ namespace StructuraSystems::Client {
     void CodeWidgetModel::createProjectAndCommit(CommunicationService* communicationService) {
         Project = communicationService->postProject(Project->getName(), Project->getDescription(), "Main");
 
-        Commit = std::make_shared<SysMLv2::REST::Commit>("Upload from Local Project, by Structura Systems", Project);
+        std::vector<std::shared_ptr<SysMLv2::REST::DataVersion>> requestedChage;
         for (const auto &element : Elements) {
             auto dataVersion = std::make_shared<SysMLv2::REST::DataVersion>(boost::uuids::random_generator()(), element);
-            Commit->addChange(dataVersion);
+            requestedChage.push_back(dataVersion);
         }
 
-        communicationService->postCommitWithId(Project->getId(), Commit);
+        auto commitRequest = std::make_shared<SysMLv2::REST::CommitRequest>("Upload from Local Project, by Structura Systems", requestedChage);
+
+        Commit = communicationService->postCommitWithId(Project->getId(), commitRequest);
     }
 
 

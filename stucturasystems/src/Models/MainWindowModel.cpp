@@ -192,7 +192,5 @@ namespace StructuraSystems::Client {
             const auto digitalTwin = wizzard.generateDigitalTwin();
             BackendConnection->postDigitalTwinToProject(model->getProject()->getId(), digitalTwin);
         }
-            return;
-            // BackendConnection->postDigitalTwinToProject();
     }
 }

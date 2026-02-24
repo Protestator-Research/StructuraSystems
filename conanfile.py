@@ -50,7 +50,7 @@ class CppStructuraSystemsRecipe(ConanFile):
             self.options["gtest/*"].shared = True
             self.options["libcurl/*"].shared = True
             self.options["nlohmann_json/*"].shared = True
-            self.options["sysmlv2lib/*"].shared=True
+            self.options["sysmllib/*"].shared=True
             self.options["yaml-cpp/*"].shared=True
             self.options["libpqxx/*"].shared=True
             self.options["openssl/*"].shared=True
@@ -61,7 +61,7 @@ class CppStructuraSystemsRecipe(ConanFile):
             self.options["gtest/*"].shared = False
             self.options["libcurl/*"].shared = False
             self.options["nlohmann_json/*"].shared = False
-            self.options["sysmlv2lib/*"].shared=False
+            self.options["sysmllib/*"].shared=False
             self.options["yaml-cpp/*"].shared=False
             self.options["libpqxx/*"].shared=False
             self.options["openssl/*"].shared=False

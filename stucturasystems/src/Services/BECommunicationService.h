@@ -23,6 +23,7 @@ namespace SysMLv2::REST {
     class Branch;
     class Project;
     class DigitalTwin;
+    class CommitRequest;
 }
 
 namespace KerML::Entities {
@@ -102,7 +103,7 @@ namespace StructuraSystems::Client {
          * @param commit 
          * @return 
          */
-        std::shared_ptr<SysMLv2::REST::Commit> postCommitWithId(boost::uuids::uuid projectId, std::shared_ptr<SysMLv2::REST::Commit> commit);
+        std::shared_ptr<SysMLv2::REST::Commit> postCommitWithId(boost::uuids::uuid projectId, std::shared_ptr<SysMLv2::REST::CommitRequest> commit);
 
 
         /**
