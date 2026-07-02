@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.15)
 
-find_package(Qt6 REQUIRED COMPONENTS Core Widgets Gui)
+find_package(Qt6 REQUIRED)
 find_package(md4c REQUIRED)
 find_package(sysmllib REQUIRED)
 find_package(yaml-cpp REQUIRED)
@@ -69,6 +69,7 @@ set(SOURCES
         src/Widgets/Dialogs/EditProjectDialog.h
         src/Widgets/Dialogs/EditProjectDialog.cpp
         resources/Resources.qrc
+        ../resources/sysml.qrc
         src/Models/SettingsModel.cpp
         src/Models/SettingsModel.h
         src/Widgets/Dialogs/SettingsDialog.cpp
@@ -103,9 +104,7 @@ target_include_directories(StructuraSystems PUBLIC
         "${CMAKE_CURRENT_BINARY_DIR}/")
 
 target_link_libraries(StructuraSystems PUBLIC
-        Qt6::Widgets
-        Qt6::Gui
-        Qt6::Core
+        qt::qt
         md4c::md4c
         sysmllib::sysmllib
         yaml-cpp::yaml-cpp

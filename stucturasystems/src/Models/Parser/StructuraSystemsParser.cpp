@@ -108,48 +108,56 @@ namespace StructuraSystems::Client {
 
     }
 
-    void StructuraSystemsParser::writeKerMLFile(QString ,
-                                                std::vector<std::shared_ptr<KerML::Entities::Element>> ) {
+    void StructuraSystemsParser::writeKerMLFile(QString filePath,
+                                                std::vector<std::shared_ptr<KerML::Entities::Element>> elements) {
 
-        // QFile file;
-        // file.setFileName(filePath);
-        // if (file.open(QIODevice::ReadWrite)) {
-        //     QTextStream stream(&file);
-        //     for(const auto & elem : elements) {
-        //         if (std::dynamic_pointer_cast<KerML::Entities::TextualRepresentation>(elem) != nullptr) {
-        //             QString value = QString::fromStdString(std::dynamic_pointer_cast<KerML::Entities::TextualRepresentation>(elem)->body());
-        //             stream << value << "\r\n";
-        //         }
-        //     }
-        // }
-        // file.flush();
-        // file.close();
+        QFile file;
+        file.setFileName(filePath);
+        if (file.open(QIODevice::ReadWrite)) {
+             QTextStream stream(&file);
+             for(const auto & elem : elements) {
+                 if (std::dynamic_pointer_cast<KerML::Entities::TextualRepresentation>(elem) != nullptr) {
+                     QString value = QString::fromStdString(std::dynamic_pointer_cast<KerML::Entities::TextualRepresentation>(elem)->body());
+                     stream << value << "\r\n";
+                 }
+             }
+        }
+        file.flush();
+        file.close();
     }
 
-    void StructuraSystemsParser::writeSysMLv2File(QString ,
-                                                  std::vector<std::shared_ptr<KerML::Entities::Element>> ) {
-        // QFile file;
-        // file.setFileName(filePath);
-        // if (file.open(QIODevice::ReadWrite)) {
-        //     QTextStream stream(&file);
-        //     for(const auto & elem : elements)
-        //         stream << QString::fromStdString(elem->body()) << "\r\n";
-        // }
-        // file.flush();
-        // file.close();
+    void StructuraSystemsParser::writeSysMLv2File(QString filePath,
+                                                  std::vector<std::shared_ptr<KerML::Entities::Element>> elements) {
+        QFile file;
+        file.setFileName(filePath);
+        if (file.open(QIODevice::ReadWrite)) {
+            QTextStream stream(&file);
+            for (const auto& elem : elements) {
+                if (std::dynamic_pointer_cast<KerML::Entities::TextualRepresentation>(elem) != nullptr) {
+                    QString value = QString::fromStdString(std::dynamic_pointer_cast<KerML::Entities::TextualRepresentation>(elem)->body());
+                    stream << value << "\r\n";
+                }
+            }
+        }
+        file.flush();
+        file.close();
     }
 
-    void StructuraSystemsParser::writeMarkdownFile(QString ,
-                                                   std::vector<std::shared_ptr<KerML::Entities::Element>> ) {
-        // QFile file;
-        // file.setFileName(filePath);
-        // if (file.open(QIODevice::ReadWrite)) {
-        //     QTextStream stream(&file);
-        //     for(const auto & elem : elements)
-        //         stream << QString::fromStdString(elem->getMarkdownString()) << "\r\n";
-        // }
-        // file.flush();
-        // file.close();
+    void StructuraSystemsParser::writeMarkdownFile(QString filePath,
+                                                   std::vector<std::shared_ptr<KerML::Entities::Element>> elements) {
+        QFile file;
+        file.setFileName(filePath);
+        if (file.open(QIODevice::ReadWrite)) {
+            QTextStream stream(&file);
+            for (const auto& elem : elements) {
+                if (std::dynamic_pointer_cast<KerML::Entities::TextualRepresentation>(elem) != nullptr) {
+                    QString value = QString::fromStdString(std::dynamic_pointer_cast<KerML::Entities::TextualRepresentation>(elem)->body());
+                    stream << value << "\r\n";
+                }
+            }
+        }
+        file.flush();
+        file.close();
     }
 
 } // StructuraSystems::Client

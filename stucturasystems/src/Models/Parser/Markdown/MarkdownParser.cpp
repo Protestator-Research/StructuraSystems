@@ -109,9 +109,7 @@ namespace StructuraSystems::Client {
 
     std::shared_ptr<KerML::Entities::Element> MarkdownParser::createElement(std::string language, std::string body) {
 
-        std::shared_ptr<KerML::Entities::TextualRepresentation> element = std::make_shared<KerML::Entities::TextualRepresentation>();
-        element->setLanguage(language);
-        element->setBody(body);
+        std::shared_ptr<KerML::Entities::TextualRepresentation> element = std::make_shared<KerML::Entities::TextualRepresentation>(language,body);
         return element;
     }
 }
