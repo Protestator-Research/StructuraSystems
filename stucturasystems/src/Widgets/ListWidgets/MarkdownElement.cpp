@@ -30,24 +30,28 @@ namespace StructuraSystems::Client {
     void MarkdownElement::redecorateMarkdownElement() {
         if(Element->language() == "YaML") {
             const auto yamlValue = QString::fromStdString(Element->body()).remove("---\n");
-            YAML::Node node = YAML::Load(yamlValue.toStdString());
+
+        	if (yamlValue.isEmpty())
+        		return;
+
+        	YAML::Node node = YAML::Load(yamlValue.toStdString());
             QString value = QString::fromStdString("<div class=\"header\"><h1>"
                     +node["name"].as<std::string>() + "</h1>"
                     +"<h3>Author: "+node["maintainer"].as<std::string>() +"</h3></div>");
             ui->TextBrowser->setHtml(value);
             ui->LanguageCombobox->setCurrentIndex(1);
-        }
-        if(Element->language() != "YaML") {
-
-        }
-        if((Element->language() == "SysML")||(Element->language() == "SysMLv2")||(Element->language() == "SysMD")) {
+        }else if((Element->language() == "SysML")||(Element->language() == "SysMLv2")||(Element->language() == "SysMD")) {
             ui->LanguageCombobox->setCurrentIndex(2);
-        }
-        if((Element->language() == "KerML")) {
+            ui->TextBrowser->setText(QString::fromStdString(Element->body()));
+        }else if((Element->language() == "KerML")) {
             ui->LanguageCombobox->setCurrentIndex(3);
+            ui->TextBrowser->setText(QString::fromStdString(Element->body()));
+        }else {
+            ui->TextBrowser->setMarkdown(QString::fromStdString(Element->body()));
         }
         ui->TextEditor->setVisible(false);
         ui->LanguageCombobox->setVisible(false);
+
     }
 
     void MarkdownElement::makeConnections() {

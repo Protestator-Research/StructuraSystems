@@ -13,6 +13,8 @@
 #include <sysmlv2/rest/entities/Project.h>
 #include <sysmlv2/rest/entities/Commit.h>
 #include <sysmlv2/rest/entities/Branch.h>
+#include <sysmlv2/rest/entities/ProjectRequest.h>
+#include <sysmlv2/rest/entities/CommitRequest.h>
 #include <kerml/root/annotations/TextualRepresentation.h>
 #include <kerml/root/elements/Element.h>
 #include "entities/DigitalTwin.h"
@@ -25,6 +27,8 @@
 // Internal Classes
 //---------------------------------------------------------
 #include "BECommunicationService.h"
+
+#include <iostream>
 
 
 namespace StructuraSystems::Client {
@@ -58,11 +62,15 @@ namespace StructuraSystems::Client {
         return std::dynamic_pointer_cast<SysMLv2::REST::Commit>(commit);
     }
 
-    std::shared_ptr<SysMLv2::REST::Commit> CommunicationService::postCommitWithId(boost::uuids::uuid projectId, std::shared_ptr<SysMLv2::REST::Commit> commit)
+    std::shared_ptr<SysMLv2::REST::Commit> CommunicationService::postCommitWithId(boost::uuids::uuid projectId, std::shared_ptr<SysMLv2::REST::CommitRequest> commit)
     {
         std::string projectdString = boost::uuids::to_string(projectId);
-        auto commi = APIImplementation->postCommit(projectdString, commit, BarrierString);
-
+        std::shared_ptr<SysMLv2::REST::IEntity> commi;
+        try {
+            commi = APIImplementation->postCommit(projectdString, commit, BarrierString);
+        }catch (std::exception &e) {
+            std::cerr << e.what() << std::endl;
+        }
         std::shared_ptr<SysMLv2::REST::Commit> returnValue = dynamic_pointer_cast<SysMLv2::REST::Commit>(commi);
         return returnValue;
     }
@@ -106,8 +114,10 @@ namespace StructuraSystems::Client {
     }
 
     std::shared_ptr<SysMLv2::REST::Project> CommunicationService::postProject(std::string projectName, std::string projectDescription, std::string defaultBranchName) {
-        std::shared_ptr<SysMLv2::REST::Project> project = std::make_shared<SysMLv2::REST::Project>(projectName,projectDescription, defaultBranchName);
-        project = dynamic_pointer_cast<SysMLv2::REST::Project>(APIImplementation->postProject(project, BarrierString));
+        std::shared_ptr<SysMLv2::REST::ProjectRequest> projectRequest = std::make_shared<SysMLv2::REST::ProjectRequest>(projectName, projectDescription, defaultBranchName);
+        // std::shared_ptr<SysMLv2::REST::Project> project = std::make_shared<SysMLv2::REST::Project>(projectName,projectDescription, defaultBranchName);
+        const auto returnValue = APIImplementation->postProject(projectRequest, BarrierString);
+        const auto project = dynamic_pointer_cast<SysMLv2::REST::Project>(returnValue);
         return project;
     }
 

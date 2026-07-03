@@ -105,10 +105,7 @@ namespace StructuraSystems::Client {
             }
             BackendConnection = new CommunicationService(Settings->serverPath());
             BackendConnection->setUserForLoginInBackend(Settings->username(), Settings->password());
-            auto projects = BackendConnection->getAllProjects();
-            for (const auto &project: projects) {
-                ExternalFileItemModel->appendProject(project);
-            }
+            updateOnlineProjects();
         }catch (std::exception& ex) {
             QMessageBox msg = QMessageBox(MainWindow);
             msg.setIcon(QMessageBox::Icon::Critical);
@@ -152,6 +149,14 @@ namespace StructuraSystems::Client {
         MainWindow->setWindowModified(true);
     }
 
+    void MainWindowModel::updateOnlineProjects() {
+        ExternalFileItemModel->clear();
+        auto projects = BackendConnection->getAllProjects();
+        for (const auto &project: projects) {
+            ExternalFileItemModel->appendProject(project);
+        }
+    }
+
     void MainWindowModel::saveFile() {
         const auto projectName = MainWindow->getTabTitle(MainWindow->getActiveTabIndex());
         CodeWidgetModelMap[projectName]->saveFile(Settings->workingDirectory());
@@ -179,6 +184,7 @@ namespace StructuraSystems::Client {
         const auto modelName = MainWindow->getTabTitle(MainWindow->getActiveTabIndex());
         const auto model = CodeWidgetModelMap[modelName];
         model->createProjectAndCommit(BackendConnection);
+        updateOnlineProjects();
     }
 
     void MainWindowModel::onCreateDTClicked() {
@@ -192,7 +198,5 @@ namespace StructuraSystems::Client {
             const auto digitalTwin = wizzard.generateDigitalTwin();
             BackendConnection->postDigitalTwinToProject(model->getProject()->getId(), digitalTwin);
         }
-            return;
-            // BackendConnection->postDigitalTwinToProject();
     }
 }

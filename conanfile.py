@@ -8,7 +8,6 @@ from sys import platform
 
 class CppStructuraSystemsRecipe(ConanFile):
     name = "StructuraSystems"
-    version = "2501"
     package_type = "application"
 
     # Optional metadata
@@ -36,39 +35,40 @@ class CppStructuraSystemsRecipe(ConanFile):
         self.requires("yaml-cpp/0.8.0")
         self.requires("openssl/3.6.3")
         self.requires("mongo-cxx-driver/4.1.4")
+        self.requires("libsodium/1.0.20")
 
 
     def config_options(self):
         if self.settings.os == "Windows":
             del self.options.fPIC
+            self.options.shared=True
 
     def configure(self):
         if self.options.shared:
-            # If os=Windows, fPIC will have been removed in config_options()
-            # use rm_safe to avoid double delete errors
             self.options.rm_safe("fPIC")
             self.options["boost/*"].shared = True
             self.options["gtest/*"].shared = True
             self.options["libcurl/*"].shared = True
             self.options["nlohmann_json/*"].shared = True
-            self.options["sysmlv2lib/*"].shared=True
+            self.options["sysmllib/*"].shared=True
             self.options["yaml-cpp/*"].shared=True
             self.options["libpqxx/*"].shared=True
             self.options["openssl/*"].shared=True
             self.options["mongo-cxx-driver/*"].shared=True
+            self.options["qt/*"].shared = True
         else:
             self.options["boost/*"].shared = False
             self.options["gtest/*"].shared = False
             self.options["libcurl/*"].shared = False
             self.options["nlohmann_json/*"].shared = False
-            self.options["sysmlv2lib/*"].shared=False
+            self.options["sysmllib/*"].shared=False
             self.options["yaml-cpp/*"].shared=False
             self.options["libpqxx/*"].shared=False
             self.options["openssl/*"].shared=False
             self.options["mongo-cxx-driver/*"].shared=False
+            self.options["qt/*"].shared = False
 
         if platform != "darwin":
-            self.options["qt/*"].shared = True
             self.options["qt/*"].qtcharts = True
             self.options["qt/*"].qthttpserver = True
 
@@ -89,11 +89,8 @@ class CppStructuraSystemsRecipe(ConanFile):
         cmake.build()
 
     def build_requirements(self):
-        self.tool_requires("cmake/3.30.0")
-        self.tool_requires("icu/74.2")
-        if platform != "darwin":
-            self.tool_requires("qt/6.8.3")
-        self.test_requires("gtest/1.14.0")
+        self.tool_requires("cmake/[>=3.30.0 <5]")
+        self.test_requires("gtest/[>=1.14.0 <2]")
 
     def test(self):
         cmd = os.path.join(self.cpp.build.bindir, "CppDigitalTwin/CpsBaseLib/tests/CpsBaseLibTests")

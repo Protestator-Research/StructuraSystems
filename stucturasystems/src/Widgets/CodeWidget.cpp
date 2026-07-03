@@ -29,8 +29,8 @@ namespace StructuraSystems::Client {
         ui->AddElementToolButton->setVisible(false);
     }
 
-    QListWidget *CodeWidget::getListWidget() {
-        return ui->MarkdownCodeElementsWidget;
+    QWidget* CodeWidget::getScrollAreaWidget() {
+        return ui->CodeScrollWidgetArea->widget();
     }
 
     CodeWidget::CodeWidget(std::shared_ptr<SysMLv2::REST::Project> project, std::shared_ptr<SysMLv2::REST::Commit> commit,
@@ -52,7 +52,7 @@ namespace StructuraSystems::Client {
     }
 
     void CodeWidget::decorateDialogView() {
-        ui->MarkdownCodeElementsWidget->setSelectionMode(QAbstractItemView::SelectionMode::MultiSelection);
+        //ui->MarkdownCodeElementsWidget->setSelectionMode(QAbstractItemView::SelectionMode::MultiSelection);
         Model->setDialogView(true);
     }
 

@@ -48,6 +48,7 @@ namespace StructuraSystems::Client {
 
     private slots:
         void onTabEdited();
+        void updateOnlineProjects();
 
     private:
         StructuraMainWindow* MainWindow;
