@@ -16,7 +16,8 @@
 
 #include "CodeWidgetModel.h"
 
-#include <qlayout.h>
+#include <QLayout>
+#include <QInputDialog>
 #include <sysmlv2/rest/entities/Commit.h>
 #include <sysmlv2/rest/entities/DataVersion.h>
 #include <sysmlv2/service/online/SysMLAPIImplementation.h>
@@ -68,7 +69,12 @@ namespace StructuraSystems::Client {
 
                 auto markdownElement = new MarkdownElement(textualRepresentation, scrollAreaWidget);
                 scrollAreaWidget->layout()->addWidget(markdownElement);
+                markdownElement->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
                 markdownElement->repaint();
+
+                connect(markdownElement, SIGNAL(elementEdited()), this, SLOT(elementEdited()));
+                listItemWidget->setSizeHint(markdownElement->sizeHint());
+                codeDisplayWidget->setItemWidget(listItemWidget, markdownElement);
 
                 connect(markdownElement, SIGNAL(elementEdited()), this, SLOT(elementEdited()));
             }
@@ -76,17 +82,25 @@ namespace StructuraSystems::Client {
         scrollAreaWidget->repaint();
     }
 
-    CodeWidgetModel::~CodeWidgetModel() {
-    }
-
     void CodeWidgetModel::elementEdited() {
         CodeWidget->setWindowModified(true);
         emit tabEdited();
     }
 
-    void CodeWidgetModel::createCommit([[maybe_unused]] CommunicationService* communicationService) {
-        //communicationService->postCommitWithId(Project->getId(), Commit);
-        //TODO
+    void CodeWidgetModel::createCommit(CommunicationService* communicationService) {
+        bool userAcceptedDialog;
+        QString commitDescription = QInputDialog::getText(CodeWidget, tr("Commit Description"), tr("Please give a Commit Descriptions"),QLineEdit::Normal,tr(""),&userAcceptedDialog);
+        if (userAcceptedDialog) {
+            std::vector<std::shared_ptr<SysMLv2::REST::DataVersion>> requestedChage;
+            for (const auto& element : Elements) {
+                auto dataVersion = std::make_shared<SysMLv2::REST::DataVersion>(boost::uuids::random_generator()(), element);
+                requestedChage.push_back(dataVersion);
+            }
+
+            auto commitRequest = std::make_shared<SysMLv2::REST::CommitRequest>(commitDescription.toStdString(), requestedChage);
+
+            Commit = communicationService->postCommitWithId(Project->getId(), commitRequest);
+        }
     }
 
     void CodeWidgetModel::saveFile(std::string basePath) {
