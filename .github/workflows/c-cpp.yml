@@ -26,7 +26,7 @@ jobs:
     - name: prepare dependencies
       run: |
        mkdir build && cd build
-       conan install ..
+       conan install .. --build missing
     - name: build structura systems
       run: |
         ls -al

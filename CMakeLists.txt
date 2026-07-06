@@ -6,9 +6,12 @@ include(CMakeDependentOption)
 
 option(RUN_TESTS "Build the tests" ON)
 
-#if(APPLE)
-#    list(APPEND CMAKE_PREFIX_PATH "~/Qt/6.9.2/macos/")
-#endif(APPLE)
+if(APPLE)
+    list(APPEND CMAKE_PREFIX_PATH "~/Qt/6.11.1/macos/")
+endif(APPLE)
+if(WIN32)
+    list(APPEND CMAKE_PREFIX_PATH "C:/Qt/6.11.1/msvc2022_64")
+endif(WIN32)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
