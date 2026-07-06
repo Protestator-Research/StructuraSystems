@@ -61,7 +61,7 @@ namespace StructuraSystems::Client {
         std::shared_ptr<SysMLv2::REST::Project> Project;
         std::shared_ptr<SysMLv2::REST::Commit> Commit;
         std::vector<std::shared_ptr<KerML::Entities::Element>> Elements;
-        CodeWidget* CodeWidget;
+        CodeWidget* _CodeWidget;
         std::unique_ptr<SysMLv2::API::ElementNavigationService> ElementService;
         bool DialogView = false;
 

@@ -37,7 +37,7 @@ namespace StructuraSystems::Client {
             QObject(codeWidget),
             Project(project),
             Commit(commit),
-            CodeWidget(codeWidget),
+            _CodeWidget(codeWidget),
             ElementService(std::make_unique<SysMLv2::API::ElementNavigationService>()){
         updateItemView(project,commit);
     }
@@ -48,7 +48,7 @@ namespace StructuraSystems::Client {
             Project(project),
             Commit(commit),
             Elements(std::move(elements)),
-            CodeWidget(codeWidget),
+            _CodeWidget(codeWidget),
             ElementService(std::make_unique<SysMLv2::API::ElementNavigationService>()) {
         updateItemView(project,Commit);
     }
@@ -56,7 +56,7 @@ namespace StructuraSystems::Client {
     void CodeWidgetModel::updateItemView(std::shared_ptr<SysMLv2::REST::Project> &project,
                                          std::shared_ptr<SysMLv2::REST::Commit> &commit) {
 
-        const auto scrollAreaWidget = CodeWidget->getScrollAreaWidget();
+        const auto scrollAreaWidget = _CodeWidget->getScrollAreaWidget();
 
         if (Elements.empty() && (Commit != nullptr))
             Elements = ElementService->getElements(project, commit);
@@ -73,8 +73,6 @@ namespace StructuraSystems::Client {
                 markdownElement->repaint();
 
                 connect(markdownElement, SIGNAL(elementEdited()), this, SLOT(elementEdited()));
-                listItemWidget->setSizeHint(markdownElement->sizeHint());
-                codeDisplayWidget->setItemWidget(listItemWidget, markdownElement);
 
                 connect(markdownElement, SIGNAL(elementEdited()), this, SLOT(elementEdited()));
             }
@@ -83,13 +81,13 @@ namespace StructuraSystems::Client {
     }
 
     void CodeWidgetModel::elementEdited() {
-        CodeWidget->setWindowModified(true);
+        _CodeWidget->setWindowModified(true);
         emit tabEdited();
     }
 
     void CodeWidgetModel::createCommit(CommunicationService* communicationService) {
         bool userAcceptedDialog;
-        QString commitDescription = QInputDialog::getText(CodeWidget, tr("Commit Description"), tr("Please give a Commit Descriptions"),QLineEdit::Normal,tr(""),&userAcceptedDialog);
+        QString commitDescription = QInputDialog::getText(_CodeWidget, tr("Commit Description"), tr("Please give a Commit Descriptions"),QLineEdit::Normal,tr(""),&userAcceptedDialog);
         if (userAcceptedDialog) {
             std::vector<std::shared_ptr<SysMLv2::REST::DataVersion>> requestedChage;
             for (const auto& element : Elements) {
