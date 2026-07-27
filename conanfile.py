@@ -1,5 +1,6 @@
 from conan import ConanFile
 from conan.tools.cmake import CMakeToolchain, CMake, cmake_layout, CMakeDeps
+from conan.tools.env import VirtualBuildEnv
 from conan.tools.env import Environment
 from conan.tools.apple import XcodeDeps
 import os
@@ -74,6 +75,8 @@ class CppStructuraSystemsRecipe(ConanFile):
         tc = CMakeToolchain(self)
         tc.user_presets_path = 'CMakePresets.json'
         tc.generate()
+        ms = VirtualBuildEnv(self)
+        ms.generate()
 
     def build(self):
         cmake = CMake(self)
