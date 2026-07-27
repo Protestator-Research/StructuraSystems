@@ -16,7 +16,7 @@
 namespace StructuraSystems::Client {
     void MarkdownParser::parseMarkdownFile(QString path) {
         QFile file = QFile(path);
-        file.open(QIODevice::ReadOnly);
+        [[maybe_unused]] auto result = file.open(QIODevice::ReadOnly);
         QByteArray array = file.readAll();
         file.close();
         MarkdownString = QString(array.data()).toStdString();

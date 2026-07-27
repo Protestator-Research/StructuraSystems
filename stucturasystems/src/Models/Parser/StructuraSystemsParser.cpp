@@ -52,7 +52,7 @@ namespace StructuraSystems::Client {
 
     std::vector<std::shared_ptr<KerML::Entities::Element>> StructuraSystemsParser::readSysMLv2File(QString filePath) {
         QFile file = QFile(filePath);
-        file.open(QIODevice::ReadOnly);
+        [[maybe_unused]] auto result = file.open(QIODevice::ReadOnly);
         QByteArray array = file.readAll();
         file.close();
         std::string body = QString(array.data()).toStdString();
@@ -65,7 +65,7 @@ namespace StructuraSystems::Client {
 
     std::vector<std::shared_ptr<KerML::Entities::Element>> StructuraSystemsParser::readKerMLFile(QString filePath) {
         QFile file = QFile(filePath);
-        file.open(QIODevice::ReadOnly);
+        [[maybe_unused]] auto result = file.open(QIODevice::ReadOnly);
         QByteArray array = file.readAll();
         file.close();
         std::string body = QString(array.data()).toStdString();
