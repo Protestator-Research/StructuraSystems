@@ -70,6 +70,7 @@ namespace StructuraSystems::Client {
         connect(ui->actionParse_Model, SIGNAL(triggered(bool)), WindowModel, SLOT(onActionParseModelClicked()));
         connect(ui->actionUpload_Local_Project, SIGNAL(triggered(bool)), WindowModel, SLOT(onUploadModelClicked()));
         connect(ui->actionCreate_Digital_Twin, SIGNAL(triggered(bool)), WindowModel, SLOT(onCreateDTClicked()));
+        connect(ui->actionPush, SIGNAL(triggered(bool)), WindowModel, SLOT(onCommitButtonClicked()));
     }
 
     void StructuraMainWindow::addTabToMainWindow(QWidget *tab, QString title) {

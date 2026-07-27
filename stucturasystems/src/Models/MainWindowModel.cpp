@@ -199,4 +199,12 @@ namespace StructuraSystems::Client {
             BackendConnection->postDigitalTwinToProject(model->getProject()->getId(), digitalTwin);
         }
     }
+
+    void MainWindowModel::onCommitButtonClicked()
+    {
+        int index = MainWindow->getActiveTabIndex();
+        const auto modelName = MainWindow->getTabTitle(index + 1);
+        const auto model = CodeWidgetModelMap[modelName];
+        model->createCommit(BackendConnection);
+    }
 }

@@ -1,10 +1,5 @@
 cmake_minimum_required(VERSION 3.15)
 
-find_package(Qt6 REQUIRED COMPONENTS Core Widgets Charts)
-find_package(md4c REQUIRED)
-find_package(sysmllib REQUIRED)
-find_package(yaml-cpp REQUIRED)
-
 qt_standard_project_setup()
 
 set(CMAKE_AUTOMOC ON)
@@ -104,13 +99,10 @@ target_include_directories(StructuraSystems PUBLIC
         "${CMAKE_CURRENT_BINARY_DIR}/")
 
 target_link_libraries(StructuraSystems PUBLIC
-        Qt::Core
-        Qt::Widgets
-        Qt::Charts
+        qt::qt
         md4c::md4c
         sysmllib::sysmllib
-        yaml-cpp::yaml-cpp
-)
+        yaml-cpp::yaml-cpp)
 
 if (!UNIX)
 set_target_properties(StructuraSystems PROPERTIES

@@ -23,7 +23,7 @@ class CppStructuraSystemsRecipe(ConanFile):
     default_options = {"shared": True, "fPIC": False}
 
     # Sources are located in the same place as this recipe, copy them to the recipe
-    exports_sources = "CMakeLists.txt", "CppDigitalTwin/*"
+    exports_sources = "CMakeLists.txt", "structurasystems/*"
 
     def requirements(self):
         self.requires("boost/[>=1.86.0 <2]")
@@ -35,7 +35,6 @@ class CppStructuraSystemsRecipe(ConanFile):
         self.requires("yaml-cpp/0.8.0")
         self.requires("openssl/3.6.3")
 
-
     def config_options(self):
         if self.settings.os == "Windows":
             del self.options.fPIC
@@ -45,28 +44,25 @@ class CppStructuraSystemsRecipe(ConanFile):
         if self.options.shared:
             self.options.rm_safe("fPIC")
             self.options["boost/*"].shared = True
-            self.options["gtest/*"].shared = True
             self.options["libcurl/*"].shared = True
             self.options["nlohmann_json/*"].shared = True
             self.options["sysmllib/*"].shared=True
             self.options["yaml-cpp/*"].shared=True
-            self.options["libpqxx/*"].shared=True
+            self.options["md4c/*"].shared=True
             self.options["openssl/*"].shared=True
-            self.options["mongo-cxx-driver/*"].shared=True
             self.options["qt/*"].shared = True
         else:
             self.options["boost/*"].shared = False
-            self.options["gtest/*"].shared = False
             self.options["libcurl/*"].shared = False
             self.options["nlohmann_json/*"].shared = False
             self.options["sysmllib/*"].shared=False
             self.options["yaml-cpp/*"].shared=False
-            self.options["libpqxx/*"].shared=False
+            self.options["md4c/*"].shared=False
             self.options["openssl/*"].shared=False
             self.options["qt/*"].shared = False
 
         self.options["qt/*"].qtcharts = True
-        self.options["qt/*"].qthttpserver = True
+        #self.options["qt/*"].qthttpserver = True
 
     
     def layout(self):
