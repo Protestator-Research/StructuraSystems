@@ -68,7 +68,7 @@ class CppStructuraSystemsRecipe(ConanFile):
             if self.settings.os == "Linux":
                 self.options["qt/*"].shared = False
         
-        if self.settings.os == "Linux"
+        if self.settings.os == "Linux":
             self.options["qt/*"].qtcharts = True
     
     def layout(self):
