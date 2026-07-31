@@ -187,6 +187,8 @@ namespace StructuraSystems::Client {
             BackendConnection->postProject(projectName, projectDescription, "Main",Settings->username()); //TODO fix for group required
         if (visibility == "Public")
             BackendConnection->postProject(projectName, projectDescription, "Main");
+
+        updateOnlineProjects();
     }
 
     void MainWindowModel::saveFile() {
