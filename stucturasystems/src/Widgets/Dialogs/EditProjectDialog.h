@@ -1,22 +1,41 @@
-#ifndef EDITPROJECTDIALOG_H
-#define EDITPROJECTDIALOG_H
+#pragma once
 
 #include <QDialog>
 
-namespace Ui {
-class EditProjectDialog;
-}
-
-class EditProjectDialog : public QDialog
+namespace StructuraSystems::Client
 {
-    Q_OBJECT
+    namespace Ui {
+        class EditProjectDialog;
+    }
 
-public:
-    explicit EditProjectDialog(QWidget *parent = nullptr);
-    ~EditProjectDialog();
+    class EditProjectDialog : public QDialog
+    {
+        Q_OBJECT
 
-private:
-    Ui::EditProjectDialog *ui;
-};
+    public:
+        explicit EditProjectDialog(QWidget *parent = nullptr, bool isOnline = false, std::string projectName = "", std::string description = "");
+        ~EditProjectDialog();
 
-#endif // EDITPROJECTDIALOG_H
+        std::string getProjectName();
+        std::string getProjectDescription();
+        std::string getProjectPath();
+
+        bool isOnlineProject();
+        std::string projectVisibility();
+
+    private slots:
+        void onPathSelectionButtonClicked();
+        void redecorateState();
+
+    private:
+        void makeConnections();
+
+
+        Ui::EditProjectDialog *ui;
+
+        bool IsOnline = false;
+        std::string ProjectName;
+        std::string Description;
+        std::string ProjectPath;
+    };
+}
