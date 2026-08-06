@@ -190,13 +190,13 @@ namespace StructuraSystems::Client {
     void MainWindowModel::commitProject() {
         if (BackendConnection == nullptr) {
             QMessageBox msg = QMessageBox(MainWindow);
-                msg.setIcon(QMessageBox::Icon::Critical);
-                msg.setText(tr("No backend connection is currently available. Pushing a commit will be canceled."));
-                msg.exec();
-                return;
-            }        
+            msg.setIcon(QMessageBox::Icon::Critical);
+            msg.setText(tr("No backend connection is currently available. Pushing a commit will be canceled."));
+            msg.exec();
+            return;
+        }
 
-        const int activeTabIndex = MainWindow->getActiveTabIndex();
+	        const int activeTabIndex = MainWindow->getActiveTabIndex() + 1;
         
         if (activeTabIndex < 0) {
             QMessageBox msg = QMessageBox(MainWindow);
