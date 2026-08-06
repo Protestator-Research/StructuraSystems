@@ -45,6 +45,7 @@ namespace StructuraSystems::Client {
         void onActionParseModelClicked();
         void onUploadModelClicked();
         void onCreateDTClicked();
+        void commitProject();
 
     private slots:
         void onTabEdited();

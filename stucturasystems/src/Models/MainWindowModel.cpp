@@ -187,6 +187,38 @@ namespace StructuraSystems::Client {
         updateOnlineProjects();
     }
 
+    void MainWindowModel::commitProject() {
+        if (BackendConnection == nullptr) {
+            QMessageBox msg = QMessageBox(MainWindow);
+                msg.setIcon(QMessageBox::Icon::Critical);
+                msg.setText(tr("No backend connection is currently available. Pushing a commit will be canceled."));
+                msg.exec();
+                return;
+            }        
+
+        const int activeTabIndex = MainWindow->getActiveTabIndex();
+        
+        if (activeTabIndex < 0) {
+            QMessageBox msg = QMessageBox(MainWindow);
+                msg.setIcon(QMessageBox::Icon::Critical);
+                msg.setText(tr("No project is currently open. Pushing a commit will be canceled."));
+                msg.exec();
+                return;
+        }
+
+        const QString projectName = MainWindow->getTabTitle(activeTabIndex);
+        const auto model = CodeWidgetModelMap.find(projectName); // find outputs iterator to key-value-pair
+
+        if (model == CodeWidgetModelMap.end() || model->second == nullptr){
+            QMessageBox msg = QMessageBox(MainWindow);
+                msg.setIcon(QMessageBox::Icon::Critical);
+                msg.setText(tr("The model for the active project could not be found. Pushing a commit will be canceled."));
+                msg.exec();
+                return;
+        }
+        model->second->createCommit(BackendConnection); 
+    }
+
     void MainWindowModel::onCreateDTClicked() {
         int index = MainWindow->getActiveTabIndex();
         const auto modelName = MainWindow->getTabTitle(index+1);
