@@ -13,7 +13,7 @@ if(WIN32)
     list(APPEND CMAKE_PREFIX_PATH "C:/Qt/6.11.1/msvc2022_64")
 endif(WIN32)
 
-find_package(Qt6 REQUIRED)
+find_package(Qt6 REQUIRED COMPONENTS Core Widgets Charts)
 find_package(md4c REQUIRED)
 find_package(sysmllib REQUIRED)
 find_package(yaml-cpp REQUIRED)
