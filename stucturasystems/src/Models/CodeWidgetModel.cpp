@@ -20,6 +20,7 @@
 #include <QInputDialog>
 #include <sysmlv2/rest/entities/Commit.h>
 #include <sysmlv2/rest/entities/DataVersion.h>
+#include <sysmlv2/rest/entities/Branch.h>
 #include <sysmlv2/service/online/SysMLAPIImplementation.h>
 
 #include "../Widgets/CodeWidget.h"
@@ -57,7 +58,20 @@ namespace StructuraSystems::Client {
                                          std::shared_ptr<SysMLv2::REST::Commit> &commit) {
 
         const auto scrollAreaWidget = _CodeWidget->getScrollAreaWidget();
+        auto* layout = scrollAreaWidget->layout();
 
+        while (layout->count() > 0) {
+            QLayoutItem* item = layout->takeAt(0);
+
+            if (item == nullptr)
+                continue;
+            if (QWidget* widget = item->widget()) {
+                widget->hide();
+                delete widget;
+            }
+            delete item;
+        }    
+        
         if (Elements.empty() && (Commit != nullptr))
             Elements = ElementService->getElements(project, commit);
 
@@ -72,7 +86,6 @@ namespace StructuraSystems::Client {
                 markdownElement->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
                 markdownElement->repaint();
 
-                connect(markdownElement, SIGNAL(elementEdited()), this, SLOT(elementEdited()));
 
                 connect(markdownElement, SIGNAL(elementEdited()), this, SLOT(elementEdited()));
             }
@@ -86,6 +99,12 @@ namespace StructuraSystems::Client {
     }
 
     void CodeWidgetModel::createCommit(CommunicationService* communicationService) {
+        
+        /*
+        qDebug() << "Project name(triggered by CodeWidgetModel::createCommit(...)):" << QString::fromStdString(Project->getName());
+        qDebug() << "Project ID(triggered by CodeWidgetModel::createCommit(...)):" << QString::fromStdString(boost::uuids::to_string(Project->getId()));
+        */
+
         bool userAcceptedDialog;
         QString commitDescription = QInputDialog::getText(_CodeWidget, tr("Commit Description"), tr("Please give a Commit Descriptions"),QLineEdit::Normal,tr(""),&userAcceptedDialog);
         if (userAcceptedDialog) {
@@ -158,5 +177,36 @@ namespace StructuraSystems::Client {
         Commit = communicationService->postCommitWithId(Project->getId(), commitRequest);
     }
 
+    void CodeWidgetModel::pullFromBackend(CommunicationService* communicationService) {
+        if (communicationService == nullptr)
+            throw std::runtime_error("Backend connection not available.");
 
+        const auto branches = communicationService->getAllBranchesForProjectWithID(Project->getId());
+        std::shared_ptr<SysMLv2::REST::Branch> mainBranch;
+
+        for (const auto &branch : branches){
+            if (branch->getId() == Project -> getDefaultBranch()->getId()){
+                mainBranch = branch;
+                break;
+            }
+        }
+
+        if (mainBranch == nullptr)
+            throw std::runtime_error("Default branch not found.");
+        if (mainBranch->getHead() == nullptr)
+            throw std::runtime_error("Default branch has no head commit.");
+
+        const auto latestCommit = communicationService->getCommitWithId(Project->getId(), mainBranch->getHead()->getId());
+
+        if (latestCommit == nullptr)
+            throw std::runtime_error("Head commit could not be downloaded.");
+
+        const auto latestElements = communicationService->getAllElements(latestCommit->getId(), Project->getId());
+
+        Commit = latestCommit;
+        Elements = latestElements;
+        updateItemView(Project, Commit);
+
+        _CodeWidget->setWindowModified(false);
+    }
 }
