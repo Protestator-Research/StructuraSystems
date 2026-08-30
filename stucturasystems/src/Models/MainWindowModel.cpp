@@ -187,38 +187,6 @@ namespace StructuraSystems::Client {
         updateOnlineProjects();
     }
 
-    void MainWindowModel::commitProject() {
-        if (BackendConnection == nullptr) {
-            QMessageBox msg = QMessageBox(MainWindow);
-            msg.setIcon(QMessageBox::Icon::Critical);
-            msg.setText(tr("No backend connection is currently available. Pushing a commit will be canceled."));
-            msg.exec();
-            return;
-        }
-
-	        const int activeTabIndex = MainWindow->getActiveTabIndex() + 1;
-        
-        if (activeTabIndex < 0) {
-            QMessageBox msg = QMessageBox(MainWindow);
-                msg.setIcon(QMessageBox::Icon::Critical);
-                msg.setText(tr("No project is currently open. Pushing a commit will be canceled."));
-                msg.exec();
-                return;
-        }
-
-        const QString projectName = MainWindow->getTabTitle(activeTabIndex);
-        const auto model = CodeWidgetModelMap.find(projectName); // find outputs iterator to key-value-pair
-
-        if (model == CodeWidgetModelMap.end() || model->second == nullptr){
-            QMessageBox msg = QMessageBox(MainWindow);
-                msg.setIcon(QMessageBox::Icon::Critical);
-                msg.setText(tr("The model for the active project could not be found. Pushing a commit will be canceled."));
-                msg.exec();
-                return;
-        }
-        model->second->createCommit(BackendConnection); 
-    }
-
     void MainWindowModel::onCreateDTClicked() {
         int index = MainWindow->getActiveTabIndex();
         const auto modelName = MainWindow->getTabTitle(index+1);
@@ -229,6 +197,50 @@ namespace StructuraSystems::Client {
         if (wizzard.exec()==QDialog::Accepted) {
             const auto digitalTwin = wizzard.generateDigitalTwin();
             BackendConnection->postDigitalTwinToProject(model->getProject()->getId(), digitalTwin);
+        }
+    }
+
+    void MainWindowModel::onCommitButtonClicked()
+    {
+        int index = MainWindow->getActiveTabIndex();
+        // qDebug() << "Current tab(triggered by MainWindowModel::onCommitButtonClicked()):" << index;
+        const auto modelName = MainWindow->getTabTitle(index);
+        // qDebug() << "modelName(triggered by MainWindowModel::onCommitButtonClicked()):" << modelName;
+        const auto model = CodeWidgetModelMap[modelName];
+        // qDebug() << "model pointer(triggered by MainWindowModel::onCommitButtonClicked()):" << model;
+        model->createCommit(BackendConnection);
+    }
+
+    void MainWindowModel::onPullButtonClicked() {
+        auto* widget = MainWindow->getActiveTabWidget();
+        if (widget == nullptr) {
+            qDebug() << "Pull has no activated tab.";
+            return;
+        }
+
+        auto* codeWidget = qobject_cast<CodeWidget*>(widget);
+        if (codeWidget == nullptr){
+            qDebug() << "Pulls active tab is not a CodeWidget.";
+            return;
+        }
+
+        auto* model = codeWidget->getModel();
+        if (model == nullptr){
+            qDebug() << "Pull: CodeWidget has no model.";
+            return;
+        }
+
+        try {
+            qDebug() << "The pulled project:" << QString::fromStdString(model->getProject()->getName());
+            model->pullFromBackend(BackendConnection);
+        }
+        catch (const std::exception &excep) {
+            qDebug() << "Pull error:" << excep.what();
+            QMessageBox msg;
+            msg.setWindowTitle(tr("Pull"));
+            msg.setText(tr("Could not download the current model from backend."));
+            msg.setInformativeText(excep.what());
+            msg.exec();
         }
     }
 }
