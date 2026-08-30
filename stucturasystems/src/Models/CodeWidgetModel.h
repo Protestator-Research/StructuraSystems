@@ -51,6 +51,8 @@ namespace StructuraSystems::Client {
 
         [[nodiscard]] std::vector<std::shared_ptr<KerML::Entities::Element>> getSelectedElements() const;
 
+        void pullFromBackend(CommunicationService* communicationService);
+
     signals:
         void tabEdited();
 
