@@ -21,6 +21,7 @@
 #include <QInputDialog>
 #include <sysmlv2/rest/entities/Commit.h>
 #include <sysmlv2/rest/entities/DataVersion.h>
+#include <sysmlv2/rest/entities/Branch.h>
 #include <sysmlv2/service/online/SysMLAPIImplementation.h>
 
 #include "../Widgets/CodeWidget.h"
@@ -58,34 +59,35 @@ namespace StructuraSystems::Client {
 	void CodeWidgetModel::updateItemView(std::shared_ptr<SysMLv2::REST::Project>& project,
 		std::shared_ptr<SysMLv2::REST::Commit>& commit) {
 
-		const auto scrollAreaWidget = _CodeWidget->getScrollAreaWidget();
-		scrollAreaWidget->layout()->setAlignment(Qt::AlignTop);
-		scrollAreaWidget->layout()->setSizeConstraint(QLayout::SetMinAndMaxSize);
+        const auto scrollAreaWidget = _CodeWidget->getScrollAreaWidget();
+        auto* layout = scrollAreaWidget->layout();
 
-		if (Elements.empty() && (Commit != nullptr) && (ElementService != nullptr)) {
-			Elements = ElementService->getElements(project, commit);
-		}
-		else if (_CommunicationService != nullptr)
-		{
-			Elements = _CommunicationService->getAllElements(commit->getId(), project->getId());
-		}
-		else
-		{
-			std::cerr << "Issue with connection to get Elements" << std::endl;
-		}
+        while (layout->count() > 0) {
+            QLayoutItem* item = layout->takeAt(0);
 
-		for (const auto& element : Elements) {
-			auto type = element->getType();
-			std::transform(type.begin(), type.end(), type.begin(), ::tolower);
-			if (type == SysMLv2::REST::TEXTUAL_REPRESENTATION_TYPE) {
-				const auto textualRepresentation = std::dynamic_pointer_cast<KerML::Entities::TextualRepresentation>(element);
+            if (item == nullptr)
+                continue;
+            if (QWidget* widget = item->widget()) {
+                widget->hide();
+                delete widget;
+            }
+            delete item;
+        }    
+        
+        if (Elements.empty() && (Commit != nullptr))
+            Elements = ElementService->getElements(project, commit);
+
+        for (const auto &element: Elements) {
+            auto type = element->getType();
+            std::transform(type.begin(), type.end(), type.begin(), ::tolower);
+            if (type == SysMLv2::REST::TEXTUAL_REPRESENTATION_TYPE) {
+                const auto textualRepresentation = std::dynamic_pointer_cast<KerML::Entities::TextualRepresentation>(element);
 
 				auto markdownElement = new MarkdownElement(textualRepresentation, scrollAreaWidget);
 				scrollAreaWidget->layout()->addWidget(markdownElement);
 				markdownElement->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
 				markdownElement->repaint();
 
-				connect(markdownElement, SIGNAL(elementEdited()), this, SLOT(elementEdited()));
 
 				connect(markdownElement, SIGNAL(elementEdited()), this, SLOT(elementEdited()));
 			}
@@ -190,5 +192,36 @@ namespace StructuraSystems::Client {
 		Commit = communicationService->postCommitWithId(Project->getId(), commitRequest);
 	}
 
+    void CodeWidgetModel::pullFromBackend(CommunicationService* communicationService) {
+        if (communicationService == nullptr)
+            throw std::runtime_error("Backend connection not available.");
 
+        const auto branches = communicationService->getAllBranchesForProjectWithID(Project->getId());
+        std::shared_ptr<SysMLv2::REST::Branch> mainBranch;
+
+        for (const auto &branch : branches){
+            if (branch->getId() == Project -> getDefaultBranch()->getId()){
+                mainBranch = branch;
+                break;
+            }
+        }
+
+        if (mainBranch == nullptr)
+            throw std::runtime_error("Default branch not found.");
+        if (mainBranch->getHead() == nullptr)
+            throw std::runtime_error("Default branch has no head commit.");
+
+        const auto latestCommit = communicationService->getCommitWithId(Project->getId(), mainBranch->getHead()->getId());
+
+        if (latestCommit == nullptr)
+            throw std::runtime_error("Head commit could not be downloaded.");
+
+        const auto latestElements = communicationService->getAllElements(latestCommit->getId(), Project->getId());
+
+        Commit = latestCommit;
+        Elements = latestElements;
+        updateItemView(Project, Commit);
+
+        _CodeWidget->setWindowModified(false);
+    }
 }
