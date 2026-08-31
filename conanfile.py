@@ -31,13 +31,10 @@ class CppStructuraSystemsRecipe(ConanFile):
         self.requires("libcurl/[>=8.4.0 <9]")
         self.requires("nlohmann_json/[>=3.11.3 <3.13]")
         self.requires("md4c/0.5.2")
-        self.requires("sysmllib/2607beta")
+        self.requires("sysmllib/2608beta")
         self.requires("yaml-cpp/0.8.0")
         self.requires("openssl/3.6.3")
         
-        if self.settings.os == "Linux":
-            self.requires("qt/6.11.1")
-
         if self.settings.os == "Linux":
             self.requires("qt/6.11.1")
 
