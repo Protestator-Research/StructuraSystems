@@ -34,6 +34,9 @@ class CppStructuraSystemsRecipe(ConanFile):
         self.requires("sysmllib/2607beta")
         self.requires("yaml-cpp/0.8.0")
         self.requires("openssl/3.6.3")
+        
+        if self.settings.os == "Linux":
+            self.requires("qt/6.11.1")
 
         if self.settings.os == "Linux":
             self.requires("qt/6.11.1")
@@ -65,11 +68,14 @@ class CppStructuraSystemsRecipe(ConanFile):
             self.options["yaml-cpp/*"].shared=False
             self.options["md4c/*"].shared=False
             self.options["openssl/*"].shared=False
+
             if self.settings.os == "Linux":
                 self.options["qt/*"].shared = False
-        
+
         if self.settings.os == "Linux":
             self.options["qt/*"].qtcharts = True
+  
+
     
     def layout(self):
         cmake_layout(self)

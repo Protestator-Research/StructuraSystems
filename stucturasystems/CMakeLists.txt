@@ -99,8 +99,8 @@ target_include_directories(StructuraSystems PUBLIC
         "${CMAKE_CURRENT_BINARY_DIR}/")
 
 target_link_libraries(StructuraSystems PUBLIC
-        Qt6::Widgets
         Qt6::Core
+        Qt6::Widgets
         Qt6::Charts
         md4c::md4c
         sysmllib::sysmllib
