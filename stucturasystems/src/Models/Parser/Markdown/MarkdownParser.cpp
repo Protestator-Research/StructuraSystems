@@ -52,9 +52,17 @@ namespace StructuraSystems::Client {
                     break;
                 case CMARK_NODE_HTML_BLOCK:
                 case CMARK_NODE_CODE_BLOCK:
-                case CMARK_NODE_CODE:
-                    returnValue.push_back(createElement(cmark_node_get_fence_info(child),cmark_node_get_literal(child)));
+            case CMARK_NODE_CODE:
+                {
+                    std::string fenceInfo = "";
+                    if (cmark_node_get_fence_info(child))
+                        fenceInfo = cmark_node_get_fence_info(child);
+                    else
+                        fenceInfo = "SysMLv2";
+
+                    returnValue.push_back(createElement(fenceInfo,cmark_node_get_literal(child)));
                     break;
+                }
                 case CMARK_NODE_CUSTOM_BLOCK:
                 case CMARK_NODE_PARAGRAPH:
                 case CMARK_NODE_HEADING:
