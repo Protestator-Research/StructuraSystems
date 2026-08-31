@@ -168,10 +168,13 @@ namespace StructuraSystems::Client {
         file.setFileName(QString::fromStdString(filePath));
         if (file.open(QIODevice::ReadWrite)) {
             QTextStream stream(&file);
-            stream << tr("-----");
-            stream << tr("projectName") << QString::fromStdString(projectName);
-            stream << tr("projectDescription") << QString::fromStdString(projectDescription);
-            stream << tr("-----");
+            stream << tr("---\r\n");
+            stream << tr("name: ") << QString::fromStdString(projectName) << tr("\r\n");
+            stream << tr("title: ") << QString::fromStdString(projectName) << tr("\r\n");
+            stream << tr("description: ") << QString::fromStdString(projectDescription) << tr("\r\n");
+            stream << tr("maintainer: ") <<  tr("\r\n");
+            stream << tr("usage: ") << tr("\r\n");
+            stream << tr("-----\r\n");
         }
         file.flush();
         file.close();

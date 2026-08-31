@@ -40,7 +40,7 @@ namespace StructuraSystems::Client
 
     bool EditProjectDialog::isOnlineProject()
     {
-        return (ui->OnlineCombobox->currentText()=="Online");
+        return ((ui->OnlineCombobox->currentText()=="Online")&&(ui->OnlineCombobox->isVisible()));
     }
 
     std::string EditProjectDialog::projectVisibility()
