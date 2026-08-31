@@ -151,8 +151,16 @@ namespace StructuraSystems::Client {
             QTextStream stream(&file);
             for (const auto& elem : elements) {
                 if (std::dynamic_pointer_cast<KerML::Entities::TextualRepresentation>(elem) != nullptr) {
-                    QString value = QString::fromStdString(std::dynamic_pointer_cast<KerML::Entities::TextualRepresentation>(elem)->body());
-                    stream << value << "\r\n";
+                    if (std::dynamic_pointer_cast<KerML::Entities::TextualRepresentation>(elem)->language()=="Markdown")
+                    {
+                        QString value = QString::fromStdString(std::dynamic_pointer_cast<KerML::Entities::TextualRepresentation>(elem)->body());
+                        stream << value << "\r\n";
+                    }else
+                    {
+                        QString value = QString::fromStdString(std::dynamic_pointer_cast<KerML::Entities::TextualRepresentation>(elem)->body());
+                        QString language = QString::fromStdString(std::dynamic_pointer_cast<KerML::Entities::TextualRepresentation>(elem)->language()));
+                        stream << "``` "<< language << "\r\n" << value << "\r\n" << "``` \r\n";
+                    }
                 }
             }
         }
