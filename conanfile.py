@@ -38,6 +38,9 @@ class CppStructuraSystemsRecipe(ConanFile):
         if self.settings.os == "Linux":
             self.requires("qt/6.11.1")
 
+        if self.settings.os == "Linux":
+            self.requires("qt/6.11.1")
+
     def config_options(self):
         if self.settings.os == "Windows":
             del self.options.fPIC
@@ -56,7 +59,7 @@ class CppStructuraSystemsRecipe(ConanFile):
 
             if self.settings.os == "Linux":
                 self.options["qt/*"].shared = True
-            
+
         else:
             self.options["boost/*"].shared = False
             self.options["libcurl/*"].shared = False
@@ -92,7 +95,9 @@ class CppStructuraSystemsRecipe(ConanFile):
         cmake.build()
 
     def build_requirements(self):
-        self.tool_requires("qt/6.11.1")
+        if self.settings.os == "Linux":
+            self.tool_requires("qt/6.11.1")
+        
         self.tool_requires("cmake/[>=3.30.0 <5]")
 
 
