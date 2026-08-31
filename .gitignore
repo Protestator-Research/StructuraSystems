@@ -31,18 +31,8 @@
 *.out
 *.app
 
-# Logs
-*.log
-
-# Generated Output
-output.txt
-
-# Generated metadata/config
-sysmllib.json
-
 .DS_Store
 .idea/**
-.vscode/
 build/**
 cmake-build-debug/**
 CMakePresets.json

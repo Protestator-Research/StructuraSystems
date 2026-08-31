@@ -70,8 +70,8 @@ namespace StructuraSystems::Client {
                 delete widget;
             }
             delete item;
-        }    
-        
+        }
+
         if (Elements.empty() && (Commit != nullptr))
             Elements = ElementService->getElements(project, commit);
 
@@ -99,12 +99,6 @@ namespace StructuraSystems::Client {
     }
 
     void CodeWidgetModel::createCommit(CommunicationService* communicationService) {
-        
-        /*
-        qDebug() << "Project name(triggered by CodeWidgetModel::createCommit(...)):" << QString::fromStdString(Project->getName());
-        qDebug() << "Project ID(triggered by CodeWidgetModel::createCommit(...)):" << QString::fromStdString(boost::uuids::to_string(Project->getId()));
-        */
-
         bool userAcceptedDialog;
         QString commitDescription = QInputDialog::getText(_CodeWidget, tr("Commit Description"), tr("Please give a Commit Descriptions"),QLineEdit::Normal,tr(""),&userAcceptedDialog);
         if (userAcceptedDialog) {

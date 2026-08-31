@@ -46,13 +46,16 @@ namespace StructuraSystems::Client {
         void onUploadModelClicked();
         void onCreateDTClicked();
         void onCommitButtonClicked();
-        void onPullButtonClicked(); 
+        void onPullButtonClicked();
 
     private slots:
         void onTabEdited();
         void updateOnlineProjects();
 
     private:
+        void createLocalProject(std::string filePath, std::string projectName, std::string projectDescription);
+        void createOnlineProject(std::string projectName, std::string projectDescription, std::string visibility);
+
         StructuraMainWindow* MainWindow;
         std::map<QString,CodeWidget*> CodeWidgetMap;
         std::map<QString, CodeWidgetModel*> CodeWidgetModelMap;
@@ -63,6 +66,7 @@ namespace StructuraSystems::Client {
 
         CommunicationService* BackendConnection = nullptr;
 
+        bool OnlineConnected = false;
 
         void openProjectFromFileStorage(QString filePath);
     };

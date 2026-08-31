@@ -9,6 +9,7 @@
 #include "Parser/StructuraSystemsParser.h"
 #include "../Widgets/Dialogs/DigitalTwinCreationWizzard.h"
 #include "../Widgets/CodeWidget.h"
+#include "../Widgets/Dialogs/EditProjectDialog.h"
 
 #include <QFileDialog>
 #include <QStandardPaths>
@@ -106,6 +107,8 @@ namespace StructuraSystems::Client {
             BackendConnection = new CommunicationService(Settings->serverPath());
             BackendConnection->setUserForLoginInBackend(Settings->username(), Settings->password());
             updateOnlineProjects();
+            OnlineConnected = true;
+
         }catch (std::exception& ex) {
             QMessageBox msg = QMessageBox(MainWindow);
             msg.setIcon(QMessageBox::Icon::Critical);
@@ -114,6 +117,7 @@ namespace StructuraSystems::Client {
             msg.show();
             msg.exec();
             BackendConnection = nullptr;
+            OnlineConnected = false;
         }
     }
 
@@ -157,22 +161,58 @@ namespace StructuraSystems::Client {
         }
     }
 
+    void MainWindowModel::createLocalProject(std::string filePath, std::string projectName,
+        std::string projectDescription)
+    {
+        QFile file;
+        file.setFileName(QString::fromStdString(filePath));
+        if (file.open(QIODevice::ReadWrite)) {
+            QTextStream stream(&file);
+            stream << tr("---\r\n");
+            stream << tr("name: ") << QString::fromStdString(projectName) << tr("\r\n");
+            stream << tr("title: ") << QString::fromStdString(projectName) << tr("\r\n");
+            stream << tr("description: ") << QString::fromStdString(projectDescription) << tr("\r\n");
+            stream << tr("maintainer: ") <<  tr("\r\n");
+            stream << tr("usage: ") << tr("\r\n");
+            stream << tr("-----\r\n");
+        }
+        file.flush();
+        file.close();
+        openFolder(QString::fromStdString(Settings->workingDirectory()));
+    }
+
+    void MainWindowModel::createOnlineProject(std::string projectName, std::string projectDescription,
+        std::string visibility)
+    {
+        if (visibility == "Private")
+            BackendConnection->postProject(projectName, projectDescription, "Main",Settings->username());
+        if (visibility == "Internal")
+            BackendConnection->postProject(projectName, projectDescription, "Main",Settings->username()); //TODO fix for group required
+        if (visibility == "Public")
+            BackendConnection->postProject(projectName, projectDescription, "Main");
+
+        updateOnlineProjects();
+    }
+
     void MainWindowModel::saveFile() {
         const auto projectName = MainWindow->getTabTitle(MainWindow->getActiveTabIndex());
         CodeWidgetModelMap[projectName]->saveFile(Settings->workingDirectory());
     }
 
     void MainWindowModel::newFile() {
-        const auto filename = QFileDialog::getSaveFileName(MainWindow,tr("Create new File"), QString::fromStdString(Settings->workingDirectory()),tr("Markdown File (*.md);;KerML File (*.kerml);;SysML File (*.sysml);;XML-File (*.xml);;JSON-File (*.json)"));
-        QFile file;
-        file.setFileName(filename);
-        if (file.open(QIODevice::ReadWrite)) {
-            QTextStream stream(&file);
-            stream << tr("Get Started!");
+        auto projectCreationDialog = new EditProjectDialog(MainWindow, OnlineConnected);
+        projectCreationDialog->show();
+        if (projectCreationDialog->exec() == QDialog::Accepted)
+        {
+            if (projectCreationDialog->isOnlineProject())
+            {
+                createOnlineProject(projectCreationDialog->getProjectName(),projectCreationDialog->getProjectDescription(),projectCreationDialog->projectVisibility());
+            }
+            else
+            {
+                createLocalProject(projectCreationDialog->getProjectPath(),projectCreationDialog->getProjectName(), projectCreationDialog->getProjectDescription());
+            }
         }
-        file.flush();
-        file.close();
-        openFolder(QString::fromStdString(Settings->workingDirectory()));
     }
 
     void MainWindowModel::onActionParseModelClicked() {
@@ -203,15 +243,13 @@ namespace StructuraSystems::Client {
     void MainWindowModel::onCommitButtonClicked()
     {
         int index = MainWindow->getActiveTabIndex();
-        // qDebug() << "Current tab(triggered by MainWindowModel::onCommitButtonClicked()):" << index;
         const auto modelName = MainWindow->getTabTitle(index);
-        // qDebug() << "modelName(triggered by MainWindowModel::onCommitButtonClicked()):" << modelName;
         const auto model = CodeWidgetModelMap[modelName];
-        // qDebug() << "model pointer(triggered by MainWindowModel::onCommitButtonClicked()):" << model;
         model->createCommit(BackendConnection);
     }
 
-    void MainWindowModel::onPullButtonClicked() {
+    void MainWindowModel::onPullButtonClicked()
+    {
         auto* widget = MainWindow->getActiveTabWidget();
         if (widget == nullptr) {
             qDebug() << "Pull has no activated tab.";
@@ -219,7 +257,8 @@ namespace StructuraSystems::Client {
         }
 
         auto* codeWidget = qobject_cast<CodeWidget*>(widget);
-        if (codeWidget == nullptr){
+        if (codeWidget == nullptr)
+        {
             qDebug() << "Pulls active tab is not a CodeWidget.";
             return;
         }

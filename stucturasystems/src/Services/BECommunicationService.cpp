@@ -113,10 +113,9 @@ namespace StructuraSystems::Client {
         return returnValue;
     }
 
-    std::shared_ptr<SysMLv2::REST::Project> CommunicationService::postProject(std::string projectName, std::string projectDescription, std::string defaultBranchName) {
+    std::shared_ptr<SysMLv2::REST::Project> CommunicationService::postProject(std::string projectName, std::string projectDescription, std::string defaultBranchName,  std::string owner, std::string owningGroup) {
         std::shared_ptr<SysMLv2::REST::ProjectRequest> projectRequest = std::make_shared<SysMLv2::REST::ProjectRequest>(projectName, projectDescription, defaultBranchName);
-        // std::shared_ptr<SysMLv2::REST::Project> project = std::make_shared<SysMLv2::REST::Project>(projectName,projectDescription, defaultBranchName);
-        const auto returnValue = APIImplementation->postProject(projectRequest, BarrierString);
+        const auto returnValue = APIImplementation->postProject(projectRequest, BarrierString, owner,owningGroup);
         const auto project = dynamic_pointer_cast<SysMLv2::REST::Project>(returnValue);
         return project;
     }

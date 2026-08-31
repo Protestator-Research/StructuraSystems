@@ -79,7 +79,7 @@ namespace StructuraSystems::Client {
          * @param defaultBranchName
          * @return
          */
-        std::shared_ptr<SysMLv2::REST::Project> postProject(std::string projectName, std::string projectDescription, std::string defaultBranchName);
+        std::shared_ptr<SysMLv2::REST::Project> postProject(std::string projectName, std::string projectDescription, std::string defaultBranchName, std::string owner = "", std::string owningGroup = "");
 
         /**
          * Download all branches for a project, with the projects id.
