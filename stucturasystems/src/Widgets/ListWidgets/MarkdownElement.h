@@ -3,6 +3,8 @@
 
 #include <QWidget>
 
+class QResizeEvent;
+
 namespace KerML::Entities {
     class TextualRepresentation;
 }
@@ -31,6 +33,7 @@ namespace StructuraSystems::Client {
 
     protected:
         void contextMenuEvent(QContextMenuEvent *event) override;
+        void resizeEvent(QResizeEvent *event) override;
 
     private slots:
         void customContextMenuRequested(QPoint pos);
@@ -41,9 +44,13 @@ namespace StructuraSystems::Client {
         void openContextMenu(QPoint pos);
         void makeConnections();
         void redecorateMarkdownElement();
+        void scheduleSizeUpdate();
+        void updateSizeToContent();
         Ui::MarkdownElement *ui;
         std::shared_ptr<KerML::Entities::TextualRepresentation> Element;
         bool EditationState=false;
+        bool SizeUpdatePending=false;
+        bool SizeUpdateInProgress=false;
     };
 }
 #endif // MARKDOWNELEMENT_H

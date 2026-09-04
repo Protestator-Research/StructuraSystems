@@ -2,7 +2,14 @@
 #include "ui_MarkdownElement.h"
 
 #include <QMenu>
+#include <QAbstractTextDocumentLayout>
 #include <QContextMenuEvent>
+#include <QResizeEvent>
+#include <QScopedValueRollback>
+#include <QTextDocument>
+#include <QTextEdit>
+#include <QTimer>
+#include <QtMath>
 #include <yaml-cpp/yaml.h>
 #include <kerml/root/annotations/TextualRepresentation.h>
 
@@ -13,10 +20,18 @@ namespace StructuraSystems::Client {
         ui->setupUi(this);
         ui->retranslateUi(this);
         Element = element;
+        setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        ui->TextBrowser->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        ui->TextEditor->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        ui->TextBrowser->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        ui->TextBrowser->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        ui->TextEditor->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        ui->TextEditor->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
         ui->MoveElementDown->setIcon(QIcon(":/icons/arrows/DownGreen"));
         ui->MoveElementUp->setIcon(QIcon(":/icons/arrows/UpGreen"));
         redecorateMarkdownElement();
         makeConnections();
+        updateSizeToContent();
     }
 
     MarkdownElement::~MarkdownElement() {
@@ -31,14 +46,15 @@ namespace StructuraSystems::Client {
         if(Element->language() == "YaML") {
             const auto yamlValue = QString::fromStdString(Element->body()).remove("---\n");
 
-        	if (yamlValue.isEmpty())
-        		return;
-
-        	YAML::Node node = YAML::Load(yamlValue.toStdString());
-            QString value = QString::fromStdString("<div class=\"header\"><h1>"
-                    +node["name"].as<std::string>() + "</h1>"
-                    +"<h3>Author: "+node["maintainer"].as<std::string>() +"</h3></div>");
-            ui->TextBrowser->setHtml(value);
+            if (yamlValue.isEmpty()) {
+                ui->TextBrowser->clear();
+            } else {
+                YAML::Node node = YAML::Load(yamlValue.toStdString());
+                QString value = QString::fromStdString("<div class=\"header\"><h1>"
+                        +node["name"].as<std::string>() + "</h1>"
+                        +"<h3>Author: "+node["maintainer"].as<std::string>() +"</h3></div>");
+                ui->TextBrowser->setHtml(value);
+            }
             ui->LanguageCombobox->setCurrentIndex(1);
         }else if((Element->language() == "SysML")||(Element->language() == "SysMLv2")||(Element->language() == "SysMD")) {
             ui->LanguageCombobox->setCurrentIndex(2);
@@ -51,7 +67,7 @@ namespace StructuraSystems::Client {
         }
         ui->TextEditor->setVisible(false);
         ui->LanguageCombobox->setVisible(false);
-
+        updateSizeToContent();
     }
 
     void MarkdownElement::makeConnections() {
@@ -64,12 +80,23 @@ namespace StructuraSystems::Client {
         connect(ui->MoveElementUp, SIGNAL(clicked(bool)), this, SIGNAL(moveElementUp()));
         connect(ui->MoveElementDown, SIGNAL(clicked(bool)), this, SIGNAL(moveElementDown()));
         connect(ui->LanguageCombobox, SIGNAL(currentIndexChanged(int)), this, SLOT(editElementLanguage()));
+        connect(ui->TextBrowser->document()->documentLayout(),
+                &QAbstractTextDocumentLayout::documentSizeChanged,
+                this, [this](const QSizeF &) { scheduleSizeUpdate(); });
+        connect(ui->TextEditor->document()->documentLayout(),
+                &QAbstractTextDocumentLayout::documentSizeChanged,
+                this, [this](const QSizeF &) { scheduleSizeUpdate(); });
     }
 
     void MarkdownElement::contextMenuEvent(QContextMenuEvent *event) {
         openContextMenu(event->globalPos());
 
         QWidget::contextMenuEvent(event);
+    }
+
+    void MarkdownElement::resizeEvent(QResizeEvent *event) {
+        QWidget::resizeEvent(event);
+        scheduleSizeUpdate();
     }
 
     void MarkdownElement::customContextMenuRequested(QPoint pos) {
@@ -96,19 +123,64 @@ namespace StructuraSystems::Client {
             ui->LanguageCombobox->setEnabled(true);
             ui->LanguageCombobox->setVisible(true);
             EditationState = true;
+            updateSizeToContent();
         } else if(EditationState) {
             Element->setBody(ui->TextEditor->toPlainText().toStdString());
-            ui->TextBrowser->setMarkdown(QString::fromStdString(Element->body()));
-            ui->TextEditor->setVisible(false);
             ui->TextBrowser->setVisible(true);
             ui->actionEdit->setText(tr("Edit"));
             EditationState = false;
             ui->LanguageCombobox->setEnabled(false);
             ui->LanguageCombobox->setVisible(false);
-            adjustSize();
-            parentWidget()->adjustSize();
+
             redecorateMarkdownElement();
+            updateSizeToContent();
             emit elementEdited();
+        }
+    }
+
+    void MarkdownElement::scheduleSizeUpdate() {
+        if (SizeUpdatePending)
+            return;
+
+        SizeUpdatePending = true;
+        QTimer::singleShot(0, this, [this]() {
+            SizeUpdatePending = false;
+            updateSizeToContent();
+        });
+    }
+
+    void MarkdownElement::updateSizeToContent() {
+        if (SizeUpdateInProgress)
+            return;
+
+        QScopedValueRollback<bool> updateGuard(SizeUpdateInProgress, true);
+        QTextEdit *textWidget = EditationState
+                                ? ui->TextEditor
+                                : static_cast<QTextEdit *>(ui->TextBrowser);
+        const int viewportWidth = textWidget->viewport()->width();
+        if (viewportWidth <= 0)
+            return;
+
+        QTextDocument *document = textWidget->document();
+        if (qAbs(document->textWidth() - viewportWidth) > 0.5)
+            document->setTextWidth(viewportWidth);
+
+        const int chromeHeight = textWidget->height() - textWidget->viewport()->height();
+        const int contentHeight = qCeil(document->documentLayout()->documentSize().height());
+        const int targetHeight = qMax(contentHeight + chromeHeight,
+                                      textWidget->fontMetrics().height() + chromeHeight);
+
+        if (textWidget->height() != targetHeight)
+            textWidget->setFixedHeight(targetHeight);
+
+        if (layout())
+            layout()->invalidate();
+        updateGeometry();
+
+        if (QWidget *container = parentWidget()) {
+            if (container->layout())
+                container->layout()->invalidate();
+            container->updateGeometry();
         }
     }
 

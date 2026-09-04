@@ -57,6 +57,8 @@ namespace StructuraSystems::Client {
                                          std::shared_ptr<SysMLv2::REST::Commit> &commit) {
 
         const auto scrollAreaWidget = _CodeWidget->getScrollAreaWidget();
+        scrollAreaWidget->layout()->setAlignment(Qt::AlignTop);
+        scrollAreaWidget->layout()->setSizeConstraint(QLayout::SetMinAndMaxSize);
 
         if (Elements.empty() && (Commit != nullptr))
             Elements = ElementService->getElements(project, commit);
@@ -69,7 +71,7 @@ namespace StructuraSystems::Client {
 
                 auto markdownElement = new MarkdownElement(textualRepresentation, scrollAreaWidget);
                 scrollAreaWidget->layout()->addWidget(markdownElement);
-                markdownElement->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+                markdownElement->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
                 markdownElement->repaint();
 
                 connect(markdownElement, SIGNAL(elementEdited()), this, SLOT(elementEdited()));
