@@ -46,6 +46,7 @@ namespace StructuraSystems::Client {
         void onUploadModelClicked();
         void onCreateDTClicked();
         void onCommitButtonClicked();
+        void onPullButtonClicked();
 
     private slots:
         void onTabEdited();

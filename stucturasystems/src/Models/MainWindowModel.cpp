@@ -243,8 +243,43 @@ namespace StructuraSystems::Client {
     void MainWindowModel::onCommitButtonClicked()
     {
         int index = MainWindow->getActiveTabIndex();
-        const auto modelName = MainWindow->getTabTitle(index + 1);
+        const auto modelName = MainWindow->getTabTitle(index);
         const auto model = CodeWidgetModelMap[modelName];
         model->createCommit(BackendConnection);
+    }
+
+    void MainWindowModel::onPullButtonClicked()
+    {
+        auto* widget = MainWindow->getActiveTabWidget();
+        if (widget == nullptr) {
+            qDebug() << "Pull has no activated tab.";
+            return;
+        }
+
+        auto* codeWidget = qobject_cast<CodeWidget*>(widget);
+        if (codeWidget == nullptr)
+        {
+            qDebug() << "Pulls active tab is not a CodeWidget.";
+            return;
+        }
+
+        auto* model = codeWidget->getModel();
+        if (model == nullptr){
+            qDebug() << "Pull: CodeWidget has no model.";
+            return;
+        }
+
+        try {
+            qDebug() << "The pulled project:" << QString::fromStdString(model->getProject()->getName());
+            model->pullFromBackend(BackendConnection);
+        }
+        catch (const std::exception &excep) {
+            qDebug() << "Pull error:" << excep.what();
+            QMessageBox msg;
+            msg.setWindowTitle(tr("Pull"));
+            msg.setText(tr("Could not download the current model from backend."));
+            msg.setInformativeText(excep.what());
+            msg.exec();
+        }
     }
 }

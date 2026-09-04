@@ -71,6 +71,7 @@ namespace StructuraSystems::Client {
         connect(ui->actionUpload_Local_Project, SIGNAL(triggered(bool)), WindowModel, SLOT(onUploadModelClicked()));
         connect(ui->actionCreate_Digital_Twin, SIGNAL(triggered(bool)), WindowModel, SLOT(onCreateDTClicked()));
         connect(ui->actionPush, SIGNAL(triggered(bool)), WindowModel, SLOT(onCommitButtonClicked()));
+        connect(ui->actionPull, SIGNAL(triggered(bool)), WindowModel, SLOT(onPullButtonClicked()));
     }
 
     void StructuraMainWindow::addTabToMainWindow(QWidget *tab, QString title) {
@@ -114,10 +115,12 @@ namespace StructuraSystems::Client {
     }
 
     QWidget *StructuraMainWindow::getActiveTabWidget() {
-        return ui->tabWidget->currentWidget();
+        QWidget* currentWidget =  ui->ProjectTabWidget->currentWidget();
+        return currentWidget;
     }
 
     int StructuraMainWindow::getActiveTabIndex() {
-        return ui->tabWidget->currentIndex() - 1;
+        int index = ui->ProjectTabWidget->currentIndex();
+        return index;
     }
 } // StructuraSystems::Client

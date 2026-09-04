@@ -38,9 +38,6 @@ class CppStructuraSystemsRecipe(ConanFile):
         if self.settings.os == "Linux":
             self.requires("qt/6.11.1")
 
-        if self.settings.os == "Linux":
-            self.requires("qt/6.11.1")
-
     def config_options(self):
         if self.settings.os == "Windows":
             del self.options.fPIC
