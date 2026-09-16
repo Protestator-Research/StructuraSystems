@@ -12,19 +12,20 @@
 #include "ui_DigitalTwinCreationWizzard.h"
 #include "../../Services/entities/DigitalTwin.h"
 #include "../CodeWidget.h"
+#include "../../Services/BECommunicationService.h"
 
 
 namespace StructuraSystems::Client {
-    DigitalTwinCreationWizzard::DigitalTwinCreationWizzard(std::shared_ptr<SysMLv2::REST::Project> project, std::shared_ptr<SysMLv2::REST::Commit> commit, std::vector<std::shared_ptr<KerML::Entities::Element>> elements, QWidget *parent) :
+    DigitalTwinCreationWizzard::DigitalTwinCreationWizzard(std::shared_ptr<SysMLv2::REST::Project> project, std::shared_ptr<SysMLv2::REST::Commit> commit, CommunicationService* communicationService, QWidget *parent) :
     QWizard(parent),
     ui(new Ui::CreateDTWizard){
         ui->setupUi(this);
         ui->retranslateUi(this);
 
         Project = project;
-        Elements = elements;
+        Elements = communicationService->getAllElements(commit->getId(),project->getId());
         Commit = commit;
-        _CodeWidget = new CodeWidget(project, commit, elements, this);
+        _CodeWidget = new CodeWidget(project, commit, communicationService, this);
         decorateUI();
     }
 

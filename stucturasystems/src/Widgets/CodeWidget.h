@@ -32,7 +32,7 @@ namespace StructuraSystems::Client {
 
     public:
         explicit CodeWidget(std::shared_ptr<SysMLv2::REST::Project> project, std::shared_ptr<SysMLv2::REST::Commit> commit, QWidget *parent = nullptr);
-        explicit CodeWidget(std::shared_ptr<SysMLv2::REST::Project> project, std::shared_ptr<SysMLv2::REST::Commit> commit, std::vector<std::shared_ptr<KerML::Entities::Element>> entities, QWidget *parent = nullptr);
+        explicit CodeWidget(std::shared_ptr<SysMLv2::REST::Project> project, std::shared_ptr<SysMLv2::REST::Commit> commit, CommunicationService* communicationService, QWidget *parent = nullptr);
         ~CodeWidget() override;
 
         QWidget* getScrollAreaWidget();
