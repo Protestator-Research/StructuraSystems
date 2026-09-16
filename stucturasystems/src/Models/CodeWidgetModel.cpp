@@ -50,8 +50,8 @@ namespace StructuraSystems::Client {
         Project(project),
         Commit(commit),
         _CodeWidget(codeWidget),
-        _CommunicationService(communicationService),
-		ElementService(nullptr) {
+		ElementService(nullptr),
+        _CommunicationService(communicationService){
         updateItemView(project,Commit);
     }
 
