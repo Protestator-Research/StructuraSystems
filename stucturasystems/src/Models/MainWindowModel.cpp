@@ -132,9 +132,7 @@ namespace StructuraSystems::Client {
 
             auto commit = BackendConnection->getCommitWithId(project->getId(), mainBranch->getHead()->getId());
             CodeWidgetMap[QString::fromStdString(project->getName())] = new CodeWidget(project, commit,
-                                                                                       BackendConnection->getAllElements(
-                                                                                               commit->getId(),
-                                                                                               project->getId()),
+                                                                                       BackendConnection,
                                                                                        MainWindow);
             MainWindow->addTabToMainWindow(CodeWidgetMap[QString::fromStdString(project->getName())],
                                            QString::fromStdString(project->getName()));
@@ -216,7 +214,7 @@ namespace StructuraSystems::Client {
     }
 
     void MainWindowModel::onActionParseModelClicked() {
-        QString activeTabName = MainWindow->getTabTitle(MainWindow->getActiveTabIndex());
+        QString activeTabName = MainWindow->getTabTitle(MainWindow->getActiveTabIndex()+1);
         CodeWidgetModelMap[activeTabName]->parseKerMLSysMLModel();
     }
 
@@ -232,7 +230,7 @@ namespace StructuraSystems::Client {
         const auto modelName = MainWindow->getTabTitle(index+1);
         const auto model = CodeWidgetModelMap[modelName];
         std::vector<std::shared_ptr<KerML::Entities::Element>> elements = BackendConnection->getAllElements(model->getCommit()->getId(), model->getProject()->getId());
-        auto wizzard = DigitalTwinCreationWizzard(model->getProject(),model->getCommit(), elements, MainWindow);
+        auto wizzard = DigitalTwinCreationWizzard(model->getProject(),model->getCommit(), BackendConnection, MainWindow);
         wizzard.show();
         if (wizzard.exec()==QDialog::Accepted) {
             const auto digitalTwin = wizzard.generateDigitalTwin();

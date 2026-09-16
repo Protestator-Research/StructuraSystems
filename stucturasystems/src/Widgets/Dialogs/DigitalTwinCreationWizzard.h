@@ -18,13 +18,14 @@ namespace KerML::Entities {
 
 namespace StructuraSystems::Client {
     class CodeWidget;
+    class CommunicationService;
 
     namespace Ui {
         class CreateDTWizard;
     }
     class DigitalTwinCreationWizzard : public QWizard{
     public:
-        DigitalTwinCreationWizzard(std::shared_ptr<SysMLv2::REST::Project> project, std::shared_ptr<SysMLv2::REST::Commit> commit, std::vector<std::shared_ptr<KerML::Entities::Element>> elements, QWidget *parent);
+        DigitalTwinCreationWizzard(std::shared_ptr<SysMLv2::REST::Project> project, std::shared_ptr<SysMLv2::REST::Commit> commit, CommunicationService* communicationService, QWidget *parent);
         ~DigitalTwinCreationWizzard() override;
 
         std::shared_ptr<SysMLv2::REST::DigitalTwin> generateDigitalTwin();

@@ -13,6 +13,7 @@
 #include <boost/uuid/uuid.hpp>
 #include <boost/uuid/random_generator.hpp>
 #include <memory>
+#include <iostream>
 
 #include "CodeWidgetModel.h"
 
@@ -38,18 +39,19 @@ namespace StructuraSystems::Client {
             Project(project),
             Commit(commit),
             _CodeWidget(codeWidget),
-            ElementService(std::make_unique<SysMLv2::API::ElementNavigationService>()){
+            ElementService(std::make_unique<SysMLv2::API::ElementNavigationService>()),
+			_CommunicationService(nullptr){
         updateItemView(project,commit);
     }
 
-    CodeWidgetModel::CodeWidgetModel(StructuraSystems::Client::CodeWidget *codeWidget, std::shared_ptr<SysMLv2::REST::Project> &project,
-                                     std::vector<std::shared_ptr<KerML::Entities::Element>> elements, std::shared_ptr<SysMLv2::REST::Commit> &commit) :
-            QObject(codeWidget),
-            Project(project),
-            Commit(commit),
-            Elements(std::move(elements)),
-            _CodeWidget(codeWidget),
-            ElementService(std::make_unique<SysMLv2::API::ElementNavigationService>()) {
+    CodeWidgetModel::CodeWidgetModel(StructuraSystems::Client::CodeWidget* codeWidget, std::shared_ptr<SysMLv2::REST::Project>& project,
+        CommunicationService* communicationService, std::shared_ptr<SysMLv2::REST::Commit>& commit) :
+        QObject(codeWidget),
+        Project(project),
+        Commit(commit),
+        _CodeWidget(codeWidget),
+        _CommunicationService(communicationService),
+		ElementService(nullptr) {
         updateItemView(project,Commit);
     }
 
@@ -60,8 +62,15 @@ namespace StructuraSystems::Client {
         scrollAreaWidget->layout()->setAlignment(Qt::AlignTop);
         scrollAreaWidget->layout()->setSizeConstraint(QLayout::SetMinAndMaxSize);
 
-        if (Elements.empty() && (Commit != nullptr))
+        if (Elements.empty() && (Commit != nullptr) && (ElementService!=nullptr)) {
             Elements = ElementService->getElements(project, commit);
+        }else if (_CommunicationService!=nullptr)
+        {
+            Elements = _CommunicationService->getAllElements(commit->getId(), project->getId());
+        }else
+        {
+            std::cerr << "Issue with connection to get Elements" << std::endl;
+        }
 
         for (const auto &element: Elements) {
             auto type = element->getType();
@@ -111,9 +120,21 @@ namespace StructuraSystems::Client {
 
     void CodeWidgetModel::parseKerMLSysMLModel() {
         for(const auto& element : Elements){
-            if (std::dynamic_pointer_cast<KerML::Entities::TextualRepresentation>(element) != nullptr)
-                if(std::dynamic_pointer_cast<KerML::Entities::TextualRepresentation>(element)->language()=="KerML")
-                    auto parsedModel = SysMLv2::Files::Parser::parseKerML(std::dynamic_pointer_cast<KerML::Entities::TextualRepresentation>(element)->body());
+            if (std::dynamic_pointer_cast<KerML::Entities::TextualRepresentation>(element) != nullptr) {
+                const auto textualRepresentation = std::dynamic_pointer_cast<KerML::Entities::TextualRepresentation>(element);
+                std::pair<std::vector<std::shared_ptr<KerML::Entities::Element>>, std::vector<std::shared_ptr<SysMLv2::Files::ParserError>>> parsedModel;
+
+                const auto text = textualRepresentation->body();
+                
+                if (textualRepresentation->language() == "KerML") {
+                    parsedModel = SysMLv2::Files::Parser::parseKerML(text);
+                    std::cout << text << std::endl;
+                }
+                else if (textualRepresentation->language() == "SysMLv2") {
+                    parsedModel = SysMLv2::Files::Parser::parseSysMLv2(text);
+                    std::cout << text << std::endl;
+                }
+            }
         }
 
     }

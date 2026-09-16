@@ -30,7 +30,7 @@ namespace StructuraSystems::Client {
         Q_OBJECT
     public:
         CodeWidgetModel(CodeWidget* codeWidget, std::shared_ptr<SysMLv2::REST::Project> &project, std::shared_ptr<SysMLv2::REST::Commit> &commit);
-        CodeWidgetModel(CodeWidget* codeWidget, std::shared_ptr<SysMLv2::REST::Project> &project, std::vector<std::shared_ptr<KerML::Entities::Element>> elements, std::shared_ptr<SysMLv2::REST::Commit> &commit);
+        CodeWidgetModel(CodeWidget* codeWidget, std::shared_ptr<SysMLv2::REST::Project> &project, CommunicationService* communicationService, std::shared_ptr<SysMLv2::REST::Commit> &commit);
         ~CodeWidgetModel() override = default;
 
         void updateItemView(std::shared_ptr<SysMLv2::REST::Project> &project, std::shared_ptr<SysMLv2::REST::Commit> &commit);
@@ -64,6 +64,7 @@ namespace StructuraSystems::Client {
         CodeWidget* _CodeWidget;
         std::unique_ptr<SysMLv2::API::ElementNavigationService> ElementService;
         bool DialogView = false;
+        CommunicationService* _CommunicationService;
 
     };
 }
