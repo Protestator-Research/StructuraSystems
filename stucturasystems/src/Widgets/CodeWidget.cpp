@@ -33,12 +33,11 @@ namespace StructuraSystems::Client {
         return ui->CodeScrollWidgetArea->widget();
     }
 
-    CodeWidget::CodeWidget(std::shared_ptr<SysMLv2::REST::Project> project, std::shared_ptr<SysMLv2::REST::Commit> commit,
-                           std::vector<std::shared_ptr<KerML::Entities::Element>> entities, QWidget *parent) :
+    CodeWidget::CodeWidget(std::shared_ptr<SysMLv2::REST::Project> project, std::shared_ptr<SysMLv2::REST::Commit> commit, CommunicationService* communicationService, QWidget *parent) :
                            QWidget(parent), ui(new Ui::CodeWidget){
         ui->setupUi(this);
         ui->retranslateUi(this);
-        Model = new CodeWidgetModel(this, project, entities, commit);
+        Model = new CodeWidgetModel(this, project, communicationService, commit);
         HtmlDelegate = new HTMLDelegate();
         decorateWidget();
     }
