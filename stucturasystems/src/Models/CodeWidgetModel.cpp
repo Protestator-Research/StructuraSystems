@@ -32,154 +32,163 @@
 
 
 namespace StructuraSystems::Client {
-    CodeWidgetModel::CodeWidgetModel(StructuraSystems::Client::CodeWidget *codeWidget,
-                                     std::shared_ptr<SysMLv2::REST::Project> &project,
-                                     std::shared_ptr<SysMLv2::REST::Commit> &commit) :
-            QObject(codeWidget),
-            Project(project),
-            Commit(commit),
-            _CodeWidget(codeWidget),
-            ElementService(std::make_unique<SysMLv2::API::ElementNavigationService>()),
-			_CommunicationService(nullptr){
-        updateItemView(project,commit);
-    }
+	CodeWidgetModel::CodeWidgetModel(StructuraSystems::Client::CodeWidget* codeWidget,
+		std::shared_ptr<SysMLv2::REST::Project>& project,
+		std::shared_ptr<SysMLv2::REST::Commit>& commit) :
+		QObject(codeWidget),
+		Project(project),
+		Commit(commit),
+		_CodeWidget(codeWidget),
+		ElementService(std::make_unique<SysMLv2::API::ElementNavigationService>()),
+		_CommunicationService(nullptr) {
+		updateItemView(project, commit);
+	}
 
-    CodeWidgetModel::CodeWidgetModel(StructuraSystems::Client::CodeWidget* codeWidget, std::shared_ptr<SysMLv2::REST::Project>& project,
-        CommunicationService* communicationService, std::shared_ptr<SysMLv2::REST::Commit>& commit) :
-        QObject(codeWidget),
-        Project(project),
-        Commit(commit),
-        _CodeWidget(codeWidget),
-        _CommunicationService(communicationService),
+	CodeWidgetModel::CodeWidgetModel(StructuraSystems::Client::CodeWidget* codeWidget, std::shared_ptr<SysMLv2::REST::Project>& project,
+		CommunicationService* communicationService, std::shared_ptr<SysMLv2::REST::Commit>& commit) :
+		QObject(codeWidget),
+		Project(project),
+		Commit(commit),
+		_CodeWidget(codeWidget),
+		_CommunicationService(communicationService),
 		ElementService(nullptr) {
-        updateItemView(project,Commit);
-    }
+		updateItemView(project, Commit);
+	}
 
-    void CodeWidgetModel::updateItemView(std::shared_ptr<SysMLv2::REST::Project> &project,
-                                         std::shared_ptr<SysMLv2::REST::Commit> &commit) {
+	void CodeWidgetModel::updateItemView(std::shared_ptr<SysMLv2::REST::Project>& project,
+		std::shared_ptr<SysMLv2::REST::Commit>& commit) {
 
-        const auto scrollAreaWidget = _CodeWidget->getScrollAreaWidget();
-        scrollAreaWidget->layout()->setAlignment(Qt::AlignTop);
-        scrollAreaWidget->layout()->setSizeConstraint(QLayout::SetMinAndMaxSize);
+		const auto scrollAreaWidget = _CodeWidget->getScrollAreaWidget();
+		scrollAreaWidget->layout()->setAlignment(Qt::AlignTop);
+		scrollAreaWidget->layout()->setSizeConstraint(QLayout::SetMinAndMaxSize);
 
-        if (Elements.empty() && (Commit != nullptr) && (ElementService!=nullptr)) {
-            Elements = ElementService->getElements(project, commit);
-        }else if (_CommunicationService!=nullptr)
-        {
-            Elements = _CommunicationService->getAllElements(commit->getId(), project->getId());
-        }else
-        {
-            std::cerr << "Issue with connection to get Elements" << std::endl;
-        }
+		if (Elements.empty() && (Commit != nullptr) && (ElementService != nullptr)) {
+			Elements = ElementService->getElements(project, commit);
+		}
+		else if (_CommunicationService != nullptr)
+		{
+			Elements = _CommunicationService->getAllElements(commit->getId(), project->getId());
+		}
+		else
+		{
+			std::cerr << "Issue with connection to get Elements" << std::endl;
+		}
 
-        for (const auto &element: Elements) {
-            auto type = element->getType();
-            std::transform(type.begin(), type.end(), type.begin(), ::tolower);
-            if (type == SysMLv2::REST::TEXTUAL_REPRESENTATION_TYPE) {
-                const auto textualRepresentation = std::dynamic_pointer_cast<KerML::Entities::TextualRepresentation>(element);
+		for (const auto& element : Elements) {
+			auto type = element->getType();
+			std::transform(type.begin(), type.end(), type.begin(), ::tolower);
+			if (type == SysMLv2::REST::TEXTUAL_REPRESENTATION_TYPE) {
+				const auto textualRepresentation = std::dynamic_pointer_cast<KerML::Entities::TextualRepresentation>(element);
 
-                auto markdownElement = new MarkdownElement(textualRepresentation, scrollAreaWidget);
-                scrollAreaWidget->layout()->addWidget(markdownElement);
-                markdownElement->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-                markdownElement->repaint();
+				auto markdownElement = new MarkdownElement(textualRepresentation, scrollAreaWidget);
+				scrollAreaWidget->layout()->addWidget(markdownElement);
+				markdownElement->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+				markdownElement->repaint();
 
-                connect(markdownElement, SIGNAL(elementEdited()), this, SLOT(elementEdited()));
+				connect(markdownElement, SIGNAL(elementEdited()), this, SLOT(elementEdited()));
 
-                connect(markdownElement, SIGNAL(elementEdited()), this, SLOT(elementEdited()));
-            }
-        }
-        scrollAreaWidget->repaint();
-    }
+				connect(markdownElement, SIGNAL(elementEdited()), this, SLOT(elementEdited()));
+			}
+		}
+		scrollAreaWidget->repaint();
+	}
 
-    void CodeWidgetModel::elementEdited() {
-        _CodeWidget->setWindowModified(true);
-        emit tabEdited();
-    }
+	void CodeWidgetModel::elementEdited() {
+		_CodeWidget->setWindowModified(true);
+		emit tabEdited();
+	}
 
-    void CodeWidgetModel::createCommit(CommunicationService* communicationService) {
-        bool userAcceptedDialog;
-        QString commitDescription = QInputDialog::getText(_CodeWidget, tr("Commit Description"), tr("Please give a Commit Descriptions"),QLineEdit::Normal,tr(""),&userAcceptedDialog);
-        if (userAcceptedDialog) {
-            std::vector<std::shared_ptr<SysMLv2::REST::DataVersion>> requestedChage;
-            for (const auto& element : Elements) {
-                auto dataVersion = std::make_shared<SysMLv2::REST::DataVersion>(boost::uuids::random_generator()(), element);
-                requestedChage.push_back(dataVersion);
-            }
+	void CodeWidgetModel::createCommit(CommunicationService* communicationService) {
+		bool userAcceptedDialog;
+		QString commitDescription = QInputDialog::getText(_CodeWidget, tr("Commit Description"), tr("Please give a Commit Descriptions"), QLineEdit::Normal, tr(""), &userAcceptedDialog);
+		if (userAcceptedDialog) {
+			std::vector<std::shared_ptr<SysMLv2::REST::DataVersion>> requestedChage;
+			for (const auto& element : Elements) {
+				auto dataVersion = std::make_shared<SysMLv2::REST::DataVersion>(boost::uuids::random_generator()(), element);
+				requestedChage.push_back(dataVersion);
+			}
 
-            auto commitRequest = std::make_shared<SysMLv2::REST::CommitRequest>(commitDescription.toStdString(), requestedChage);
+			auto commitRequest = std::make_shared<SysMLv2::REST::CommitRequest>(commitDescription.toStdString(), requestedChage);
 
-            Commit = communicationService->postCommitWithId(Project->getId(), commitRequest);
-        }
-    }
+			Commit = communicationService->postCommitWithId(Project->getId(), commitRequest);
+		}
+	}
 
-    void CodeWidgetModel::saveFile(std::string basePath) {
-        StructuraSystemsParser parser;
-        auto path = QString::fromStdString(basePath + "/" + Project->getName());
-        parser.writeFile(path, Elements);
-    }
+	void CodeWidgetModel::saveFile(std::string basePath) {
+		StructuraSystemsParser parser;
+		auto path = QString::fromStdString(basePath + "/" + Project->getName());
+		parser.writeFile(path, Elements);
+	}
 
-    void CodeWidgetModel::parseKerMLSysMLModel() {
-        for(const auto& element : Elements){
-            if (std::dynamic_pointer_cast<KerML::Entities::TextualRepresentation>(element) != nullptr) {
-                const auto textualRepresentation = std::dynamic_pointer_cast<KerML::Entities::TextualRepresentation>(element);
-                std::pair<std::vector<std::shared_ptr<KerML::Entities::Element>>, std::vector<std::shared_ptr<SysMLv2::Files::ParserError>>> parsedModel;
+	void CodeWidgetModel::parseKerMLSysMLModel() {
+		for (const auto& element : Elements) {
+			if (std::dynamic_pointer_cast<KerML::Entities::TextualRepresentation>(element) != nullptr) {
+				const auto textualRepresentation = std::dynamic_pointer_cast<KerML::Entities::TextualRepresentation>(element);
+				std::pair<std::vector<std::shared_ptr<KerML::Entities::Element>>, std::vector<std::shared_ptr<SysMLv2::Files::ParserError>>> parsedModel;
 
-                const auto text = textualRepresentation->body();
-                
-                if (textualRepresentation->language() == "KerML") {
-                    parsedModel = SysMLv2::Files::Parser::parseKerML(text);
-                    std::cout << text << std::endl;
-                }
-                else if (textualRepresentation->language() == "SysMLv2") {
-                    parsedModel = SysMLv2::Files::Parser::parseSysMLv2(text);
-                    std::cout << text << std::endl;
-                }
-            }
-        }
+				const auto text = textualRepresentation->body();
 
-    }
+				if (textualRepresentation->language() == "KerML")
+					parsedModel = SysMLv2::Files::Parser::parseKerML(text);
 
-    std::shared_ptr<SysMLv2::REST::Commit> CodeWidgetModel::getCommit() const {
-        return Commit;
-    }
+				else if (textualRepresentation->language() == "SysMLv2")
+					parsedModel = SysMLv2::Files::Parser::parseSysMLv2(text);
 
-    std::shared_ptr<SysMLv2::REST::Project> CodeWidgetModel::getProject() const {
-        return Project;
-    }
+				if ((textualRepresentation->language() == "SysMLv2") || (textualRepresentation->language() == "KerML"))
+				{
+					for (const auto& elem : parsedModel.second)
+						ParserErrors.push_back(elem);
+					for (const auto& elem : parsedModel.first)
+						InstaceElements.push_back(elem);
+				}
+			}
+		}
 
-    void CodeWidgetModel::setDialogView(bool dialogView) {
-        DialogView = dialogView;
-        updateItemView(Project, Commit);
-    }
+		std::cout << "Number of Errors: " << ParserErrors.size() << std::endl;
+		std::cout << "Number of Elements: " << InstaceElements.size() << std::endl;
+	}
 
-    std::vector<std::shared_ptr<KerML::Entities::Element>> CodeWidgetModel::getSelectedElements() const {
-        //const auto codeDisplayWidget = CodeWidget->getListWidget();
+	std::shared_ptr<SysMLv2::REST::Commit> CodeWidgetModel::getCommit() const {
+		return Commit;
+	}
 
-        //const auto selectedItems = codeDisplayWidget->selectedItems();
+	std::shared_ptr<SysMLv2::REST::Project> CodeWidgetModel::getProject() const {
+		return Project;
+	}
 
-        std::vector<std::shared_ptr<KerML::Entities::Element>> result;
-        //for (const auto& index : selectedItems) {
-        //    const auto& markdownWidget = dynamic_cast<MarkdownElement*>(index);
-        //    result.push_back(markdownWidget->getElement());
-        //}
+	void CodeWidgetModel::setDialogView(bool dialogView) {
+		DialogView = dialogView;
+		updateItemView(Project, Commit);
+	}
+
+	std::vector<std::shared_ptr<KerML::Entities::Element>> CodeWidgetModel::getSelectedElements() const {
+		//const auto codeDisplayWidget = CodeWidget->getListWidget();
+
+		//const auto selectedItems = codeDisplayWidget->selectedItems();
+
+		std::vector<std::shared_ptr<KerML::Entities::Element>> result;
+		//for (const auto& index : selectedItems) {
+		//    const auto& markdownWidget = dynamic_cast<MarkdownElement*>(index);
+		//    result.push_back(markdownWidget->getElement());
+		//}
 
 
-        return result;
-    }
+		return result;
+	}
 
-    void CodeWidgetModel::createProjectAndCommit(CommunicationService* communicationService) {
-        Project = communicationService->postProject(Project->getName(), Project->getDescription(), "Main");
+	void CodeWidgetModel::createProjectAndCommit(CommunicationService* communicationService) {
+		Project = communicationService->postProject(Project->getName(), Project->getDescription(), "Main");
 
-        std::vector<std::shared_ptr<SysMLv2::REST::DataVersion>> requestedChage;
-        for (const auto &element : Elements) {
-            auto dataVersion = std::make_shared<SysMLv2::REST::DataVersion>(boost::uuids::random_generator()(), element);
-            requestedChage.push_back(dataVersion);
-        }
+		std::vector<std::shared_ptr<SysMLv2::REST::DataVersion>> requestedChage;
+		for (const auto& element : Elements) {
+			auto dataVersion = std::make_shared<SysMLv2::REST::DataVersion>(boost::uuids::random_generator()(), element);
+			requestedChage.push_back(dataVersion);
+		}
 
-        auto commitRequest = std::make_shared<SysMLv2::REST::CommitRequest>("Upload from Local Project, by Structura Systems", requestedChage);
+		auto commitRequest = std::make_shared<SysMLv2::REST::CommitRequest>("Upload from Local Project, by Structura Systems", requestedChage);
 
-        Commit = communicationService->postCommitWithId(Project->getId(), commitRequest);
-    }
+		Commit = communicationService->postCommitWithId(Project->getId(), commitRequest);
+	}
 
 
 }
