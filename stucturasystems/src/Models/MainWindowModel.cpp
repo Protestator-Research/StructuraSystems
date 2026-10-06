@@ -193,7 +193,10 @@ namespace StructuraSystems::Client {
     }
 
     void MainWindowModel::saveFile() {
-        const auto projectName = MainWindow->getTabTitle(MainWindow->getActiveTabIndex());
+        int index = MainWindow->getActiveTabIndex();
+        if (index < 0)
+            return;
+        const auto projectName = MainWindow->getTabTitle(index);
         CodeWidgetModelMap[projectName]->saveFile(Settings->workingDirectory());
     }
 
@@ -214,12 +217,18 @@ namespace StructuraSystems::Client {
     }
 
     void MainWindowModel::onActionParseModelClicked() {
-        QString activeTabName = MainWindow->getTabTitle(MainWindow->getActiveTabIndex()+1);
+        int index = MainWindow->getActiveTabIndex();
+        if (index < 0)
+            return;
+        QString activeTabName = MainWindow->getTabTitle(index);
         CodeWidgetModelMap[activeTabName]->parseKerMLSysMLModel();
     }
 
     void MainWindowModel::onUploadModelClicked() {
-        const auto modelName = MainWindow->getTabTitle(MainWindow->getActiveTabIndex());
+        int index = MainWindow->getActiveTabIndex();
+        if (index < 0)
+            return;
+        const auto modelName = MainWindow->getTabTitle(index);
         const auto model = CodeWidgetModelMap[modelName];
         model->createProjectAndCommit(BackendConnection);
         updateOnlineProjects();
@@ -227,7 +236,9 @@ namespace StructuraSystems::Client {
 
     void MainWindowModel::onCreateDTClicked() {
         int index = MainWindow->getActiveTabIndex();
-        const auto modelName = MainWindow->getTabTitle(index+1);
+        if (index < 0)
+            return;
+        const auto modelName = MainWindow->getTabTitle(index);
         const auto model = CodeWidgetModelMap[modelName];
         std::vector<std::shared_ptr<KerML::Entities::Element>> elements = BackendConnection->getAllElements(model->getCommit()->getId(), model->getProject()->getId());
         auto wizzard = DigitalTwinCreationWizzard(model->getProject(),model->getCommit(), BackendConnection, MainWindow);
@@ -241,7 +252,9 @@ namespace StructuraSystems::Client {
     void MainWindowModel::onCommitButtonClicked()
     {
         int index = MainWindow->getActiveTabIndex();
-        const auto modelName = MainWindow->getTabTitle(index + 1);
+        if (index < 0)
+            return;
+        const auto modelName = MainWindow->getTabTitle(index);
         const auto model = CodeWidgetModelMap[modelName];
         model->createCommit(BackendConnection);
     }

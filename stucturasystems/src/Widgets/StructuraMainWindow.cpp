@@ -114,10 +114,10 @@ namespace StructuraSystems::Client {
     }
 
     QWidget *StructuraMainWindow::getActiveTabWidget() {
-        return ui->tabWidget->currentWidget();
+        return ui->ProjectTabWidget->currentWidget();
     }
 
     int StructuraMainWindow::getActiveTabIndex() {
-        return ui->tabWidget->currentIndex() - 1;
+        return ui->ProjectTabWidget->currentIndex();
     }
 } // StructuraSystems::Client
