@@ -61,12 +61,41 @@ set(SOURCES
 
 qt_add_executable(StructuraSystems ${SOURCES})
 
+set_source_files_properties(qml/Theme.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
+
 qt_add_qml_module(StructuraSystems
         URI StructuraSystems
         VERSION 1.0
         QML_FILES
             qml/Main.qml
+            qml/Theme.qml
+            qml/components/Icon.qml
+            qml/components/IconToolButton.qml
+            qml/components/EmptyState.qml
+            qml/components/InsertDivider.qml
+            qml/components/LanguageChip.qml
+            qml/components/LanguageMenu.qml
+            qml/components/NavigationRail.qml
+            qml/components/NavRailItem.qml
+            qml/components/ProjectList.qml
+            qml/components/SegmentedControl.qml
+            qml/components/Snackbar.qml
+            qml/views/DigitalTwinPane.qml
+            qml/views/EditorView.qml
+            qml/views/ElementCard.qml
+            qml/views/ExplorerPane.qml
+            qml/views/OnlinePane.qml
+            qml/views/ProblemsSheet.qml
+            qml/views/StatusBar.qml
+            qml/dialogs/CloseDocumentDialog.qml
+            qml/dialogs/CommitDialog.qml
+            qml/dialogs/DetailsDialog.qml
+            qml/dialogs/DigitalTwinWizard.qml
+            qml/dialogs/NewProjectDialog.qml
+            qml/dialogs/SettingsDialog.qml
         SOURCES
+            src/ViewModels/SysMLHighlighter.cpp
+            src/ViewModels/SysMLHighlighter.h
             src/ViewModels/AppController.cpp
             src/ViewModels/AppController.h
             src/ViewModels/DocumentModel.cpp
