@@ -1,0 +1,144 @@
+//
+// Created by Moritz Herzog on 07.10.26.
+//
+
+#ifndef STRUCTURASYSTEMS_APPCONTROLLER_H
+#define STRUCTURASYSTEMS_APPCONTROLLER_H
+
+#include <memory>
+#include <vector>
+#include <QHash>
+#include <QList>
+#include <QObject>
+#include <QPointer>
+#include <QString>
+#include <QStringList>
+#include <QUrl>
+#include <QtQml/qqmlregistration.h>
+
+namespace SysMLv2::REST {
+    class Project;
+}
+
+namespace StructuraSystems::Client {
+    class CommunicationService;
+    class DocumentModel;
+    class OpenDocumentsModel;
+    class ProblemListModel;
+    class ProjectItemModel;
+    class SettingsController;
+
+    /**
+     * Central view model of the application (singleton in QML). Owns the settings, the backend connection, the project
+     * lists and the opened documents. All backend communication runs asynchronously, results are applied on the GUI thread.
+     * Errors and messages are reported by the notify signal, there is no dialog code in here.
+     */
+    class AppController : public QObject {
+        Q_OBJECT
+        QML_ELEMENT
+        QML_SINGLETON
+        Q_MOC_INCLUDE("DocumentModel.h")
+        Q_MOC_INCLUDE("OpenDocumentsModel.h")
+        Q_MOC_INCLUDE("ProblemListModel.h")
+        Q_MOC_INCLUDE("SettingsController.h")
+        Q_MOC_INCLUDE("../Models/ItemModels/ProjectItemModel.h")
+        Q_PROPERTY(bool connected READ connected NOTIFY connectedChanged)
+        Q_PROPERTY(bool busy READ busy NOTIFY busyChanged)
+        Q_PROPERTY(QString statusText READ statusText NOTIFY statusTextChanged)
+        Q_PROPERTY(StructuraSystems::Client::ProjectItemModel *localProjects READ localProjects CONSTANT)
+        Q_PROPERTY(StructuraSystems::Client::ProjectItemModel *onlineProjects READ onlineProjects CONSTANT)
+        Q_PROPERTY(StructuraSystems::Client::OpenDocumentsModel *documents READ documents CONSTANT)
+        Q_PROPERTY(int currentIndex READ currentIndex WRITE setCurrentIndex NOTIFY currentIndexChanged)
+        Q_PROPERTY(StructuraSystems::Client::DocumentModel *currentDocument READ currentDocument NOTIFY currentDocumentChanged)
+        Q_PROPERTY(StructuraSystems::Client::ProblemListModel *problems READ problems CONSTANT)
+        Q_PROPERTY(StructuraSystems::Client::SettingsController *settings READ settings CONSTANT)
+    public:
+        explicit AppController(QObject *parent = nullptr);
+        ~AppController() override;
+
+        [[nodiscard]] bool connected() const;
+        [[nodiscard]] bool busy() const;
+        [[nodiscard]] QString statusText() const;
+        [[nodiscard]] ProjectItemModel *localProjects() const;
+        [[nodiscard]] ProjectItemModel *onlineProjects() const;
+        [[nodiscard]] OpenDocumentsModel *documents() const;
+        [[nodiscard]] int currentIndex() const;
+        void setCurrentIndex(int index);
+        [[nodiscard]] DocumentModel *currentDocument() const;
+        [[nodiscard]] ProblemListModel *problems() const;
+        [[nodiscard]] SettingsController *settings() const;
+
+        /** Loads the projects of a folder into the local project list. Also becomes the working directory. */
+        Q_INVOKABLE void openFolder(const QUrl &folder);
+        /** Adds single files to the local project list and opens them. */
+        Q_INVOKABLE void openFiles(const QList<QUrl> &files);
+        Q_INVOKABLE void openLocalProject(int row);
+        Q_INVOKABLE void openOnlineProject(int row);
+        Q_INVOKABLE void closeDocument(int index);
+
+        Q_INVOKABLE void connectToBackend();
+        Q_INVOKABLE void disconnectFromBackend();
+        Q_INVOKABLE void refreshOnlineProjects();
+
+        Q_INVOKABLE void saveCurrent();
+        Q_INVOKABLE void parseCurrent();
+        Q_INVOKABLE void commitCurrent(const QString &message);
+        Q_INVOKABLE void uploadCurrent();
+
+        Q_INVOKABLE void createLocalProject(const QString &name, const QString &description);
+        /** @param visibility "Private", "Internal" or "Public" */
+        Q_INVOKABLE void createOnlineProject(const QString &name, const QString &description, const QString &visibility);
+        /** @param elementIds uuid strings of the elements (see DocumentModel::selectedElementIds) */
+        Q_INVOKABLE void createDigitalTwin(const QString &name, const QStringList &elementIds);
+
+    signals:
+        void connectedChanged();
+        void busyChanged();
+        void statusTextChanged();
+        void currentIndexChanged();
+        void currentDocumentChanged();
+        /**
+         * @param level 0 = info, 1 = success, 2 = warning, 3 = error
+         * @param message short text for the user
+         * @param details optional technical details (e.g. the exception text), may be empty
+         */
+        void notify(int level, const QString &message, const QString &details);
+
+    private:
+        template<typename Result, typename Work, typename Done>
+        void runAsync(const QString &description, Work work, Done done);
+
+        void setBusy(bool busy);
+        void setConnected(bool connected);
+        void setStatusText(const QString &text);
+        void emitNotify(int level, const QString &message, const QString &details = QString());
+
+        void loadFolder(const QString &folder);
+        void loadFile(const QString &filePath, const QString &folder);
+        void openLocalProjectByName(const QString &name);
+        void openDocument(const QString &key, DocumentModel *document);
+        void updateCurrentDocument(int newIndex);
+        void refreshProblems();
+        void populateOnlineProjects(const std::vector<std::shared_ptr<SysMLv2::REST::Project>> &projects);
+        void openWorkingDirectoryIfPresent();
+        void onSettingsSaved();
+        bool requireConnection();
+
+        SettingsController *Settings;
+        std::shared_ptr<CommunicationService> BackendConnection;
+        ProjectItemModel *LocalProjects;
+        ProjectItemModel *OnlineProjects;
+        OpenDocumentsModel *Documents;
+        ProblemListModel *Problems;
+
+        int CurrentIndex = -1;
+        QPointer<DocumentModel> CurrentDocument;
+        bool Connected = false;
+        bool Busy = false;
+        QString StatusText;
+        QString LoadedFolder;
+        QHash<QString, QString> LocalFolders;
+    };
+}
+
+#endif //STRUCTURASYSTEMS_APPCONTROLLER_H

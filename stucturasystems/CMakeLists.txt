@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.15)
 
-qt_standard_project_setup()
+qt_standard_project_setup(REQUIRES 6.8)
 
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTOUIC OFF)
@@ -8,16 +8,6 @@ set(CMAKE_AUTORCC ON)
 
 set(SOURCES
         src/main.cpp
-        src/Widgets/StructuraMainWindow.cpp
-        src/Widgets/StructuraMainWindow.h
-        src/Models/MainWindowModel.cpp
-        src/Models/MainWindowModel.h
-        src/Models/CodeWidgetModel.cpp
-        src/Models/CodeWidgetModel.h
-        src/Widgets/CodeWidget.h
-        src/Widgets/CodeWidget.cpp
-        src/Models/ItemModels/ProjectItemModel.cpp
-        src/Models/ItemModels/ProjectItemModel.h
         src/Models/ItemModels/ProjectTreeViewItem.h
         src/Models/ItemModels/ProjectTreeViewItem.cpp
         src/Models/Parser/StructuraSystemsParser.cpp
@@ -59,49 +49,52 @@ set(SOURCES
         src/Models/Parser/Markdown/CommonmarkParser/utf8.c
         src/Models/Parser/Markdown/CommonmarkParser/utf8.h
         src/Models/Parser/Markdown/CommonmarkParser/xml.c
-        src/Models/Delegates/HtmlDelegate.cpp
-        src/Models/Delegates/HtmlDelegate.h
-        src/Widgets/Dialogs/EditProjectDialog.h
-        src/Widgets/Dialogs/EditProjectDialog.cpp
         resources/Resources.qrc
         ../resources/sysml.qrc
         src/Models/SettingsModel.cpp
         src/Models/SettingsModel.h
-        src/Widgets/Dialogs/SettingsDialog.cpp
-        src/Widgets/Dialogs/SettingsDialog.h
-        src/Models/ItemModels/ErrorItemModel.cpp
-        src/Models/ItemModels/ErrorItemModel.h
-        src/Widgets/ListWidgets/AddElementWidget.h
-        src/Widgets/ListWidgets/AddElementWidget.cpp
-        src/Widgets/ListWidgets/MarkdownElement.h
-        src/Widgets/ListWidgets/MarkdownElement.cpp
         src/Services/BECommunicationService.h
         src/Services/BECommunicationService.cpp
         src/Services/entities/DigitalTwin.h
-        src/Services/entities/DigitalTwin.cpp
-        src/Widgets/Dialogs/DigitalTwinCreationWizzard.cpp
-        src/Widgets/Dialogs/DigitalTwinCreationWizzard.h)
-
-qt_wrap_ui(SOURCES
-        ui/MainWindow.ui
-        ui/CodeWidget.ui
-        ui/EditProjectDialog.ui
-        ui/SettingsDialog.ui
-        ui/MarkdownElement.ui
-        ui/AddElementWidget.ui
-        ui/DigitalTwinCreationWizzard.ui)
-
-add_executable(StructuraSystems ${SOURCES})
+        src/Services/entities/DigitalTwin.cpp)
 
 
+qt_add_executable(StructuraSystems ${SOURCES})
 
+qt_add_qml_module(StructuraSystems
+        URI StructuraSystems
+        VERSION 1.0
+        QML_FILES
+            qml/Main.qml
+        SOURCES
+            src/ViewModels/AppController.cpp
+            src/ViewModels/AppController.h
+            src/ViewModels/DocumentModel.cpp
+            src/ViewModels/DocumentModel.h
+            src/ViewModels/OpenDocumentsModel.cpp
+            src/ViewModels/OpenDocumentsModel.h
+            src/ViewModels/ProblemListModel.cpp
+            src/ViewModels/ProblemListModel.h
+            src/ViewModels/SettingsController.cpp
+            src/ViewModels/SettingsController.h
+            src/Models/ItemModels/ProjectItemModel.cpp
+            src/Models/ItemModels/ProjectItemModel.h)
+
+
+
+# The QML type registration and moc include the ViewModel headers by their plain file name.
 target_include_directories(StructuraSystems PUBLIC
-        "${CMAKE_CURRENT_BINARY_DIR}/")
+        "${CMAKE_CURRENT_BINARY_DIR}/"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/ViewModels"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/Models/ItemModels")
 
 target_link_libraries(StructuraSystems PUBLIC
         Qt6::Core
-        Qt6::Widgets
-        Qt6::Charts
+        Qt6::Gui
+        Qt6::Qml
+        Qt6::Quick
+        Qt6::QuickControls2
+        Qt6::Concurrent
         md4c::md4c
         sysmllib::sysmllib
         yaml-cpp::yaml-cpp)
@@ -128,4 +121,4 @@ elseif (UNIX AND NOT APPLE)
     target_compile_options(StructuraSystems PRIVATE -Wall -Wextra -Wpedantic -Werror)
 else ()
     target_compile_options(StructuraSystems PRIVATE -Wall -Wextra -Wpedantic -Werror)
-endif()
+endif()

@@ -70,7 +70,10 @@ class CppStructuraSystemsRecipe(ConanFile):
                 self.options["qt/*"].shared = False
 
         if self.settings.os == "Linux":
-            self.options["qt/*"].qtcharts = True
+            self.options["qt/*"].qtdeclarative = True
+            self.options["qt/*"].qtshadertools = True
+            self.options["qt/*"].with_pq = False
+            self.options["qt/*"].with_odbc = False
   
 
     
@@ -93,7 +96,7 @@ class CppStructuraSystemsRecipe(ConanFile):
 
     def build_requirements(self):
         if self.settings.os == "Linux":
-            self.tool_requires("qt/6.11.1")
+            self.tool_requires("qt/6.11.1", options={"qtdeclarative": True, "qtshadertools": True, "with_pq": False, "with_odbc": False})
         
         self.tool_requires("cmake/[>=3.30.0 <5]")
 

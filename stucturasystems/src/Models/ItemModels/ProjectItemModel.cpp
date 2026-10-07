@@ -26,7 +26,10 @@ namespace StructuraSystems::Client {
                ? createIndex(parentItem->row(), 0, parentItem) : QModelIndex{};
 }
 
-    int ProjectItemModel::rowCount(const QModelIndex &) const {
+    int ProjectItemModel::rowCount(const QModelIndex &parent) const {
+        // Flat list: only the (invisible) root has children.
+        if (parent.isValid())
+            return 0;
         return RootItem->childCount();
     }
 
@@ -35,11 +38,33 @@ namespace StructuraSystems::Client {
     }
 
     QVariant ProjectItemModel::data(const QModelIndex &index, int role) const {
-        if (!index.isValid() || role != Qt::DisplayRole)
+        if (!index.isValid())
             return {};
 
         ProjectTreeViewItem *item = const_cast<ProjectTreeViewItem *>(static_cast<const ProjectTreeViewItem *>(index.internalPointer()));
-        return item->data();
+        switch (role) {
+            case Qt::DisplayRole:
+            case NameRole:
+                return item->data();
+            case DescriptionRole: {
+                const auto project = item->getProject();
+                return project ? QVariant(QString::fromStdString(project->getDescription())) : QVariant(QString());
+            }
+            default:
+                return {};
+        }
+    }
+
+    QHash<int, QByteArray> ProjectItemModel::roleNames() const {
+        return {
+            {Qt::DisplayRole, "display"},
+            {NameRole, "name"},
+            {DescriptionRole, "description"}
+        };
+    }
+
+    int ProjectItemModel::count() const {
+        return RootItem->childCount();
     }
 
     std::vector<std::shared_ptr<SysMLv2::REST::Project>> ProjectItemModel::getProjects() {
@@ -55,11 +80,8 @@ namespace StructuraSystems::Client {
 
     std::shared_ptr<SysMLv2::REST::Project>
     ProjectItemModel::createProject(std::string projectName, std::string description) {
-        beginInsertRows(QModelIndex(), 0, RootItem->childCount());
         auto project = std::make_shared<SysMLv2::REST::Project>(projectName, description, "main");
-        RootItem->appendProject(project);
-        endInsertRows();
-        emit dataChanged(index(0,0), index(RootItem->childCount()-1,1), {Qt::DisplayRole});
+        appendProject(project);
         return project;
     }
 
@@ -73,7 +95,8 @@ namespace StructuraSystems::Client {
             project->setDescription(description);
         if(branch)
             project->setDefaultBranch(branch);
-        emit dataChanged(index(0,0), index(RootItem->childCount()-1,1), {Qt::DisplayRole});
+        if (RootItem->childCount() > 0)
+            emit dataChanged(index(0,0), index(RootItem->childCount()-1,0), {Qt::DisplayRole, NameRole, DescriptionRole});
         return project;
     }
 
@@ -113,13 +136,14 @@ namespace StructuraSystems::Client {
         beginRemoveRows(QModelIndex(), 0, lastElement);
         RootItem->clearChildItems();
         endRemoveRows();
-        removeRows(0, lastElement, index(0,0));
+        emit countChanged();
     }
 
     void ProjectItemModel::appendProject(std::shared_ptr<SysMLv2::REST::Project> project) {
-        beginInsertRows(QModelIndex(), 0, RootItem->childCount());
+        const int newRow = RootItem->childCount();
+        beginInsertRows(QModelIndex(), newRow, newRow);
         RootItem->appendProject(project);
         endInsertRows();
-        emit dataChanged(index(0,0), index(RootItem->childCount()-1,1), {Qt::DisplayRole});
+        emit countChanged();
     }
-}
+}

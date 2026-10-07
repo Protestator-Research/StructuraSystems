@@ -6,6 +6,7 @@
 #define STRUCTURASYSTEMS_PROJECTITEMMODEL_H
 
 #include <QAbstractItemModel>
+#include <QtQml/qqmlregistration.h>
 #include <sysmlv2/service/interfaces/IProjectService.h>
 
 namespace StructuraSystems::Client {
@@ -13,7 +14,16 @@ namespace StructuraSystems::Client {
 
     class ProjectItemModel : public QAbstractItemModel, public SysMLv2::API::IProjectService{
     Q_OBJECT
+    QML_NAMED_ELEMENT(ProjectListModel)
+    QML_UNCREATABLE("ProjectListModel instances are owned by AppController.")
+    Q_PROPERTY(int count READ count NOTIFY countChanged)
     public:
+        enum Roles {
+            NameRole = Qt::UserRole + 1,
+            DescriptionRole
+        };
+        Q_ENUM(Roles)
+
         explicit ProjectItemModel(QObject* parent = nullptr);
         ~ProjectItemModel() override;
 
@@ -25,7 +35,11 @@ namespace StructuraSystems::Client {
 
         int columnCount(const QModelIndex &parent) const override;
 
-        QVariant data(const QModelIndex &index, int role) const override;
+        QVariant data(const QModelIndex &index, int role = Qt::DisplayRole) const override;
+
+        QHash<int, QByteArray> roleNames() const override;
+
+        [[nodiscard]] int count() const;
 
         std::vector<std::shared_ptr<SysMLv2::REST::Project>> getProjects() override;
 
@@ -42,6 +56,10 @@ namespace StructuraSystems::Client {
         QVariant headerData(int section, Qt::Orientation orientation, int role = Qt::DisplayRole) const override;
 
         void clear();
+
+    signals:
+        void countChanged();
+
     private:
         ProjectTreeViewItem* RootItem;
     };
