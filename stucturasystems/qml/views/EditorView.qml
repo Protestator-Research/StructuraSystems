@@ -16,14 +16,33 @@ Item {
 
     property int _pendingEditRow: -1
     property int _flashRow: -1
+    property int _scrollRow: -1
+    property int _scrollTries: 0
+    property real _lastItemY: NaN
+    property real _lastContentY: NaN
 
-    /** Scrolls to the card of the given row and highlights it for a moment. */
+    /**
+     * Scrolls to the card of the given row and highlights it for a moment. The cards have different heights that are
+     * only known once their delegates exist, so the view is positioned again until the target stopped moving.
+     */
     function scrollToRow(row) {
         if (!document || row < 0 || row >= document.count)
             return
-        list.positionViewAtIndex(row, ListView.Beginning)
+        _scrollRow = row
+        _scrollTries = 0
+        _lastItemY = NaN
+        _lastContentY = NaN
+        _positionRow()
+        scrollTimer.restart()
         _flashRow = row
         flashTimer.restart()
+    }
+
+    // Puts the card at the top of the view with a small gap.
+    function _positionRow() {
+        list.positionViewAtIndex(_scrollRow, ListView.Beginning)
+        if (_scrollRow > 0)
+            list.contentY -= 8
     }
 
     /** Inserts a new element and opens its card in edit mode. */
@@ -36,6 +55,28 @@ Item {
             return
         _pendingEditRow = row
         Qt.callLater(() => list.positionViewAtIndex(row, ListView.Contain))
+    }
+
+    Timer {
+        id: scrollTimer
+        interval: 40
+        repeat: true
+        onTriggered: {
+            const item = list.itemAtIndex(view._scrollRow)
+            const stable = !!item && item.y === view._lastItemY && list.contentY === view._lastContentY
+            if (stable || view._scrollTries >= 15 || view._scrollRow >= list.count) {
+                stop()
+                view._scrollRow = -1
+                // The flash is shown only once the card is in place.
+                if (stable)
+                    flashTimer.restart()
+                return
+            }
+            view._scrollTries++
+            view._lastItemY = item ? item.y : NaN
+            view._positionRow()
+            view._lastContentY = list.contentY
+        }
     }
 
     Timer {
@@ -191,14 +232,30 @@ Item {
         parent: Overlay.overlay
         anchors.centerIn: Overlay.overlay
         modal: true
+        width: 400
         title: qsTr("Delete element?")
-        standardButtons: Dialog.Cancel | Dialog.Ok
-        Component.onCompleted: standardButton(Dialog.Ok).text = qsTr("Delete")
+        footer: DialogFooter {
+            Button {
+                text: qsTr("Cancel")
+                flat: true
+                onClicked: deleteDialog.reject()
+            }
+            Button {
+                text: qsTr("Delete")
+                highlighted: true
+                Material.accent: Theme.dangerFill
+                icon.source: Theme.iconTrash
+                icon.color: "transparent"
+                icon.width: 18
+                icon.height: 18
+                onClicked: deleteDialog.accept()
+            }
+        }
 
         Label {
             text: qsTr("The element will be removed from the document. This cannot be undone.")
             wrapMode: Text.Wrap
-            width: 320
+            width: deleteDialog.availableWidth
         }
         onAccepted: {
             if (view.document && !view.locked)

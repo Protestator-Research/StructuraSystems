@@ -81,6 +81,13 @@ namespace StructuraSystems::Client {
         Q_INVOKABLE void refreshOnlineProjects();
 
         Q_INVOKABLE void saveCurrent();
+        /** @return true if any open document has unsaved changes. */
+        [[nodiscard]] Q_INVOKABLE bool hasUnsavedChanges() const;
+        /** @return true if any open local document has unsaved changes (those can be saved without a commit). */
+        [[nodiscard]] Q_INVOKABLE bool hasUnsavedLocalChanges() const;
+        /** Saves all modified local documents. Online documents are skipped (they need a commit).
+         *  @return true if every attempted save succeeded. */
+        Q_INVOKABLE bool saveAllLocal();
         Q_INVOKABLE void parseCurrent();
         Q_INVOKABLE void commitCurrent(const QString &message);
         Q_INVOKABLE void uploadCurrent();

@@ -31,6 +31,8 @@ QtObject {
     readonly property color success: dark ? "#6fcf8f" : "#2e7d4f"
     readonly property color warning: dark ? "#f0b45a" : "#b26a00"
     readonly property color danger: dark ? "#ff8a80" : "#c62828"
+    /** Fill of destructive buttons; keeps white text readable in both themes. */
+    readonly property color dangerFill: dark ? "#c5392f" : "#c62828"
     readonly property color info: dark ? "#7fb4e8" : "#1f6f9f"
 
     // ---------------------------------------------------------------- metrics

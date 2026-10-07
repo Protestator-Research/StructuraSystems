@@ -1,5 +1,6 @@
 pragma ComponentBehavior: Bound
 
+import QtCore
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Controls.Material
@@ -20,6 +21,9 @@ ApplicationWindow {
     /** 0 explorer, 1 online, 2 digital twins */
     property int destination: 0
     property bool panelOpen: true
+    /** Narrow windows start without side panel; it can still be opened by hand. */
+    readonly property bool compact: width < 1100
+    property bool _restored: false
 
     function requestClose(index, title, modified) {
         if (index < 0 || busy)
@@ -66,10 +70,70 @@ ApplicationWindow {
         }
     }
 
+    function _onScreen(px, py) {
+        for (const screen of Qt.application.screens) {
+            if (px >= screen.virtualX && px < screen.virtualX + screen.width
+                    && py >= screen.virtualY && py < screen.virtualY + screen.height)
+                return true
+        }
+        return false
+    }
+
+    function _restoreState() {
+        width = Math.max(minimumWidth, windowState.width)
+        height = Math.max(minimumHeight, windowState.height)
+        if (windowState.hasPosition && _onScreen(windowState.x + 48, windowState.y + 48)) {
+            x = windowState.x
+            y = windowState.y
+        }
+        destination = Math.max(0, Math.min(2, windowState.destination))
+        problemsSheet.bodyHeight = Math.max(problemsSheet.minBodyHeight,
+                                            Math.min(problemsSheet.maxBodyHeight, windowState.problemsHeight))
+        panelOpen = windowState.panelOpen && !compact
+        if (windowState.maximized)
+            visibility = Window.Maximized
+        _restored = true
+    }
+
+    // Only the geometry of the normal (not maximized) window is remembered.
+    function _storeGeometry() {
+        if (!_restored || visibility !== Window.Windowed)
+            return
+        windowState.x = x
+        windowState.y = y
+        windowState.width = width
+        windowState.height = height
+        windowState.hasPosition = true
+    }
+
+    onXChanged: _storeGeometry()
+    onYChanged: _storeGeometry()
+    onWidthChanged: _storeGeometry()
+    onHeightChanged: _storeGeometry()
+    onVisibilityChanged: {
+        if (_restored && (visibility === Window.Windowed || visibility === Window.Maximized))
+            windowState.maximized = visibility === Window.Maximized
+    }
+    onCompactChanged: {
+        if (_restored)
+            panelOpen = !compact
+    }
+    onPanelOpenChanged: if (_restored) windowState.panelOpen = panelOpen
+    onDestinationChanged: if (_restored) windowState.destination = destination
+
+    onClosing: close => {
+        if (AppController.hasUnsavedChanges()) {
+            close.accepted = false
+            quitDialog.openDialog()
+        }
+    }
+
+    Component.onCompleted: _restoreState()
+
     width: 1280
     height: 800
-    minimumWidth: 880
-    minimumHeight: 560
+    minimumWidth: 960
+    minimumHeight: 600
     visible: true
     title: doc ? qsTr("%1 - Structura Systems").arg(doc.title) : qsTr("Structura Systems")
 
@@ -77,6 +141,37 @@ ApplicationWindow {
     Material.primary: Theme.primary
     Material.accent: Theme.accent
     Material.background: Theme.surface
+
+    Settings {
+        id: windowState
+
+        category: "Window"
+        property int x: 0
+        property int y: 0
+        property int width: 1280
+        property int height: 800
+        property bool hasPosition: false
+        property bool maximized: false
+        property bool panelOpen: true
+        property int destination: 0
+        property int problemsHeight: 190
+    }
+
+    Binding {
+        target: windowState
+        property: "problemsHeight"
+        value: problemsSheet.bodyHeight
+        when: root._restored
+        restoreMode: Binding.RestoreNone
+    }
+
+    Connections {
+        target: Qt.application
+
+        function onAboutToQuit() {
+            windowState.sync()
+        }
+    }
 
     // ---------------------------------------------------------------- shortcuts
     Shortcut { sequences: ["Ctrl+O"]; onActivated: root.openFolder() }
@@ -90,6 +185,7 @@ ApplicationWindow {
         onActivated: root.requestClose(AppController.currentIndex, root.doc.title, root.doc.modified)
     }
     Shortcut { sequences: ["Ctrl+,"]; onActivated: settingsDialog.open() }
+    Shortcut { sequences: [StandardKey.Quit]; onActivated: root.close() }
 
     // ---------------------------------------------------------------- reactions to the view models
     Connections {
@@ -122,6 +218,7 @@ ApplicationWindow {
             currentIndex: root.destination
             panelOpen: root.panelOpen
             onDestinationClicked: index => root.selectDestination(index)
+            onAboutClicked: aboutDialog.open()
             onSettingsClicked: settingsDialog.open()
         }
 
@@ -378,6 +475,8 @@ ApplicationWindow {
     NewProjectDialog { id: newProjectDialog }
     CommitDialog { id: commitDialog }
     CloseDocumentDialog { id: closeDialog }
+    QuitDialog { id: quitDialog }
+    AboutDialog { id: aboutDialog }
     DetailsDialog { id: detailsDialog }
     DigitalTwinWizard { id: wizard }
 }

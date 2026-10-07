@@ -15,7 +15,7 @@ Dialog {
     property int selectedCount: 0
     readonly property var stepTitles: [qsTr("Name"), qsTr("Elements"), qsTr("Summary")]
     readonly property bool canAdvance: step === 0 ? nameField.text.trim().length > 0
-                                                  : step === 1 ? selectedCount > 0 : true
+                                                  : selectedCount > 0 && nameField.text.trim().length > 0
 
     function openWizard() {
         if (document)
@@ -35,7 +35,7 @@ Dialog {
     modal: true
     title: qsTr("Create digital twin")
     width: 560
-    height: 520
+    height: 460
 
     onClosed: {
         if (document)
@@ -216,12 +216,15 @@ Dialog {
         }
     }
 
-    footer: DialogButtonBox {
+    footer: DialogFooter {
+        spread: true
+
         Button {
             text: qsTr("Cancel")
             flat: true
-            DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
+            onClicked: wizard.reject()
         }
+        Item { Layout.fillWidth: true }
         Button {
             text: qsTr("Back")
             flat: true
@@ -230,31 +233,31 @@ Dialog {
             icon.color: "transparent"
             icon.width: 18
             icon.height: 18
-            DialogButtonBox.buttonRole: DialogButtonBox.ActionRole
             onClicked: wizard.step -= 1
         }
         Button {
             text: qsTr("Next")
             highlighted: true
+            flat: false
             visible: wizard.step < 2
             enabled: wizard.canAdvance
             icon.source: Theme.iconForward
             icon.color: "transparent"
             icon.width: 18
             icon.height: 18
-            DialogButtonBox.buttonRole: DialogButtonBox.ActionRole
             onClicked: wizard.step += 1
         }
         Button {
             text: qsTr("Create")
             highlighted: true
+            flat: false
             visible: wizard.step === 2
             enabled: wizard.canAdvance && !AppController.busy
             icon.source: Theme.iconTwin
             icon.color: "transparent"
             icon.width: 18
             icon.height: 18
-            DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole
+            onClicked: wizard.accept()
         }
     }
 

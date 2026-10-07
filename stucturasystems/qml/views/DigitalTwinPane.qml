@@ -48,7 +48,7 @@ Pane {
                 onClicked: pane.createRequested()
             }
             Label {
-                width: 280
+                width: 240
                 visible: !pane.available
                 horizontalAlignment: Text.AlignHCenter
                 wrapMode: Text.Wrap

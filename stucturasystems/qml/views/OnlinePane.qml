@@ -94,6 +94,30 @@ Pane {
             }
         }
 
+        TextField {
+            id: search
+
+            Layout.fillWidth: true
+            Layout.leftMargin: 12
+            Layout.rightMargin: 12
+            Layout.bottomMargin: 6
+            placeholderText: qsTr("Filter projects")
+            leftPadding: 34
+            visible: AppController.connected && AppController.onlineProjects.count > 0
+            selectByMouse: true
+            Accessible.name: qsTr("Filter projects")
+            Keys.onDownPressed: list.focusFirst()
+            Keys.onEscapePressed: text = ""
+            onAccepted: list.focusFirst()
+
+            Icon {
+                x: 10
+                anchors.verticalCenter: parent.verticalCenter
+                size: 16
+                source: Theme.iconSearch
+            }
+        }
+
         Item {
             Layout.fillWidth: true
             Layout.fillHeight: true
@@ -102,9 +126,17 @@ Pane {
                 id: list
                 anchors.fill: parent
                 visible: AppController.connected
-                model: AppController.onlineProjects
+                sourceModel: AppController.onlineProjects
                 iconSource: Theme.iconOnlineProject
-                onProjectActivated: index => AppController.openOnlineProject(index)
+                filterText: search.text
+                onProjectActivated: row => AppController.openOnlineProject(row)
+            }
+
+            Label {
+                anchors.centerIn: parent
+                visible: AppController.connected && list.allFilteredOut
+                text: qsTr("No matching projects")
+                color: Theme.textSecondary
             }
 
             EmptyState {

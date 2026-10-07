@@ -29,11 +29,10 @@ Dialog {
         }
     }
 
-    footer: DialogButtonBox {
+    footer: DialogFooter {
         Button {
             text: qsTr("Copy")
             flat: true
-            DialogButtonBox.buttonRole: DialogButtonBox.ActionRole
             onClicked: {
                 text.selectAll()
                 text.copy()
@@ -43,7 +42,7 @@ Dialog {
         Button {
             text: qsTr("Close")
             highlighted: true
-            DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
+            onClicked: dialog.close()
         }
     }
 }

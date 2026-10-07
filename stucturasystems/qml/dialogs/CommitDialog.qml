@@ -44,11 +44,11 @@ Dialog {
         }
     }
 
-    footer: DialogButtonBox {
+    footer: DialogFooter {
         Button {
             text: qsTr("Cancel")
             flat: true
-            DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
+            onClicked: dialog.reject()
         }
         Button {
             id: commitButton
@@ -59,7 +59,7 @@ Dialog {
             icon.color: "transparent"
             icon.width: 18
             icon.height: 18
-            DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole
+            onClicked: dialog.accept()
         }
     }
 

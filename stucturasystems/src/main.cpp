@@ -3,6 +3,7 @@
 //
 
 #include <QGuiApplication>
+#include <QIcon>
 #include <QQmlApplicationEngine>
 #include <QQuickStyle>
 #include <QCoreApplication>
@@ -19,6 +20,8 @@ int main(int argc, char *argv[]) {
     QCoreApplication::setApplicationVersion("1.0");
     QCoreApplication::setOrganizationName("Working Group Cyber Physical Systems");
     QCoreApplication::setOrganizationDomain("https://cps.cs.rptu.de/");
+
+    QGuiApplication::setWindowIcon(QIcon(":/icons/sience/icons/4847335-science-and-technology/png/030-chip.png"));
 
     QQuickStyle::setStyle("Material");
 

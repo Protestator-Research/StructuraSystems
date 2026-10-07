@@ -30,6 +30,8 @@ namespace StructuraSystems::Client {
         void saveData();
     private:
         void readFromMemory();
+        /** Moves the working directory from the legacy "GENERAL" group (INI root section) to WORKSPACE. */
+        void migrateLegacyWorkingDirectory();
 
         std::string WorkingDirectory;
         std::string ServerPath;
@@ -38,7 +40,7 @@ namespace StructuraSystems::Client {
 
 
         QSettings Settings;
-        const std::string GENERAL_SETTINGS_GROUP_NAME = "GENERAL";
+        const std::string WORKSPACE_SETTINGS_GROUP_NAME = "WORKSPACE";
         const std::string WORKING_DIRECTORY_MAP_ENTRY = "WORKING_DIR";
         const std::string CONNECTION_SETTINGS_GROUP_NAME = "CONNECTION";
         const std::string SERVER_PATH_MAP_ENTRY = "SERVER_PATH";

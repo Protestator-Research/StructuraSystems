@@ -69,6 +69,7 @@ qt_add_qml_module(StructuraSystems
         QML_FILES
             qml/Main.qml
             qml/Theme.qml
+            qml/components/DialogFooter.qml
             qml/components/Icon.qml
             qml/components/IconToolButton.qml
             qml/components/EmptyState.qml
@@ -87,11 +88,13 @@ qt_add_qml_module(StructuraSystems
             qml/views/OnlinePane.qml
             qml/views/ProblemsSheet.qml
             qml/views/StatusBar.qml
+            qml/dialogs/AboutDialog.qml
             qml/dialogs/CloseDocumentDialog.qml
             qml/dialogs/CommitDialog.qml
             qml/dialogs/DetailsDialog.qml
             qml/dialogs/DigitalTwinWizard.qml
             qml/dialogs/NewProjectDialog.qml
+            qml/dialogs/QuitDialog.qml
             qml/dialogs/SettingsDialog.qml
         SOURCES
             src/ViewModels/SysMLHighlighter.cpp
@@ -104,6 +107,8 @@ qt_add_qml_module(StructuraSystems
             src/ViewModels/OpenDocumentsModel.h
             src/ViewModels/ProblemListModel.cpp
             src/ViewModels/ProblemListModel.h
+            src/ViewModels/ProjectFilterModel.cpp
+            src/ViewModels/ProjectFilterModel.h
             src/ViewModels/SettingsController.cpp
             src/ViewModels/SettingsController.h
             src/Models/ItemModels/ProjectItemModel.cpp

@@ -383,6 +383,39 @@ namespace StructuraSystems::Client {
             emitNotify(3, tr("Could not save %1.").arg(document->title()), baseFolder);
     }
 
+    bool AppController::hasUnsavedChanges() const {
+        for (int i = 0; i < Documents->count(); i++) {
+            const auto document = Documents->at(i);
+            if (document != nullptr && document->modified())
+                return true;
+        }
+        return false;
+    }
+
+    bool AppController::hasUnsavedLocalChanges() const {
+        for (int i = 0; i < Documents->count(); i++) {
+            const auto document = Documents->at(i);
+            if (document != nullptr && document->modified() && document->isLocalFile())
+                return true;
+        }
+        return false;
+    }
+
+    bool AppController::saveAllLocal() {
+        bool success = true;
+        for (int i = 0; i < Documents->count(); i++) {
+            const auto document = Documents->at(i);
+            if (document == nullptr || !document->modified() || !document->isLocalFile())
+                continue;
+            const auto baseFolder = LocalFolders.value(document->title(), Settings->workingDirectory());
+            if (!document->save(baseFolder)) {
+                success = false;
+                emitNotify(3, tr("Could not save %1.").arg(document->title()), baseFolder);
+            }
+        }
+        return success;
+    }
+
     void AppController::parseCurrent() {
         const auto document = CurrentDocument;
         if (!document)

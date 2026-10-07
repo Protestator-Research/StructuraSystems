@@ -47,8 +47,30 @@ namespace StructuraSystems::Client {
         Password = password;
     }
 
+    void SettingsModel::migrateLegacyWorkingDirectory() {
+        const auto newKey = QString::fromStdString(WORKSPACE_SETTINGS_GROUP_NAME + "/" + WORKING_DIRECTORY_MAP_ENTRY);
+        const auto entry = QString::fromStdString(WORKING_DIRECTORY_MAP_ENTRY);
+        // The old group "GENERAL" is the root section of an INI file, so the value ended up at the root level
+        // (or, on other backends, below "GENERAL/").
+        const QString oldKeys[] = {entry, QStringLiteral("GENERAL/") + entry};
+
+        bool migrated = false;
+        for (const auto &oldKey : oldKeys) {
+            if (!Settings.contains(oldKey))
+                continue;
+            if (!Settings.contains(newKey)) {
+                Settings.setValue(newKey, Settings.value(oldKey));
+                migrated = true;
+            }
+            Settings.remove(oldKey);
+        }
+        if (migrated)
+            Settings.sync();
+    }
+
     void SettingsModel::readFromMemory() {
-        Settings.beginGroup(GENERAL_SETTINGS_GROUP_NAME);
+        migrateLegacyWorkingDirectory();
+        Settings.beginGroup(WORKSPACE_SETTINGS_GROUP_NAME);
         WorkingDirectory = Settings.value(WORKING_DIRECTORY_MAP_ENTRY).toString().toStdString();
         Settings.endGroup();
         Settings.beginGroup(CONNECTION_SETTINGS_GROUP_NAME);
@@ -66,7 +88,7 @@ namespace StructuraSystems::Client {
     }
 
     void SettingsModel::saveData() {
-        Settings.beginGroup(GENERAL_SETTINGS_GROUP_NAME);
+        Settings.beginGroup(WORKSPACE_SETTINGS_GROUP_NAME);
         Settings.setValue(WORKING_DIRECTORY_MAP_ENTRY, QString::fromStdString(WorkingDirectory));
         Settings.endGroup();
         Settings.beginGroup(CONNECTION_SETTINGS_GROUP_NAME);

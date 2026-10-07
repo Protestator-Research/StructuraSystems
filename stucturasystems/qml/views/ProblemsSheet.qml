@@ -12,9 +12,30 @@ Pane {
 
     property bool expanded: false
     readonly property int headerHeight: 36
-    readonly property int bodyHeight: 190
+    /** Height of the list below the header; can be changed by dragging the upper edge. */
+    property int bodyHeight: 190
+    readonly property int minBodyHeight: 96
+    readonly property int maxBodyHeight: 420
+    property bool resizing: false
 
     signal problemActivated(int row)
+
+    /** Message as shown in the tooltip and copied: escaped line breaks of the parser become real ones. */
+    function fullMessage(text) {
+        return text.replace(/\\r\\n|\\n|\\r/g, "\n").replace(/\r\n?/g, "\n").trim()
+    }
+
+    /** Message for the list: one line, all whitespace and line breaks collapsed. */
+    function singleLine(text) {
+        return text.replace(/\\[nrt]/g, " ").replace(/\s+/g, " ").trim()
+    }
+
+    function copyText(text) {
+        clipboard.text = text
+        clipboard.selectAll()
+        clipboard.copy()
+        clipboard.text = ""
+    }
 
     padding: 0
     implicitHeight: headerHeight + (expanded ? bodyHeight : 0) + 1
@@ -22,6 +43,7 @@ Pane {
     Material.background: Theme.panel
 
     Behavior on implicitHeight {
+        enabled: !sheet.resizing
         NumberAnimation { duration: Theme.animationDuration; easing.type: Easing.OutCubic }
     }
 
@@ -31,6 +53,41 @@ Pane {
         anchors.right: parent.right
         height: 1
         color: Theme.outline
+    }
+
+    // Hidden helper that puts text onto the clipboard.
+    TextEdit {
+        id: clipboard
+        visible: false
+    }
+
+    // Drag handle on the upper edge
+    MouseArea {
+        id: grip
+
+        property real startY
+        property int startHeight
+
+        anchors.top: parent.top
+        anchors.left: parent.left
+        anchors.right: parent.right
+        height: 6
+        z: 10
+        enabled: sheet.expanded
+        cursorShape: Qt.SizeVerCursor
+        onPressed: mouse => {
+            startY = mapToItem(null, mouse.x, mouse.y).y
+            startHeight = sheet.bodyHeight
+            sheet.resizing = true
+        }
+        onPositionChanged: mouse => {
+            if (!pressed)
+                return
+            const delta = startY - mapToItem(null, mouse.x, mouse.y).y
+            sheet.bodyHeight = Math.round(Math.max(sheet.minBodyHeight, Math.min(sheet.maxBodyHeight, startHeight + delta)))
+        }
+        onReleased: sheet.resizing = false
+        onCanceled: sheet.resizing = false
     }
 
     // ---------------------------------------------------------------- header
@@ -106,12 +163,40 @@ Pane {
             hoverEnabled: true
             onClicked: sheet.problemActivated(problem.row)
 
+            TapHandler {
+                acceptedButtons: Qt.RightButton
+                onTapped: copyMenu.popup()
+            }
+
+            Menu {
+                id: copyMenu
+
+                MenuItem {
+                    text: qsTr("Copy")
+                    icon.source: Theme.iconDocument
+                    icon.color: "transparent"
+                    onTriggered: sheet.copyText(sheet.fullMessage(problem.message))
+                }
+            }
+
+            ToolTip {
+                visible: problem.hovered
+                delay: 700
+                // Long messages are wrapped instead of producing a tooltip wider than the window.
+                contentItem: Label {
+                    text: sheet.fullMessage(problem.message)
+                    wrapMode: Text.Wrap
+                    width: Math.min(implicitWidth, 520)
+                    color: Material.foreground
+                }
+            }
+
             contentItem: RowLayout {
                 spacing: 10
                 Icon { size: 16; source: Theme.severityIcon(problem.severity) }
                 Label {
                     Layout.fillWidth: true
-                    text: problem.message
+                    text: sheet.singleLine(problem.message)
                     elide: Text.ElideRight
                     color: Theme.textPrimary
                 }

@@ -7,13 +7,35 @@ import QtQuick.Layouts
 import StructuraSystems
 
 // List of projects (name and description). Double-click or Enter opens the current entry.
+// The list shows a filtered view of sourceModel; projectActivated reports the row in the SOURCE model.
 ListView {
     id: list
 
+    property ProjectListModel sourceModel
     property url iconSource
     property string filterText
 
-    signal projectActivated(int index)
+    signal projectActivated(int sourceRow)
+
+    /** Selects the first entry and moves the keyboard focus into the list. */
+    function focusFirst() {
+        if (count > 0) {
+            currentIndex = 0
+            forceActiveFocus()
+        }
+    }
+
+    function _activate(row) {
+        const source = filter.sourceRow(row)
+        if (source >= 0)
+            projectActivated(source)
+    }
+
+    model: ProjectFilterModel {
+        id: filter
+        sourceModel: list.sourceModel
+        filterText: list.filterText
+    }
 
     clip: true
     currentIndex: -1
@@ -22,10 +44,10 @@ ListView {
     boundsBehavior: Flickable.StopAtBounds
     ScrollBar.vertical: ScrollBar { }
 
-    readonly property bool allFilteredOut: count > 0 && contentHeight < 1
+    readonly property bool allFilteredOut: count === 0 && sourceModel !== null && sourceModel.count > 0
 
-    Keys.onReturnPressed: if (currentIndex >= 0) projectActivated(currentIndex)
-    Keys.onEnterPressed: if (currentIndex >= 0) projectActivated(currentIndex)
+    Keys.onReturnPressed: if (currentIndex >= 0) _activate(currentIndex)
+    Keys.onEnterPressed: if (currentIndex >= 0) _activate(currentIndex)
 
     delegate: ItemDelegate {
         id: entry
@@ -33,17 +55,13 @@ ListView {
         required property int index
         required property string name
         required property string description
-        readonly property bool matches: list.filterText.length === 0
-                                        || name.toLowerCase().includes(list.filterText.toLowerCase())
-                                        || description.toLowerCase().includes(list.filterText.toLowerCase())
 
         width: ListView.view.width
-        height: matches ? 52 : 0
-        visible: matches
+        height: 52
         highlighted: ListView.isCurrentItem
         hoverEnabled: true
         onClicked: list.currentIndex = index
-        onDoubleClicked: list.projectActivated(index)
+        onDoubleClicked: list._activate(index)
 
         ToolTip.visible: hovered && description.length > 0
         ToolTip.text: description

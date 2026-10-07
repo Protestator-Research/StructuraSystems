@@ -11,15 +11,6 @@ namespace StructuraSystems::Client {
         AppearanceSettings.beginGroup(APPEARANCE_SETTINGS_GROUP_NAME);
         ThemeMode = qBound(0, AppearanceSettings.value(THEME_MODE_ENTRY, 0).toInt(), 2);
         AppearanceSettings.endGroup();
-
-        // Workaround: QSettings maps an INI section called "GENERAL" (case-insensitive) to the root group, so the
-        // SettingsModel, which reads "GENERAL/WORKING_DIR", never finds the persisted working directory. The value
-        // itself is written correctly and can be read from the root group.
-        if (workingDirectory().isEmpty()) {
-            const auto persisted = AppearanceSettings.value(QStringLiteral("WORKING_DIR")).toString();
-            if (!persisted.isEmpty())
-                Settings.setWorkingDirectory(persisted.toStdString());
-        }
     }
 
     QString SettingsController::workingDirectory() const {

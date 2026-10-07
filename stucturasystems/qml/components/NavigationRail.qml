@@ -14,6 +14,7 @@ Pane {
     property bool panelOpen: true
 
     signal destinationClicked(int index)
+    signal aboutClicked()
     signal settingsClicked()
 
     implicitWidth: Theme.railWidth
@@ -48,6 +49,12 @@ Pane {
             onClicked: control.destinationClicked(2)
         }
         Item { Layout.fillHeight: true }
+        NavRailItem {
+            Layout.fillWidth: true
+            text: qsTr("About")
+            iconSource: Theme.iconInfo
+            onClicked: control.aboutClicked()
+        }
         NavRailItem {
             Layout.fillWidth: true
             text: qsTr("Settings")

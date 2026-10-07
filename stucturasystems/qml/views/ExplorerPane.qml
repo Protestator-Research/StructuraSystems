@@ -61,6 +61,10 @@ Pane {
             leftPadding: 34
             visible: AppController.localProjects.count > 0
             Accessible.name: qsTr("Filter projects")
+            selectByMouse: true
+            Keys.onDownPressed: list.focusFirst()
+            Keys.onEscapePressed: text = ""
+            onAccepted: list.focusFirst()
 
             Icon {
                 x: 10
@@ -76,11 +80,11 @@ Pane {
 
             ProjectList {
                 anchors.fill: parent
-                model: AppController.localProjects
+                id: list
+                sourceModel: AppController.localProjects
                 iconSource: Theme.iconProject
                 filterText: search.text
-                onProjectActivated: index => AppController.openLocalProject(index)
-                id: list
+                onProjectActivated: row => AppController.openLocalProject(row)
             }
 
             Label {
