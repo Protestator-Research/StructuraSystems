@@ -96,6 +96,18 @@ qt_add_qml_module(StructuraSystems
             qml/dialogs/NewProjectDialog.qml
             qml/dialogs/QuitDialog.qml
             qml/dialogs/SettingsDialog.qml
+            qml/diagram/DiagramWindow.qml
+            qml/diagram/DiagramCanvas.qml
+            qml/diagram/NodeDelegate.qml
+            qml/diagram/ToolPalette.qml
+            qml/diagram/EdgeKindMenu.qml
+            qml/diagram/BlockStateBar.qml
+            qml/diagram/ElementEditDialog.qml
+            qml/diagram/DiagramPreview.qml
+            qml/diagram/ParametricCanvas.qml
+            qml/diagram/ParametricNode.qml
+        RESOURCES
+            qml/diagram/diagram-editor.png
         SOURCES
             src/ViewModels/SysMLHighlighter.cpp
             src/ViewModels/SysMLHighlighter.h
@@ -112,7 +124,26 @@ qt_add_qml_module(StructuraSystems
             src/ViewModels/SettingsController.cpp
             src/ViewModels/SettingsController.h
             src/Models/ItemModels/ProjectItemModel.cpp
-            src/Models/ItemModels/ProjectItemModel.h)
+            src/Models/ItemModels/ProjectItemModel.h
+            src/ViewModels/Diagram/DiagramTypes.h
+            src/ViewModels/Diagram/DiagramGeometry.h
+            src/ViewModels/Diagram/SysMLBlockTarget.h
+            src/ViewModels/Diagram/DocumentBlockTarget.cpp
+            src/ViewModels/Diagram/DocumentBlockTarget.h
+            src/ViewModels/Diagram/DiagramNodeModel.cpp
+            src/ViewModels/Diagram/DiagramNodeModel.h
+            src/ViewModels/Diagram/DiagramEdgeModel.cpp
+            src/ViewModels/Diagram/DiagramEdgeModel.h
+            src/ViewModels/Diagram/DiagramController.cpp
+            src/ViewModels/Diagram/DiagramController.h
+            src/ViewModels/Diagram/DiagramEditorModel.cpp
+            src/ViewModels/Diagram/DiagramEditorModel.h
+            src/ViewModels/Diagram/EdgeLayerItem.cpp
+            src/ViewModels/Diagram/EdgeLayerItem.h
+            src/ViewModels/Diagram/DiagramPreviewModel.cpp
+            src/ViewModels/Diagram/DiagramPreviewModel.h
+            src/ViewModels/Diagram/ParametricController.cpp
+            src/ViewModels/Diagram/ParametricController.h)
 
 
 
@@ -120,7 +151,8 @@ qt_add_qml_module(StructuraSystems
 target_include_directories(StructuraSystems PUBLIC
         "${CMAKE_CURRENT_BINARY_DIR}/"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/ViewModels"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/Models/ItemModels")
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/Models/ItemModels"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/ViewModels/Diagram")
 
 target_link_libraries(StructuraSystems PUBLIC
         Qt6::Core
@@ -131,7 +163,14 @@ target_link_libraries(StructuraSystems PUBLIC
         Qt6::Concurrent
         md4c::md4c
         sysmllib::sysmllib
-        yaml-cpp::yaml-cpp)
+        yaml-cpp::yaml-cpp
+        StructuraDiagramCore)
+
+# Core of the graphical diagram editor (plain C++20, no Qt) and its unit tests.
+add_subdirectory(src/Diagram)
+if(RUN_TESTS)
+    add_subdirectory(tests)
+endif()
 
 if (!UNIX)
 set_target_properties(StructuraSystems PROPERTIES

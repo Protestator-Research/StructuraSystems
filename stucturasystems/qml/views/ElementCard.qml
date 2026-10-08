@@ -23,11 +23,17 @@ Pane {
     /** Briefly true after the user navigated here from the problem list. */
     property bool flash: false
     property bool editing: false
+    /** Element id of the row (the diagram editor opens this block). */
+    property string elementId
+    /** The diagram preview below the code is open (collapsed by default). */
+    property bool diagramOpen: false
 
     signal commitRequested(string text, string language)
     signal moveRequested(int target)
     signal insertRequested(int targetRow, string language)
     signal deleteRequested
+    /** "Open in diagram editor" in the preview. */
+    signal diagramEditorRequested
 
     function startEdit() {
         if (!locked)
@@ -95,6 +101,29 @@ Pane {
 
                 LanguageChip {
                     language: card.language
+                }
+
+                // Diagram preview of SysMLv2 / KerML blocks (collapsed by default)
+                Button {
+                    visible: Theme.isCode(card.language) && !card.editing
+                    flat: true
+                    checkable: true
+                    checked: card.diagramOpen
+                    onToggled: card.diagramOpen = checked
+                    text: card.diagramOpen ? qsTr("Hide diagram") : qsTr("Diagram")
+                    icon.source: Theme.iconDiagram
+                    icon.color: "transparent"
+                    icon.width: 18
+                    icon.height: 18
+                    font.pixelSize: 12
+                    implicitHeight: 32
+                    topInset: 0
+                    bottomInset: 0
+                    leftPadding: 8
+                    rightPadding: 10
+                    ToolTip.visible: hovered
+                    ToolTip.text: card.diagramOpen ? qsTr("Hide the diagram of this block") : qsTr("Show this block as diagram")
+                    ToolTip.delay: 600
                 }
 
                 Rectangle {
@@ -206,6 +235,21 @@ Pane {
                     y: 0
                     width: parent.width - 28
                     sourceComponent: card.editing ? editorComponent : card.language === "YAML" && card.headerTitle.length > 0 ? yamlComponent : card.language === "Markdown" ? markdownComponent : codeComponent
+                }
+            }
+
+            // Diagram of this block (read only)
+            Loader {
+                Layout.fillWidth: true
+                Layout.leftMargin: 14
+                Layout.rightMargin: 14
+                Layout.bottomMargin: active ? 14 : 0
+                active: card.diagramOpen && Theme.isCode(card.language) && !card.editing
+                visible: active
+                sourceComponent: DiagramPreview {
+                    source: card.body
+                    language: card.language
+                    onOpenRequested: card.diagramEditorRequested()
                 }
             }
         }
