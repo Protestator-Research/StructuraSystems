@@ -18,10 +18,13 @@
 #include <kerml/root/annotations/TextualRepresentation.h>
 #include <kerml/root/elements/Element.h>
 #include "entities/DigitalTwin.h"
+#include "entities/DigitalTwinRequest.h"
+#include <nlohmann/json.hpp>
 #include <sysmlv2/service/online/SysMLAPIImplementation.h>
 #include <boost/uuid/uuid_io.hpp>
 #include <boost/lexical_cast.hpp>
 #include <memory>
+#include <stdexcept>
 
 //---------------------------------------------------------
 // Internal Classes
@@ -34,7 +37,15 @@
 namespace StructuraSystems::Client {
     CommunicationService::CommunicationService(std::string serverAddress) {
         ServerAddress = std::move(serverAddress);
-        APIImplementation = new SysMLv2::API::SysMLAPIImplementation(ServerAddress);
+        APIImplementation = std::make_unique<SysMLv2::API::SysMLAPIImplementation>(ServerAddress);
+    }
+
+    CommunicationService::~CommunicationService() = default;
+
+    std::shared_ptr<CommunicationService> CommunicationService::createIndependentConnection() const {
+        auto connection = std::make_shared<CommunicationService>(ServerAddress);
+        connection->BarrierString = BarrierString;
+        return connection;
     }
 
     std::vector<std::shared_ptr<KerML::Entities::Element>> CommunicationService::getAllElements(boost::uuids::uuid commitId, boost::uuids::uuid projectId) const {
@@ -86,9 +97,28 @@ namespace StructuraSystems::Client {
     }
 
     std::shared_ptr<SysMLv2::REST::DigitalTwin> CommunicationService::postDigitalTwinToProject(
-        boost::uuids::uuid projectId, std::shared_ptr<SysMLv2::REST::DigitalTwin> requestedDT) {
-        auto digiTwinJSON = APIImplementation->postCustomRequest("/projects/"+boost::lexical_cast<std::string>(projectId)+"/digital-twin",requestedDT->serializeToJson(),BarrierString);
+        boost::uuids::uuid projectId, std::shared_ptr<SysMLv2::REST::DigitalTwinRequest> twinRequest) {
+        const auto digiTwinJSON = APIImplementation->postCustomRequest("/projects/"+boost::lexical_cast<std::string>(projectId)+"/twins",twinRequest->serializeToJson(),BarrierString);
+        // The server answers errors (400, 404) without body.
+        if (digiTwinJSON.empty() || !nlohmann::json::accept(digiTwinJSON))
+            throw std::runtime_error("The server rejected the digital twin. Check that the project and the commit exist on the server.");
         return std::make_shared<SysMLv2::REST::DigitalTwin>(digiTwinJSON);
+    }
+
+    std::vector<std::shared_ptr<SysMLv2::REST::DigitalTwin>> CommunicationService::getAllDigitalTwinsForProject(boost::uuids::uuid projectId) {
+        const auto twinsJSON = APIImplementation->getCustomRequest("/projects/"+boost::lexical_cast<std::string>(projectId)+"/twins",BarrierString);
+        std::vector<std::shared_ptr<SysMLv2::REST::DigitalTwin>> returnValue;
+        if (twinsJSON.empty())
+            return returnValue;
+
+        const auto parsedJson = nlohmann::json::parse(twinsJSON);
+        if (!parsedJson.is_array())
+            return returnValue;
+
+        for (const auto& twin : parsedJson)
+            returnValue.push_back(std::make_shared<SysMLv2::REST::DigitalTwin>(twin.dump()));
+
+        return returnValue;
     }
 
 

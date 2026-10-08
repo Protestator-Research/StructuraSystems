@@ -8,6 +8,7 @@
 //---------------------------------------------------------
 // External Classes
 //---------------------------------------------------------
+#include <memory>
 #include <vector>
 #include <string>
 #include <boost/uuid/uuid.hpp>
@@ -23,6 +24,7 @@ namespace SysMLv2::REST {
     class Branch;
     class Project;
     class DigitalTwin;
+    class DigitalTwinRequest;
     class CommitRequest;
 }
 
@@ -53,7 +55,14 @@ namespace StructuraSystems::Client {
         /**
          * D-Tor
          */
-        virtual ~CommunicationService() = default;
+        virtual ~CommunicationService();
+
+        /**
+         * Creates a second connection to the same server with the same login. The underlying API implementation is not
+         * thread safe, so requests that run in parallel to the other backend operations need their own connection.
+         * @return A new, already authenticated connection.
+         */
+        [[nodiscard]] std::shared_ptr<CommunicationService> createIndependentConnection() const;
 
         /**
          * Creates a connection to the REST endpoint of the given AGILA Backend server,  to get all Elements of a Commit and Project, distinguished by its uuid.
@@ -124,13 +133,26 @@ namespace StructuraSystems::Client {
         bool setUserForLoginInBackend(std::string username, std::string password);
 
 
-        std::shared_ptr<SysMLv2::REST::DigitalTwin> postDigitalTwinToProject(boost::uuids::uuid projectId, std::shared_ptr<SysMLv2::REST::DigitalTwin> digitalTwin);
+        /**
+         * Creates a digital twin for a project (POST /projects/{projectId}/twins).
+         * @param projectId UUID ("@id") of the project.
+         * @param twinRequest Name and referenced commit of the new digital twin.
+         * @return The digital twin created by the server.
+         */
+        std::shared_ptr<SysMLv2::REST::DigitalTwin> postDigitalTwinToProject(boost::uuids::uuid projectId, std::shared_ptr<SysMLv2::REST::DigitalTwinRequest> twinRequest);
+
+        /**
+         * Downloads all digital twins of a project (GET /projects/{projectId}/twins).
+         * @param projectId UUID ("@id") of the project.
+         * @return The digital twins of the project, empty if the project has none.
+         */
+        std::vector<std::shared_ptr<SysMLv2::REST::DigitalTwin>> getAllDigitalTwinsForProject(boost::uuids::uuid projectId);
 
     private:
         std::string ServerAddress;
 
         std::string BarrierString = "";
 
-        SysMLv2::API::SysMLAPIImplementation* APIImplementation;
+        std::unique_ptr<SysMLv2::API::SysMLAPIImplementation> APIImplementation;
     };
 }

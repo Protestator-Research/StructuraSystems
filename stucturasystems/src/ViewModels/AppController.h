@@ -22,6 +22,7 @@ namespace SysMLv2::REST {
 
 namespace StructuraSystems::Client {
     class CommunicationService;
+    class DigitalTwinProjectModel;
     class DocumentModel;
     class OpenDocumentsModel;
     class ProblemListModel;
@@ -37,6 +38,7 @@ namespace StructuraSystems::Client {
         Q_OBJECT
         QML_ELEMENT
         QML_SINGLETON
+        Q_MOC_INCLUDE("DigitalTwinProjectModel.h")
         Q_MOC_INCLUDE("DocumentModel.h")
         Q_MOC_INCLUDE("OpenDocumentsModel.h")
         Q_MOC_INCLUDE("ProblemListModel.h")
@@ -47,6 +49,8 @@ namespace StructuraSystems::Client {
         Q_PROPERTY(QString statusText READ statusText NOTIFY statusTextChanged)
         Q_PROPERTY(StructuraSystems::Client::ProjectItemModel *localProjects READ localProjects CONSTANT)
         Q_PROPERTY(StructuraSystems::Client::ProjectItemModel *onlineProjects READ onlineProjects CONSTANT)
+        Q_PROPERTY(StructuraSystems::Client::DigitalTwinProjectModel *digitalTwinProjects READ digitalTwinProjects CONSTANT)
+        Q_PROPERTY(bool twinsLoading READ twinsLoading NOTIFY twinsLoadingChanged)
         Q_PROPERTY(StructuraSystems::Client::OpenDocumentsModel *documents READ documents CONSTANT)
         Q_PROPERTY(int currentIndex READ currentIndex WRITE setCurrentIndex NOTIFY currentIndexChanged)
         Q_PROPERTY(StructuraSystems::Client::DocumentModel *currentDocument READ currentDocument NOTIFY currentDocumentChanged)
@@ -61,6 +65,9 @@ namespace StructuraSystems::Client {
         [[nodiscard]] QString statusText() const;
         [[nodiscard]] ProjectItemModel *localProjects() const;
         [[nodiscard]] ProjectItemModel *onlineProjects() const;
+        [[nodiscard]] DigitalTwinProjectModel *digitalTwinProjects() const;
+        /** True while the digital twins are loaded. Independent of busy, the twins are loaded in the background. */
+        [[nodiscard]] bool twinsLoading() const;
         [[nodiscard]] OpenDocumentsModel *documents() const;
         [[nodiscard]] int currentIndex() const;
         void setCurrentIndex(int index);
@@ -79,6 +86,10 @@ namespace StructuraSystems::Client {
         Q_INVOKABLE void connectToBackend();
         Q_INVOKABLE void disconnectFromBackend();
         Q_INVOKABLE void refreshOnlineProjects();
+        /** Reloads the digital twins of the online projects in the background, without blocking other operations. */
+        Q_INVOKABLE void refreshDigitalTwins();
+        /** Opens the project of a row of digitalTwinProjects. */
+        Q_INVOKABLE void openDigitalTwinProject(int row);
 
         Q_INVOKABLE void saveCurrent();
         /** @return true if any open document has unsaved changes. */
@@ -95,12 +106,13 @@ namespace StructuraSystems::Client {
         Q_INVOKABLE void createLocalProject(const QString &name, const QString &description);
         /** @param visibility "Private", "Internal" or "Public" */
         Q_INVOKABLE void createOnlineProject(const QString &name, const QString &description, const QString &visibility);
-        /** @param elementIds uuid strings of the elements (see DocumentModel::selectedElementIds) */
-        Q_INVOKABLE void createDigitalTwin(const QString &name, const QStringList &elementIds);
+        /** Creates a digital twin on the server, that references the current commit of the current online document. */
+        Q_INVOKABLE void createDigitalTwin(const QString &name);
 
     signals:
         void connectedChanged();
         void busyChanged();
+        void twinsLoadingChanged();
         void statusTextChanged();
         void currentIndexChanged();
         void currentDocumentChanged();
@@ -117,6 +129,7 @@ namespace StructuraSystems::Client {
 
         void setBusy(bool busy);
         void setConnected(bool connected);
+        void setTwinsLoading(bool loading);
         void setStatusText(const QString &text);
         void emitNotify(int level, const QString &message, const QString &details = QString());
 
@@ -127,6 +140,8 @@ namespace StructuraSystems::Client {
         void updateCurrentDocument(int newIndex);
         void refreshProblems();
         void populateOnlineProjects(const std::vector<std::shared_ptr<SysMLv2::REST::Project>> &projects);
+        void loadDigitalTwins(const std::vector<std::shared_ptr<SysMLv2::REST::Project>> &projects);
+        void cancelDigitalTwinLoading();
         void openWorkingDirectoryIfPresent();
         void onSettingsSaved();
         bool requireConnection();
@@ -135,6 +150,7 @@ namespace StructuraSystems::Client {
         std::shared_ptr<CommunicationService> BackendConnection;
         ProjectItemModel *LocalProjects;
         ProjectItemModel *OnlineProjects;
+        DigitalTwinProjectModel *DigitalTwinProjects;
         OpenDocumentsModel *Documents;
         ProblemListModel *Problems;
 
@@ -142,6 +158,9 @@ namespace StructuraSystems::Client {
         QPointer<DocumentModel> CurrentDocument;
         bool Connected = false;
         bool Busy = false;
+        bool TwinsLoading = false;
+        /** Incremented for every twin load; results of an outdated load are dropped. */
+        quint64 TwinLoadGeneration = 0;
         QString StatusText;
         QString LoadedFolder;
         QHash<QString, QString> LocalFolders;

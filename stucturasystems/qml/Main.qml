@@ -248,6 +248,7 @@ ApplicationWindow {
                 }
                 DigitalTwinPane {
                     onCreateRequested: wizard.openWizard()
+                    onSettingsRequested: settingsDialog.open()
                 }
             }
 

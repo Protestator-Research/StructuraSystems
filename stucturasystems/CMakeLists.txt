@@ -56,7 +56,9 @@ set(SOURCES
         src/Services/BECommunicationService.h
         src/Services/BECommunicationService.cpp
         src/Services/entities/DigitalTwin.h
-        src/Services/entities/DigitalTwin.cpp)
+        src/Services/entities/DigitalTwin.cpp
+        src/Services/entities/DigitalTwinRequest.h
+        src/Services/entities/DigitalTwinRequest.cpp)
 
 
 qt_add_executable(StructuraSystems ${SOURCES})
@@ -102,6 +104,8 @@ qt_add_qml_module(StructuraSystems
             src/ViewModels/SysMLHighlighter.h
             src/ViewModels/AppController.cpp
             src/ViewModels/AppController.h
+            src/ViewModels/DigitalTwinProjectModel.cpp
+            src/ViewModels/DigitalTwinProjectModel.h
             src/ViewModels/DocumentModel.cpp
             src/ViewModels/DocumentModel.h
             src/ViewModels/OpenDocumentsModel.cpp

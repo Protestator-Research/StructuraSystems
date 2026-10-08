@@ -6,6 +6,7 @@
 
 #include <exception>
 #include <stdexcept>
+#include <chrono>
 #include <utility>
 
 #include <QDir>
@@ -26,7 +27,9 @@
 #include <sysmlv2/rest/entities/CommitRequest.h>
 #include <sysmlv2/rest/entities/DataVersion.h>
 #include <sysmlv2/rest/entities/Project.h>
+#include <sysmlv2/rest/entities/Tag.h>
 
+#include "DigitalTwinProjectModel.h"
 #include "DocumentModel.h"
 #include "OpenDocumentsModel.h"
 #include "ProblemListModel.h"
@@ -35,6 +38,7 @@
 #include "../Models/Parser/StructuraSystemsParser.h"
 #include "../Services/BECommunicationService.h"
 #include "../Services/entities/DigitalTwin.h"
+#include "../Services/entities/DigitalTwinRequest.h"
 
 namespace StructuraSystems::Client {
     namespace {
@@ -58,6 +62,12 @@ namespace StructuraSystems::Client {
             ProjectList Projects;
         };
 
+        struct TwinLoadResult {
+            QList<DigitalTwinProject> Projects;
+            int FailedProjects = 0;
+            QString FirstError;
+        };
+
         template<typename T>
         struct Outcome {
             T Value{};
@@ -72,6 +82,7 @@ namespace StructuraSystems::Client {
         Settings(new SettingsController(this)),
         LocalProjects(new ProjectItemModel(this)),
         OnlineProjects(new ProjectItemModel(this)),
+        DigitalTwinProjects(new DigitalTwinProjectModel(this)),
         Documents(new OpenDocumentsModel(this)),
         Problems(new ProblemListModel(this)),
         StatusText(tr("Ready")) {
@@ -89,6 +100,8 @@ namespace StructuraSystems::Client {
     QString AppController::statusText() const { return StatusText; }
     ProjectItemModel *AppController::localProjects() const { return LocalProjects; }
     ProjectItemModel *AppController::onlineProjects() const { return OnlineProjects; }
+    DigitalTwinProjectModel *AppController::digitalTwinProjects() const { return DigitalTwinProjects; }
+    bool AppController::twinsLoading() const { return TwinsLoading; }
     OpenDocumentsModel *AppController::documents() const { return Documents; }
     int AppController::currentIndex() const { return CurrentIndex; }
     DocumentModel *AppController::currentDocument() const { return CurrentDocument; }
@@ -107,6 +120,13 @@ namespace StructuraSystems::Client {
             return;
         Connected = connected;
         emit connectedChanged();
+    }
+
+    void AppController::setTwinsLoading(bool loading) {
+        if (TwinsLoading == loading)
+            return;
+        TwinsLoading = loading;
+        emit twinsLoadingChanged();
     }
 
     void AppController::setStatusText(const QString &text) {
@@ -453,6 +473,86 @@ namespace StructuraSystems::Client {
         OnlineProjects->clear();
         for (const auto &project : projects)
             OnlineProjects->appendProject(project);
+        // The project list is shown immediately, the digital twins follow in the background.
+        loadDigitalTwins(projects);
+    }
+
+    void AppController::loadDigitalTwins(const ProjectList &projects) {
+        if (!Connected || BackendConnection == nullptr)
+            return;
+
+        const auto generation = ++TwinLoadGeneration;
+        setTwinsLoading(true);
+
+        // Own connection: the API implementation is not thread safe and runAsync may use BackendConnection meanwhile.
+        const auto connection = BackendConnection->createIndependentConnection();
+        auto work = [connection, projects]() {
+            TwinLoadResult result;
+            for (const auto &project : projects) {
+                if (project == nullptr)
+                    continue;
+                try {
+                    DigitalTwinProject entry;
+                    entry.ProjectId = QString::fromStdString(boost::uuids::to_string(project->getId()));
+                    entry.Name = QString::fromStdString(project->getName());
+                    entry.Description = QString::fromStdString(project->getDescription());
+                    for (const auto &twin : connection->getAllDigitalTwinsForProject(project->getId())) {
+                        if (twin == nullptr)
+                            continue;
+                        DigitalTwinInfo info;
+                        info.Id = QString::fromStdString(boost::uuids::to_string(twin->getId()));
+                        info.Name = QString::fromStdString(twin->getName());
+                        if (const auto commit = twin->referencedCommit(); commit != nullptr)
+                            info.CommitId = QString::fromStdString(boost::uuids::to_string(commit->getId()));
+                        const auto created = std::chrono::duration_cast<std::chrono::milliseconds>(twin->created().time_since_epoch());
+                        info.Created = QDateTime::fromMSecsSinceEpoch(created.count());
+                        entry.Twins.append(info);
+                    }
+                    result.Projects.append(entry);
+                } catch (const std::exception &ex) {
+                    if (result.FailedProjects++ == 0)
+                        result.FirstError = QString::fromUtf8(ex.what());
+                } catch (...) {
+                    if (result.FailedProjects++ == 0)
+                        result.FirstError = QStringLiteral("Unknown error");
+                }
+            }
+            return result;
+        };
+
+        QtConcurrent::run(std::move(work)).then(this, [this, generation](TwinLoadResult result) {
+            if (generation != TwinLoadGeneration)
+                return;
+            setTwinsLoading(false);
+            DigitalTwinProjects->setProjects(result.Projects);
+            if (result.FailedProjects > 0)
+                emitNotify(2, tr("The digital twins of %n project(s) could not be loaded.", nullptr, result.FailedProjects),
+                           result.FirstError);
+        });
+    }
+
+    void AppController::cancelDigitalTwinLoading() {
+        ++TwinLoadGeneration;
+        setTwinsLoading(false);
+        DigitalTwinProjects->clear();
+    }
+
+    void AppController::refreshDigitalTwins() {
+        if (!requireConnection())
+            return;
+        loadDigitalTwins(OnlineProjects->getProjects());
+    }
+
+    void AppController::openDigitalTwinProject(int row) {
+        const auto projectId = DigitalTwinProjects->projectIdAt(row).toStdString();
+        const auto projects = OnlineProjects->getProjects();
+        for (size_t i = 0; i < projects.size(); i++) {
+            if (projects[i] != nullptr && boost::uuids::to_string(projects[i]->getId()) == projectId) {
+                openOnlineProject(int(i));
+                return;
+            }
+        }
+        emitNotify(2, tr("The project is no longer in the list of online projects. Please refresh."));
     }
 
     void AppController::connectToBackend() {
@@ -492,6 +592,7 @@ namespace StructuraSystems::Client {
             return;
         }
         BackendConnection.reset();
+        cancelDigitalTwinLoading();
         OnlineProjects->clear();
         setConnected(false);
         setStatusText(tr("Disconnected"));
@@ -637,11 +738,11 @@ namespace StructuraSystems::Client {
             });
     }
 
-    void AppController::createDigitalTwin(const QString &name, const QStringList &elementIds) {
+    void AppController::createDigitalTwin(const QString &name) {
         const auto document = CurrentDocument;
         if (!document || !requireConnection())
             return;
-        if (!document->isOnline()) {
+        if (!document->isOnline() || document->getCommit() == nullptr) {
             emitNotify(2, tr("A digital twin can only be created for an online project."));
             return;
         }
@@ -650,25 +751,15 @@ namespace StructuraSystems::Client {
             return;
         }
 
-        std::shared_ptr<SysMLv2::REST::DigitalTwin> digitalTwin;
-        try {
-            std::vector<boost::uuids::uuid> connectedElements;
-            for (const auto &id : elementIds)
-                connectedElements.push_back(boost::uuids::string_generator()(id.toStdString()));
-            digitalTwin = std::make_shared<SysMLv2::REST::DigitalTwin>(name.trimmed().toStdString(), connectedElements,
-                                                                       document->getCommit()->getId());
-        } catch (const std::exception &ex) {
-            emitNotify(3, tr("Invalid element selection."), QString::fromUtf8(ex.what()));
-            return;
-        }
-
+        const auto twinRequest = std::make_shared<SysMLv2::REST::DigitalTwinRequest>(name.trimmed().toStdString(),
+                                                                                      document->getCommit()->getId());
         const auto service = BackendConnection;
         const auto projectId = document->getProject()->getId();
-        runAsync<bool>(tr("Creating digital twin"),
-            [service, projectId, digitalTwin]() {
-                service->postDigitalTwinToProject(projectId, digitalTwin);
-                return true;
-            },
-            [this](bool) { emitNotify(1, tr("Digital twin created.")); });
+        runAsync<std::shared_ptr<SysMLv2::REST::DigitalTwin>>(tr("Creating digital twin"),
+            [service, projectId, twinRequest]() { return service->postDigitalTwinToProject(projectId, twinRequest); },
+            [this](std::shared_ptr<SysMLv2::REST::DigitalTwin> digitalTwin) {
+                emitNotify(1, tr("Digital twin %1 created.").arg(QString::fromStdString(digitalTwin->getName())));
+                refreshDigitalTwins();
+            });
     }
 }
