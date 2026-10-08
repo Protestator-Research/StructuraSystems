@@ -24,6 +24,7 @@ ApplicationWindow {
     /** Narrow windows start without side panel; it can still be opened by hand. */
     readonly property bool compact: width < 1100
     property bool _restored: false
+    property bool forceClose: false
 
     function requestClose(index, title, modified) {
         if (index < 0 || busy)
@@ -122,7 +123,7 @@ ApplicationWindow {
     onDestinationChanged: if (_restored) windowState.destination = destination
 
     onClosing: close => {
-        if (AppController.hasUnsavedChanges()) {
+        if (!forceClose && AppController.hasUnsavedChanges()) {
             close.accepted = false
             quitDialog.openDialog()
         }
@@ -475,7 +476,13 @@ ApplicationWindow {
     NewProjectDialog { id: newProjectDialog }
     CommitDialog { id: commitDialog }
     CloseDocumentDialog { id: closeDialog }
-    QuitDialog { id: quitDialog }
+    QuitDialog {
+        id: quitDialog
+        onQuitAccepted: {
+            root.forceClose = true
+            root.close()
+        }
+    }
     AboutDialog { id: aboutDialog }
     DetailsDialog { id: detailsDialog }
     DigitalTwinWizard { id: wizard }

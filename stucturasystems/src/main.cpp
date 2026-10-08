@@ -29,6 +29,8 @@ int main(int argc, char *argv[]) {
     QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed,
                      &app, []() { QCoreApplication::exit(-1); },
                      Qt::QueuedConnection);
+    QObject::connect(&engine, &QQmlApplicationEngine::quit,
+                     &app, &QGuiApplication::quit);
     engine.loadFromModule("StructuraSystems", "Main");
 
     return app.exec();
