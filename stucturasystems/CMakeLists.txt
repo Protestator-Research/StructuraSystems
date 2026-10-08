@@ -75,6 +75,7 @@ qt_add_qml_module(StructuraSystems
             qml/components/EmptyState.qml
             qml/components/InsertDivider.qml
             qml/components/LanguageChip.qml
+            qml/components/LineNumberGutter.qml
             qml/components/LanguageMenu.qml
             qml/components/NavigationRail.qml
             qml/components/NavRailItem.qml

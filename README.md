@@ -60,7 +60,7 @@ source build/Debug/generators/conanrun.sh
 ./build/Debug/out/StructuraSystems
 ```
 
-On first start the working directory defaults to your documents folder; change it, the server address and the theme in the settings. Settings are stored with `QSettings` (organisation "Working Group Cyber Physical Systems", application "Structura Systems"), the working directory below `[WORKSPACE]`, window state below `[Window]`.
+On first start the working directory defaults to your documents folder; change it, the server address and the theme in the settings. Settings are stored with `QSettings` (organisation "Protestator-Research", application "Structura Systems"), the working directory below `[WORKSPACE]`, window state below `[Window]`.
 
 ## Project structure
 

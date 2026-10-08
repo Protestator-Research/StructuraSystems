@@ -289,26 +289,39 @@ Pane {
     Component {
         id: codeComponent
 
-        TextEdit {
-            id: codeText
-            readOnly: true
-            selectByMouse: true
-            wrapMode: TextEdit.Wrap
-            textFormat: TextEdit.PlainText
-            text: card.body.length > 0 ? card.body : qsTr("Empty element. Double-click to edit.")
-            color: card.body.length > 0 ? Theme.textPrimary : Theme.textSecondary
-            font.family: card.body.length > 0 ? Theme.monoFamily : Qt.application.font.family
-            font.italic: card.body.length === 0
-            font.pixelSize: 13
-            selectionColor: Material.accentColor
-            padding: 0
+        RowLayout {
+            spacing: 8
 
-            SysMLHighlighter {
-                textDocument: Theme.isCode(card.language) && card.body.length > 0 ? codeText.textDocument : null
-                darkTheme: Theme.dark
+            LineNumberGutter {
+                Layout.fillHeight: true
+                Layout.preferredWidth: implicitWidth
+                visible: card.body.length > 0
+                target: codeText
             }
-            TapHandler {
-                onDoubleTapped: card.startEdit()
+
+            TextEdit {
+                id: codeText
+                Layout.fillWidth: true
+                Layout.alignment: Qt.AlignTop
+                readOnly: true
+                selectByMouse: true
+                wrapMode: TextEdit.Wrap
+                textFormat: TextEdit.PlainText
+                text: card.body.length > 0 ? card.body : qsTr("Empty element. Double-click to edit.")
+                color: card.body.length > 0 ? Theme.textPrimary : Theme.textSecondary
+                font.family: card.body.length > 0 ? Theme.monoFamily : Qt.application.font.family
+                font.italic: card.body.length === 0
+                font.pixelSize: 13
+                selectionColor: Material.accentColor
+                padding: 0
+
+                SysMLHighlighter {
+                    textDocument: Theme.isCode(card.language) && card.body.length > 0 ? codeText.textDocument : null
+                    darkTheme: Theme.dark
+                }
+                TapHandler {
+                    onDoubleTapped: card.startEdit()
+                }
             }
         }
     }
@@ -332,32 +345,44 @@ Pane {
                 area.cursorPosition = area.length;
             }
 
-            TextArea {
-                id: area
-
+            RowLayout {
                 Layout.fillWidth: true
-                text: card.body
-                wrapMode: TextEdit.Wrap
-                selectByMouse: true
-                font.family: languageBox.currentText === "Markdown" ? Qt.application.font.family : Theme.monoFamily
-                font.pixelSize: languageBox.currentText === "Markdown" ? 14 : 13
-                placeholderText: qsTr("Write something...")
-                persistentSelection: true
-                // Kept open but read-only while a background job works on the elements, so no typed text is lost.
-                readOnly: card.locked
+                spacing: 8
 
-                SysMLHighlighter {
-                    textDocument: Theme.isCode(languageBox.currentText) ? area.textDocument : null
-                    darkTheme: Theme.dark
+                LineNumberGutter {
+                    Layout.fillHeight: true
+                    Layout.preferredWidth: implicitWidth
+                    visible: languageBox.currentText !== "Markdown"
+                    target: area
                 }
 
-                Keys.onPressed: event => {
-                    if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter) && (event.modifiers & Qt.ControlModifier) && !card.locked) {
-                        editor.commit();
-                        event.accepted = true;
-                    } else if (event.key === Qt.Key_Escape) {
-                        card._closeEditor();
-                        event.accepted = true;
+                TextArea {
+                    id: area
+
+                    Layout.fillWidth: true
+                    text: card.body
+                    wrapMode: TextEdit.Wrap
+                    selectByMouse: true
+                    font.family: languageBox.currentText === "Markdown" ? Qt.application.font.family : Theme.monoFamily
+                    font.pixelSize: languageBox.currentText === "Markdown" ? 14 : 13
+                    placeholderText: qsTr("Write something...")
+                    persistentSelection: true
+                    // Kept open but read-only while a background job works on the elements, so no typed text is lost.
+                    readOnly: card.locked
+
+                    SysMLHighlighter {
+                        textDocument: Theme.isCode(languageBox.currentText) ? area.textDocument : null
+                        darkTheme: Theme.dark
+                    }
+
+                    Keys.onPressed: event => {
+                        if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter) && (event.modifiers & Qt.ControlModifier) && !card.locked) {
+                            editor.commit();
+                            event.accepted = true;
+                        } else if (event.key === Qt.Key_Escape) {
+                            card._closeEditor();
+                            event.accepted = true;
+                        }
                     }
                 }
             }

@@ -88,8 +88,9 @@ Dialog {
                 color: Theme.textSecondary
             }
             LinkLabel {
-                text: qsTr("Working Group Cyber Physical Systems, RPTU<br>"
-                           + "<a href=\"https://cps.cs.rptu.de/\">https://cps.cs.rptu.de/</a>")
+                text: qsTr("Protestator-Research<br>"
+                           + "<a href=\"mailto:info@protestator-research.com\">info@protestator-research.com</a><br>"
+                           + "<a href=\"https://protestator-research.com/\">https://protestator-research.com/</a>")
             }
 
             Label {
