@@ -28,6 +28,8 @@ namespace StructuraSystems::Client {
         /// and ends at an input pin of the target (index) or its left border (-1).
         int SourcePin = -1;
         int TargetPin = -1;
+        /// Written next to the line: name and type of a connection / interface, the item of a flow.
+        QString Label;
 
         bool operator==(const DiagramEdge &other) const = default;
     };
@@ -44,7 +46,8 @@ namespace StructuraSystems::Client {
             EdgeKindRole,
             SourceIdRole,
             TargetIdRole,
-            SelectedRole
+            SelectedRole,
+            LabelRole
         };
         Q_ENUM(Roles)
 

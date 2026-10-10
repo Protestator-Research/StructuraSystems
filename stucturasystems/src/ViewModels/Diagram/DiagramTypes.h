@@ -24,7 +24,51 @@ namespace StructuraSystems::Client::DiagramTypes {
         ToolCalc,       ///< "calc" in a part / part definition (or nested in a constraint / calc)
         ToolConstraintDefinition, ///< "constraint def" (node, like a part definition)
         ToolCalcDefinition,       ///< "calc def" (node, like a part definition)
-        ToolStatement             ///< any SysML statement written as text (kept word for word)
+        ToolStatement,            ///< any SysML statement written as text (kept word for word)
+        ToolAttributeDefinition,  ///< "attribute def"
+        ToolEnumDefinition,       ///< "enum def" (attributes dropped onto it are its values)
+        ToolItemDefinition,       ///< "item def"
+        ToolPortDefinition,       ///< "port def"
+        ToolInterfaceDefinition,  ///< "interface def" (ports dropped onto it are its ends)
+        ToolPort,                 ///< "port" on a part (drawn on its border), port def or interface def
+        ToolItem,                 ///< "item" in a part, item def or port def
+        ToolActionDefinition,     ///< "action def"
+        ToolStateDefinition,      ///< "state def"
+        ToolState,                ///< "state" (in a part: "exhibit state")
+        // behavior view (inside an action or state)
+        ToolActionUsage,          ///< "action" (onto a state: "do action")
+        ToolDecision,             ///< "decide"
+        ToolMerge,                ///< "merge"
+        ToolFork,                 ///< "fork"
+        ToolJoin,                 ///< "join"
+        ToolStart,                ///< "first start;"
+        ToolDone,                 ///< "then done;"
+        ToolInitial,              ///< "entry; then ...;" (initial state)
+        // requirements, use cases, verifications
+        ToolRequirementDefinition, ///< "requirement def"
+        ToolRequirement,           ///< "requirement" (usage)
+        ToolUseCaseDefinition,     ///< "use case def"
+        ToolUseCase,               ///< "use case" (usage)
+        ToolVerificationDefinition, ///< "verification def"
+        ToolVerification,          ///< "verification" (usage)
+        ToolSubject,               ///< "subject" of a requirement / use case / verification
+        ToolActor,                 ///< "actor" of a use case ("stakeholder" of a requirement)
+        ToolObjective,             ///< "objective { ... }" of a use case / verification
+        // interactions and allocations
+        ToolOccurrenceDefinition,  ///< "occurrence def" (an interaction: lifelines, events, messages)
+        ToolOccurrence,            ///< "occurrence" (usage)
+        ToolEvent,                 ///< "event occurrence" in a part / item / port / action (on its lifeline)
+        ToolAllocationDefinition,  ///< "allocation def" (parts dropped onto it are its ends)
+        ToolLifeline,              ///< sequence view: "ref part" in the interaction
+        // analysis, variability, individuals and their lifetime
+        ToolAnalysisDefinition,    ///< "analysis def"
+        ToolAnalysis,              ///< "analysis" (usage)
+        ToolVariationDefinition,   ///< "variation part def" (variants dropped onto it are its choices)
+        ToolVariant,               ///< "variant ..." in a variation (of the kind of the variation)
+        ToolIndividualDefinition,  ///< "individual part def"
+        ToolIndividual,            ///< "individual part"
+        ToolSnapshot,              ///< "snapshot" in a part / individual / occurrence
+        ToolTimeslice              ///< "timeslice" in a part / individual / occurrence
     };
     Q_ENUM_NS(Tool)
 
@@ -36,7 +80,18 @@ namespace StructuraSystems::Client::DiagramTypes {
         Specialization,
         Binding,   ///< parametric view: "bind a = b;" or a parameter / argument bound to a value
         ValueFlow, ///< parametric view: the value of an attribute ("= expression", "= calc1")
-        Reference  ///< parametric view: a value used in an expression (dashed, derived from the text)
+        Reference, ///< parametric view: a value used in an expression (dashed, derived from the text)
+        Interface, ///< interface between two ports
+        Succession, ///< behavior view: "then b;" (label: [guard])
+        Transition, ///< behavior view: transition between states (label: trigger [guard] / effect)
+        Satisfy,    ///< «satisfy»: part / port -> requirement (dashed)
+        Verify,     ///< «verify»: verification -> requirement (dashed)
+        Include,    ///< «include»: use case -> included use case (dashed)
+        Association, ///< use case view: actor - use case (plain line)
+        Message,    ///< sequence view: message from one event to another (open arrow)
+        Allocation, ///< «allocate»: allocate a to b (open arrow)
+        Dependency, ///< dependency from a to b (dashed, open arrow)
+        Temporal    ///< a snapshot / time slice of its owner: a line with a half disc at the owner
     };
     Q_ENUM_NS(EdgeKind)
 
@@ -46,7 +101,12 @@ namespace StructuraSystems::Client::DiagramTypes {
         AlwaysComposition,
         AlwaysConnection,
         AlwaysFlow,
-        AlwaysSpecialization
+        AlwaysSpecialization,
+        AlwaysInterface,
+        AlwaysSatisfy,
+        AlwaysVerify,
+        AlwaysAllocation,
+        AlwaysDependency
     };
     Q_ENUM_NS(ArrowDefault)
 
@@ -64,7 +124,23 @@ namespace StructuraSystems::Client::DiagramTypes {
         CalcNode,
         ValueNode,      ///< parametric view: an attribute
         CallNode,       ///< parametric view: "f(a, b)" as value of an attribute
-        ExpressionNode  ///< parametric view: any other expression as value of an attribute
+        ExpressionNode, ///< parametric view: any other expression as value of an attribute
+        DefinitionNode, ///< attribute / enum / item / port / interface / action / state definition
+        PortNode,       ///< a port on the border of its part
+        ActionNode,     ///< behavior view: an action (or performed action)
+        StateNode,      ///< behavior view: a state with its entry / do / exit actions
+        DecisionNode,   ///< behavior view: decide / merge (diamond)
+        ForkNode,       ///< behavior view: fork / join (bar)
+        StartNode,      ///< behavior view: start / entry (filled circle)
+        DoneNode,       ///< behavior view: done (circle with dot)
+        RequirementNode, ///< requirement def / requirement: text (doc), subject, stakeholders, require / assume
+        CaseNode,       ///< use case / verification (def or usage) in the structure view
+        UseCaseNode,    ///< use case view: a use case (ellipse)
+        ActorNode,      ///< use case view: an actor (stick figure), one per name and type
+        BoundaryNode,   ///< use case view: the subject (system boundary around its use cases)
+        LifelineNode,   ///< sequence view: a part (or item, occurrence) with its header and dashed line
+        LifelineGroupNode, ///< sequence view: header of a part whose parts are the lifelines below it
+        EventNode       ///< sequence view: an event occurrence on its lifeline (or where a message starts / ends)
     };
     Q_ENUM_NS(NodeKind)
 }

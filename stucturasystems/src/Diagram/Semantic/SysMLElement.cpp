@@ -57,10 +57,144 @@ namespace StructuraSystems::Diagram {
                 return "ConstraintUsage";
             case ElementKind::CalcUsage:
                 return "CalcUsage";
+            case ElementKind::AttributeDefinition:
+                return "AttributeDefinition";
+            case ElementKind::EnumerationDefinition:
+                return "EnumerationDefinition";
+            case ElementKind::EnumerationLiteral:
+                return "EnumerationLiteral";
+            case ElementKind::ItemDefinition:
+                return "ItemDefinition";
+            case ElementKind::ItemUsage:
+                return "ItemUsage";
+            case ElementKind::PortDefinition:
+                return "PortDefinition";
+            case ElementKind::PortUsage:
+                return "PortUsage";
+            case ElementKind::InterfaceDefinition:
+                return "InterfaceDefinition";
+            case ElementKind::ActionDefinition:
+                return "ActionDefinition";
+            case ElementKind::ActionUsage:
+                return "ActionUsage";
+            case ElementKind::ControlNode:
+                return "ControlNode";
+            case ElementKind::StateDefinition:
+                return "StateDefinition";
+            case ElementKind::StateUsage:
+                return "StateUsage";
+            case ElementKind::RequirementDefinition:
+                return "RequirementDefinition";
+            case ElementKind::RequirementUsage:
+                return "RequirementUsage";
+            case ElementKind::Subject:
+                return "Subject";
+            case ElementKind::Actor:
+                return "Actor";
+            case ElementKind::UseCaseDefinition:
+                return "UseCaseDefinition";
+            case ElementKind::UseCaseUsage:
+                return "UseCaseUsage";
+            case ElementKind::VerificationDefinition:
+                return "VerificationDefinition";
+            case ElementKind::VerificationUsage:
+                return "VerificationUsage";
+            case ElementKind::OccurrenceDefinition:
+                return "OccurrenceDefinition";
+            case ElementKind::OccurrenceUsage:
+                return "OccurrenceUsage";
+            case ElementKind::EventOccurrence:
+                return "EventOccurrence";
+            case ElementKind::AllocationDefinition:
+                return "AllocationDefinition";
+            case ElementKind::AnalysisDefinition:
+                return "AnalysisDefinition";
+            case ElementKind::AnalysisUsage:
+                return "AnalysisUsage";
             case ElementKind::Textual:
                 return "Textual";
         }
         return "Unknown";
+    }
+
+    std::string defaultKeyword(ElementKind kind) {
+        switch (kind) {
+            case ElementKind::Package:
+                return "package";
+            case ElementKind::PartDefinition:
+                return "part def";
+            case ElementKind::PartUsage:
+                return "part";
+            case ElementKind::Attribute:
+                return "attribute";
+            case ElementKind::ActionPerformance:
+                return "perform action";
+            case ElementKind::ConstraintDefinition:
+                return "constraint def";
+            case ElementKind::CalcDefinition:
+                return "calc def";
+            case ElementKind::ConstraintUsage:
+                return "constraint";
+            case ElementKind::CalcUsage:
+                return "calc";
+            case ElementKind::AttributeDefinition:
+                return "attribute def";
+            case ElementKind::EnumerationDefinition:
+                return "enum def";
+            case ElementKind::EnumerationLiteral:
+                return "enum";
+            case ElementKind::ItemDefinition:
+                return "item def";
+            case ElementKind::ItemUsage:
+                return "item";
+            case ElementKind::PortDefinition:
+                return "port def";
+            case ElementKind::PortUsage:
+                return "port";
+            case ElementKind::InterfaceDefinition:
+                return "interface def";
+            case ElementKind::ActionDefinition:
+                return "action def";
+            case ElementKind::ActionUsage:
+                return "action";
+            case ElementKind::ControlNode:
+                return "decide";
+            case ElementKind::StateDefinition:
+                return "state def";
+            case ElementKind::StateUsage:
+                return "state";
+            case ElementKind::RequirementDefinition:
+                return "requirement def";
+            case ElementKind::RequirementUsage:
+                return "requirement";
+            case ElementKind::Subject:
+                return "subject";
+            case ElementKind::Actor:
+                return "actor";
+            case ElementKind::UseCaseDefinition:
+                return "use case def";
+            case ElementKind::UseCaseUsage:
+                return "use case";
+            case ElementKind::VerificationDefinition:
+                return "verification def";
+            case ElementKind::VerificationUsage:
+                return "verification";
+            case ElementKind::OccurrenceDefinition:
+                return "occurrence def";
+            case ElementKind::OccurrenceUsage:
+                return "occurrence";
+            case ElementKind::EventOccurrence:
+                return "event occurrence";
+            case ElementKind::AllocationDefinition:
+                return "allocation def";
+            case ElementKind::AnalysisDefinition:
+                return "analysis def";
+            case ElementKind::AnalysisUsage:
+                return "analysis";
+            case ElementKind::Textual:
+                break;
+        }
+        return {};
     }
 
     std::string toString(RelationshipKind kind) {
@@ -73,6 +207,24 @@ namespace StructuraSystems::Diagram {
                 return "Specialization";
             case RelationshipKind::Binding:
                 return "Binding";
+            case RelationshipKind::Interface:
+                return "Interface";
+            case RelationshipKind::Succession:
+                return "Succession";
+            case RelationshipKind::Transition:
+                return "Transition";
+            case RelationshipKind::Satisfy:
+                return "Satisfy";
+            case RelationshipKind::Verify:
+                return "Verify";
+            case RelationshipKind::Include:
+                return "Include";
+            case RelationshipKind::Message:
+                return "Message";
+            case RelationshipKind::Allocation:
+                return "Allocation";
+            case RelationshipKind::Dependency:
+                return "Dependency";
         }
         return "Unknown";
     }

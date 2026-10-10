@@ -7,10 +7,14 @@
 #include "DiagramGeometry.h"
 #include "DiagramNodeModel.h"
 
+#include <QFontMetrics>
 #include <QPainter>
+#include <QPainterPath>
+#include <QtMath>
 #include <QPolygonF>
 #include <QVector>
 
+#include <algorithm>
 #include <cmath>
 
 namespace StructuraSystems::Client {
@@ -255,7 +259,44 @@ namespace StructuraSystems::Client {
                 if (!source || !target)
                     continue;
 
-                const QLineF line = DiagramGeometry::edgeLine(source->Rect, target->Rect);
+                const QColor loopColor = edge.Selected ? SelectionColor : LineColor;
+                if (edge.Source == edge.Target) {
+                    // transition of a state to itself: a loop at the upper right corner
+                    painter->setPen(QPen(loopColor, edge.Selected ? 2.2 : 1.4));
+                    const QRectF r = source->Rect;
+                    const QRectF loop(r.right() - 26, r.top() - 18, 36, 36);
+                    painter->drawArc(loop, 180 * 16, -270 * 16);
+                    const QPointF tip(r.right(), r.top() + 10);
+                    painter->setBrush(QBrush(loopColor));
+                    painter->drawPolygon(arrowHead(tip, tip + QPointF(10, 0)));
+                    painter->setBrush(Qt::NoBrush);
+                    if (!edge.Label.isEmpty())
+                        painter->drawText(QPointF(r.right() + 14, r.top() - 6), edge.Label);
+                    continue;
+                }
+
+                // use cases are ellipses: the line ends at their outline
+                // and an actor at its stick figure (above its name)
+                const auto shape = [](const DiagramNode &node) {
+                    return node.Kind == DiagramTypes::ActorNode
+                           ? QRectF(node.Rect.center().x() - 20, node.Rect.top(), 40, 62) : node.Rect;
+                };
+                const auto outline = [&](const DiagramNode &node, const QPointF &towards) {
+                    return node.Kind == DiagramTypes::UseCaseNode ? DiagramGeometry::ellipsePointTowards(node.Rect, towards)
+                                                                  : DiagramGeometry::borderPointTowards(shape(node), towards);
+                };
+                QLineF line(outline(*source, shape(*target).center()), outline(*target, shape(*source).center()));
+                // two arrows between the same nodes (a -> b and b -> a): side by side instead of on top of each other
+                const bool parallel = std::any_of(Edges->edges().begin(), Edges->edges().end(), [&](const DiagramEdge &other) {
+                    return &other != &edge && ((other.Source == edge.Source && other.Target == edge.Target) ||
+                                               (other.Source == edge.Target && other.Target == edge.Source));
+                });
+                if (parallel && line.length() > 1e-6) {
+                    QPointF normal(-(line.dy()), line.dx());
+                    normal /= line.length();
+                    const qreal side = edge.Source < edge.Target ? 1.0 : -1.0;
+                    line.translate(normal * 9.0 * side);
+                }
                 const QPointF start = line.p1();
                 const QPointF end = line.p2();
                 const QColor color = edge.Selected ? SelectionColor : LineColor;
@@ -265,6 +306,8 @@ namespace StructuraSystems::Client {
                 QPointF lineEnd = end;
                 QPolygonF marker;
                 bool filled = true;
+                bool openArrow = false; // «satisfy», «verify», «include», dependency: dashed with an open arrow head
+                bool openHead = false;  // message, «allocate»: a solid line with an open arrow head
                 switch (edge.Kind) {
                     case DiagramTypes::Composition:
                         marker = diamond(start, end); // the diamond sits at the owner
@@ -272,6 +315,8 @@ namespace StructuraSystems::Client {
                             lineStart = marker[2];
                         break;
                     case DiagramTypes::Flow:
+                    case DiagramTypes::Succession:
+                    case DiagramTypes::Transition:
                         marker = arrowHead(end, start);
                         break;
                     case DiagramTypes::Specialization:
@@ -280,14 +325,91 @@ namespace StructuraSystems::Client {
                         if (!marker.isEmpty())
                             lineEnd = (marker[1] + marker[2]) / 2.0;
                         break;
+                    case DiagramTypes::Satisfy:
+                    case DiagramTypes::Verify:
+                    case DiagramTypes::Include:
+                    case DiagramTypes::Dependency:
+                        openArrow = true;
+                        break;
+                    case DiagramTypes::Message:
+                    case DiagramTypes::Allocation:
+                        openHead = true;
+                        break;
+                    case DiagramTypes::Temporal:
+                        break;
                     case DiagramTypes::Connection:
                     case DiagramTypes::Binding:
                     case DiagramTypes::ValueFlow:
                     case DiagramTypes::Reference:
+                    case DiagramTypes::Interface:
+                    case DiagramTypes::Association:
                         break;
                 }
 
-                painter->drawLine(lineStart, lineEnd);
+                if (openArrow) {
+                    QPen dashed(color, edge.Selected ? 2.2 : 1.4, Qt::DashLine);
+                    painter->setPen(dashed);
+                    painter->drawLine(lineStart, lineEnd);
+                    painter->setPen(QPen(color, edge.Selected ? 2.2 : 1.4));
+                    const QPolygonF head = arrowHead(end, start);
+                    if (!head.isEmpty()) {
+                        painter->drawLine(head[0], head[1]);
+                        painter->drawLine(head[0], head[2]);
+                    }
+                } else {
+                    painter->drawLine(lineStart, lineEnd);
+                    const QPolygonF head = openHead ? arrowHead(end, start) : QPolygonF();
+                    if (!head.isEmpty()) {
+                        painter->drawLine(head[0], head[1]);
+                        painter->drawLine(head[0], head[2]);
+                    }
+                }
+                if (edge.Kind == DiagramTypes::Temporal) {
+                    // temporal decomposition: a filled half disc on the owner, its flat side towards the slice
+                    const QLineF line(start, end);
+                    const qreal angle = line.angle();
+                    const QRectF disc(start.x() - 7, start.y() - 7, 14, 14);
+                    QPainterPath path;
+                    path.moveTo(start);
+                    path.arcTo(disc, angle + 90, 180);
+                    path.closeSubpath();
+                    painter->setBrush(QBrush(color));
+                    painter->drawPath(path.translated(QPointF(std::cos(qDegreesToRadians(angle)), -std::sin(qDegreesToRadians(angle))) * 7));
+                    painter->setBrush(Qt::NoBrush);
+                }
+                if (edge.Kind == DiagramTypes::Interface) {
+                    // ball and socket in the middle
+                    const QPointF middle = (lineStart + lineEnd) / 2.0;
+                    const QLineF line(lineStart, lineEnd);
+                    const qreal angle = line.angle();
+                    painter->setBrush(QBrush(BackgroundColor));
+                    painter->drawEllipse(middle, 4.5, 4.5);
+                    painter->setBrush(Qt::NoBrush);
+                    const QRectF socket(middle.x() - 8, middle.y() - 8, 16, 16);
+                    painter->drawArc(socket, int((angle + 90) * 16), 180 * 16);
+                }
+                if (!edge.Label.isEmpty()) {
+                    QFont font = painter->font();
+                    font.setPixelSize(11);
+                    painter->setFont(font);
+                    const QPointF middle = (lineStart + lineEnd) / 2.0;
+                    const QRectF box = painter->fontMetrics().boundingRect(edge.Label).adjusted(-4, -2, 4, 2);
+                    // beside a steep line, above a flat one; on the side the line was moved to
+                    const bool steep = std::abs(lineEnd.y() - lineStart.y()) > std::abs(lineEnd.x() - lineStart.x());
+                    const qreal side = (parallel && edge.Source > edge.Target) ? -1.0 : 1.0;
+                    QRectF placed = steep ? QRectF(side > 0 ? middle.x() + 8 : middle.x() - 8 - box.width(),
+                                                   middle.y() - box.height() / 2, box.width(), box.height())
+                                          : QRectF(middle.x() - box.width() / 2,
+                                                   side > 0 ? middle.y() - box.height() - 8 : middle.y() + 8,
+                                                   box.width(), box.height());
+                    painter->setPen(Qt::NoPen);
+                    painter->setBrush(QBrush(BackgroundColor));
+                    painter->drawRect(placed);
+                    painter->setBrush(Qt::NoBrush);
+                    painter->setPen(QPen(color));
+                    painter->drawText(placed, Qt::AlignCenter, edge.Label);
+                    painter->setPen(QPen(color, edge.Selected ? 2.2 : 1.4));
+                }
                 if (!marker.isEmpty()) {
                     painter->setBrush(filled ? QBrush(color) : QBrush(BackgroundColor));
                     painter->drawPolygon(marker);

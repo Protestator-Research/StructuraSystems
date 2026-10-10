@@ -181,6 +181,11 @@ FocusScope {
                 acceptedButtons: Qt.LeftButton | Qt.RightButton
 
                 onPressed: canvas.forceActiveFocus()
+                onDoubleClicked: mouse => {
+                    const edge = canvas.controller.edgeAt(mouse.x, mouse.y)
+                    if (edge.length > 0)
+                        edgeDialog.openFor(edge)
+                }
                 onClicked: mouse => {
                     const edge = canvas.controller.edgeAt(mouse.x, mouse.y)
                     if (mouse.button === Qt.RightButton) {
@@ -304,6 +309,14 @@ FocusScope {
         property string edgeKey
 
         MenuItem {
+            readonly property bool editable: edgeMenu.edgeKey.length > 0
+                                             && canvas.controller.edgeDetails(edgeMenu.edgeKey).editable === true
+            visible: editable
+            height: visible ? implicitHeight : 0
+            text: qsTr("Name and type...")
+            onTriggered: edgeDialog.openFor(edgeMenu.edgeKey)
+        }
+        MenuItem {
             text: qsTr("Delete relationship")
             onTriggered: canvas.controller.deleteEdge(edgeMenu.edgeKey)
         }
@@ -331,6 +344,12 @@ FocusScope {
     EdgeKindMenu {
         id: edgeKindMenu
         objectName: "edgeKindMenu"
+        controller: canvas.controller
+    }
+
+    EdgeEditDialog {
+        id: edgeDialog
+        objectName: "edgeEditDialog"
         controller: canvas.controller
     }
 

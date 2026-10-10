@@ -98,6 +98,15 @@ namespace StructuraSystems::Diagram {
         /// Expression text on one line (line breaks and comments removed).
         static std::string oneLine(const std::string &expression);
 
+        // --- documentation ("doc /* ... */") ---
+
+        /// Text of a comment or doc statement without "doc", "/*", "*/" and the leading "*" of its lines.
+        static std::string commentBody(const std::string &statement);
+        /// "doc /* text */", or for several lines "doc /*\n * line\n */" (no "*/" allowed inside the text).
+        static std::string docStatement(const std::string &body);
+        /// The doc statement owned by an element (the first one), std::nullopt if there is none.
+        static std::optional<ElementId> docOf(const SemanticModel &model, ElementId id);
+
         // --- expressions (used by the parametric view) ---
 
         /// The expression if it is exactly one call "f(a, b)"; std::nullopt otherwise.

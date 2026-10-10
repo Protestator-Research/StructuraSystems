@@ -774,8 +774,13 @@ namespace StructuraSystems::Client {
                     output = true;
                 }
             }
-            if (pin < 0 && !it->Rect.contains(point))
-                continue;
+            if (pin < 0 && !it->Rect.contains(point)) {
+                // just outside the border: the port of a value (pin -1)
+                const QPointF port = DiagramGeometry::pinPoint(it->Rect, x > it->Rect.center().x(), -1);
+                if (std::abs(y - port.y()) > PinGrip)
+                    continue;
+                output = x > it->Rect.center().x();
+            }
             return {{QStringLiteral("node"), nodeKey(it->Id)},
                     {QStringLiteral("element"), elementOf(nodeKey(it->Id))},
                     {QStringLiteral("pin"), pin},

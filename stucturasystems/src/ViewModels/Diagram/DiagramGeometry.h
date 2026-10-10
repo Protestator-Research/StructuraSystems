@@ -28,6 +28,19 @@ namespace StructuraSystems::Client::DiagramGeometry {
         return {center.x() + dx * scale, center.y() + dy * scale};
     }
 
+    /// Point on the ellipse inscribed in rect on the way from its centre towards target (use cases).
+    inline QPointF ellipsePointTowards(const QRectF &rect, const QPointF &target) {
+        const QPointF center = rect.center();
+        const qreal dx = target.x() - center.x();
+        const qreal dy = target.y() - center.y();
+        const qreal a = rect.width() / 2.0;
+        const qreal b = rect.height() / 2.0;
+        if ((std::abs(dx) < 1e-6 && std::abs(dy) < 1e-6) || a < 1e-6 || b < 1e-6)
+            return center;
+        const qreal scale = 1.0 / std::sqrt((dx * dx) / (a * a) + (dy * dy) / (b * b));
+        return {center.x() + dx * scale, center.y() + dy * scale};
+    }
+
     /// Straight edge between two node outlines (from the border of source to the border of target).
     inline QLineF edgeLine(const QRectF &source, const QRectF &target) {
         return {borderPointTowards(source, target.center()), borderPointTowards(target, source.center())};

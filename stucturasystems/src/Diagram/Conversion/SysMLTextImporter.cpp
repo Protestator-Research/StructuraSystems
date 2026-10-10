@@ -160,7 +160,7 @@ namespace StructuraSystems::Diagram {
 
         /// Words before a declaration keyword; kept as prefixes of the element.
         const std::set<std::string, std::less<>> PrefixWords = {
-                "abstract", "readonly", "constant", "ref", "variation", "individual", "end", "in", "out", "inout",
+                "abstract", "readonly", "constant", "ref", "variation", "variant", "individual", "end", "in", "out", "inout",
                 "composite", "portion", "var", "public", "private", "protected", "derived", "library", "standard"};
 
         struct Pending {
@@ -168,7 +168,17 @@ namespace StructuraSystems::Diagram {
                 Specialization,
                 Connection,
                 Flow,
-                Binding
+                Binding,
+                Interface,
+                Succession, ///< Source set (shorthand "then b;") or First = source path
+                Transition,
+                Satisfy,    ///< First = requirement, Second = "by" element
+                Verify,     ///< Source = verification, Scope = its objective, First = requirement
+                Include,    ///< Source = use case (= Scope), First = included use case
+                Message,    ///< message [name] [of T] from First to Second;
+                MessageThen, ///< then message ...;
+                Allocation, ///< allocate First to Second (refining allocations: see AllocationParent)
+                Dependency  ///< dependency [name] from First to Second;
             };
             Type Kind = Type::Specialization;
             ElementId Source = RootId;          ///< Specialization: the specializing element
@@ -179,6 +189,14 @@ namespace StructuraSystems::Diagram {
             std::string Text;                   ///< Specialization: reference as written
             std::size_t Begin = 0;              ///< Connection/Flow: statement in the source (kept as text if
             std::size_t End = 0;                ///< its ends cannot be resolved)
+            std::string Name;                   ///< Connection/Flow/Interface: optional name
+            std::string TypeName;               ///< Connection/Interface: type, Flow: "of" item type
+            std::string Guard;                  ///< Succession/Transition
+            std::string Trigger;                ///< Transition
+            std::string Effect;                 ///< Transition
+            /// Statement kept as text at its place until it is resolved (removed then), so a statement that
+            /// cannot be resolved keeps its position in the block.
+            std::optional<ElementId> Placeholder;
         };
 
         std::string joinPath(const std::vector<std::string> &path) {
@@ -455,9 +473,10 @@ namespace StructuraSystems::Diagram {
             // --- statements kept as text --------------------------------------------------------
 
             /// Text from begin to end becomes a Textual element of owner (comments inside are part of it).
-            void keepText(ElementId owner, std::size_t begin, std::size_t end, std::size_t line, bool comment = false) {
+            std::optional<ElementId> keepText(ElementId owner, std::size_t begin, std::size_t end, std::size_t line,
+                                              bool comment = false) {
                 if (end <= begin)
-                    return;
+                    return std::nullopt;
                 const std::string raw = Source.substr(begin, end - begin);
                 const std::string text = normalizeStatement(raw, columnOf(Source, begin), comment);
                 const auto [keyword, name] = SysMLTextImporter::describeStatement(text);
@@ -469,9 +488,29 @@ namespace StructuraSystems::Diagram {
                         if (Tokens[i].Type == TokenType::Comment && Tokens[i].Begin >= begin && Tokens[i].End <= end)
                             Covered[i] = true;
                     }
+                    return id;
                 } catch (const std::exception &exception) {
                     lost((keyword.empty() ? std::string("statement") : keyword) + (name.empty() ? "" : " " + name) +
                          " (" + exception.what() + ")", line);
+                }
+                return std::nullopt;
+            }
+
+            /// The last pending relationship keeps its statement as text at its place until it is resolved.
+            void reserve() {
+                auto &pending = Pendings.back();
+                pending.Placeholder = keepText(pending.Scope, pending.Begin, pending.End, pending.Line);
+            }
+
+            /// Resolved: the text kept in its place is not needed anymore (comments in it count as lost again).
+            void release(const Pending &pending) {
+                if (!pending.Placeholder || !Model.contains(*pending.Placeholder))
+                    return;
+                Model.removeElement(*pending.Placeholder);
+                --Report.ImportedElements;
+                for (std::size_t i = 0; i < Tokens.size(); ++i) {
+                    if (Tokens[i].Type == TokenType::Comment && Tokens[i].Begin >= pending.Begin && Tokens[i].End <= pending.End)
+                        Covered[i] = false;
                 }
             }
 
@@ -542,6 +581,26 @@ namespace StructuraSystems::Diagram {
                 return take().Text;
             }
 
+            /// "<'R1'>" / "<R1>" in front of the name: the short name as written (quotes kept), empty if none.
+            std::string readShortName() {
+                if (!(isSymbol("<") && isNameToken(1) && isSymbol(">", 2)))
+                    return {};
+                take();
+                const Token name = take();
+                take();
+                return Source.substr(name.Begin, name.End - name.Begin);
+            }
+
+            void applyShortName(ElementId id, const std::string &shortName, std::size_t line) {
+                if (shortName.empty())
+                    return;
+                try {
+                    Model.setShortName(id, shortName);
+                } catch (const std::exception &exception) {
+                    lost(std::string(exception.what()), line);
+                }
+            }
+
             /// a::b.c -> {"a", "b", "c"}
             std::vector<std::string> readPath() {
                 std::vector<std::string> path;
@@ -569,13 +628,18 @@ namespace StructuraSystems::Diagram {
             }
 
             /// Type text as written (separators kept), e.g. "ISQ::MassValue".
+            /// Type as written (quotes kept, separators without spaces), "~" in front of a conjugated port type.
             std::string readTypeText() {
+                std::string text;
+                if (isSymbol("~") && isNameToken(1))
+                    text = take().Text;
                 if (!isNameToken())
                     return {};
-                std::string text = take().Text;
+                const auto spelled = [this](const Token &token) { return Source.substr(token.Begin, token.End - token.Begin); };
+                text += spelled(take());
                 while ((isSymbol("::") || isSymbol(".")) && isNameToken(1)) {
                     text += take().Text;
-                    text += take().Text;
+                    text += spelled(take());
                 }
                 return text;
             }
@@ -681,6 +745,8 @@ namespace StructuraSystems::Diagram {
                 try {
                     const ElementId id = Model.addElement(kind, name, owner);
                     ++Report.ImportedElements;
+                    if (isSuccessionEnd(kind))
+                        Previous[owner] = id; // source of a following "then b;"
                     return id;
                 } catch (const std::exception &) {
                     return std::nullopt; // the caller keeps the statement as text
@@ -725,18 +791,10 @@ namespace StructuraSystems::Diagram {
                 // Prefixes: visibility, modifiers, metadata (#name)
                 std::vector<std::string> prefixes;
                 while (true) {
-                    if (peek().Type == TokenType::Identifier && PrefixWords.count(peek().Text) > 0 &&
-                        !isSymbol(";", 1) && !isSymbol(":", 1) && !isSymbol("{", 1)) {
-                        prefixes.push_back(take().Text);
+                    if (readPrefix(prefixes))
                         continue;
-                    }
-                    if (isSymbol("#") && isNameToken(1)) {
-                        take();
-                        prefixes.push_back("#" + readReferenceText());
-                        continue;
-                    }
-                    if (inEvaluationBody(owner) && isWord("return") && prefixes.empty() && isNameToken(1) &&
-                        !isSymbol(":", 1)) {
+                    if ((inEvaluationBody(owner) || inAnalysisBody(owner)) && isWord("return") && prefixes.empty() &&
+                        (isNameToken(1) || isSymbol("<", 1)) && !isSymbol(":", 1)) {
                         prefixes.push_back(take().Text);
                         continue;
                     }
@@ -751,10 +809,41 @@ namespace StructuraSystems::Diagram {
                         keepText(owner, begin, LastEnd, line);
                     return;
                 }
-                if (peek().Type == TokenType::Name && directed && inEvaluationBody(owner)) {
-                    // in 'my value' : Real;
+                if ((peek().Type == TokenType::Name || isSymbol("<")) && directed && acceptsBareParameters(owner)) {
+                    // in 'my value' : Real;  return <R1> result;
                     parseUsage(owner, ElementKind::Attribute, prefixes, begin, line, PerformStyle::DeclareAction,
                                std::string());
+                    return;
+                }
+                // "end supplier : FuelPort;" in an interface / allocation def: an end without keyword
+                const bool end = std::find(prefixes.begin(), prefixes.end(), "end") != prefixes.end();
+                // [<short name>] name followed by what may follow the name of a declaration
+                const std::size_t named = isSymbol("<") && isNameToken(1) && isSymbol(">", 2) ? 3 : 0;
+                const bool bareDeclaration =
+                        isNameToken(named) && !isWord("part", named) && !isWord("port", named) && !isWord("item", named) &&
+                        !isWord("attribute", named) && !isWord("ref", named) &&
+                        (isSymbol(":", named + 1) || isSymbol(";", named + 1) || isSymbol("[", named + 1) ||
+                         isSymbol("=", named + 1) || isSymbol(":=", named + 1) || isSymbol("{", named + 1) ||
+                         isSymbol(":>", named + 1) || isWord("default", named + 1));
+                if (std::find(prefixes.begin(), prefixes.end(), "variant") != prefixes.end() && bareDeclaration &&
+                    variantKind(owner)) {
+                    // "variant '4cylEngine';" in a variation: a variant of the kind of the variation
+                    parseUsage(owner, *variantKind(owner), prefixes, begin, line, PerformStyle::DeclareAction, std::string());
+                    return;
+                }
+                if (ownerKind(owner) == ElementKind::EnumerationDefinition && isNameToken(named) && isSymbol(";", named + 1) &&
+                    !isWord("enum", named)) {
+                    // "ok;" / "<'1'> ok;" in an enum def: a value without keyword
+                    parseUsage(owner, ElementKind::EnumerationLiteral, prefixes, begin, line, PerformStyle::DeclareAction,
+                               std::string());
+                    return;
+                }
+                if (end && bareDeclaration &&
+                    (ownerKind(owner) == ElementKind::InterfaceDefinition ||
+                     ownerKind(owner) == ElementKind::AllocationDefinition)) {
+                    parseUsage(owner, ownerKind(owner) == ElementKind::InterfaceDefinition ? ElementKind::PortUsage
+                                                                                          : ElementKind::PartUsage,
+                               prefixes, begin, line, PerformStyle::DeclareAction, std::string());
                     return;
                 }
                 if (peek().Type != TokenType::Identifier) {
@@ -804,12 +893,18 @@ namespace StructuraSystems::Diagram {
                 } else if (inEvaluationBody(owner) && keyword == "attribute" && !isWord("def", 1) && directed) {
                     take();
                     parseUsage(owner, ElementKind::Attribute, prefixes, begin, line);
-                } else if (inEvaluationBody(owner) && directed && isNameToken() &&
+                } else if (acceptsBareParameters(owner) && directed && isNameToken() &&
                            (isSymbol(":", 1) || isSymbol(";", 1) || isSymbol("[", 1) || isSymbol("=", 1) ||
                             isSymbol(":=", 1) || isWord("default", 1) || isSymbol(":>", 1))) {
                     // in x : Real;   (parameter without keyword)
                     parseUsage(owner, ElementKind::Attribute, prefixes, begin, line, PerformStyle::DeclareAction,
                                std::string());
+                } else if (!kerml && parseOccurrence(owner, keyword, prefixes, begin, line)) {
+                    // occurrences, events, messages, allocations, dependencies
+                } else if (!kerml && parseRequirementOrCase(owner, keyword, prefixes, begin, line)) {
+                    // requirements, use cases, verifications, subject, actors, satisfy, verify, include
+                } else if (!kerml && parseBehavior(owner, keyword, prefixes, begin, line)) {
+                    // actions, control nodes, states, successions and transitions
                 } else if (Dialect == SysMLTextImporter::Dialect::SysML) {
                     if (keyword == "part" && isWord("def", 1)) {
                         take();
@@ -821,6 +916,28 @@ namespace StructuraSystems::Diagram {
                     } else if (keyword == "attribute" && !isWord("def", 1)) {
                         take();
                         parseUsage(owner, ElementKind::Attribute, prefixes, begin, line);
+                    } else if (isWord("def", 1) && (keyword == "attribute" || keyword == "enum" || keyword == "item" ||
+                                                    keyword == "port" || keyword == "interface")) {
+                        take();
+                        take();
+                        const ElementKind kind = keyword == "attribute" ? ElementKind::AttributeDefinition
+                                                 : keyword == "enum" ? ElementKind::EnumerationDefinition
+                                                 : keyword == "item" ? ElementKind::ItemDefinition
+                                                 : keyword == "port" ? ElementKind::PortDefinition
+                                                 : ElementKind::InterfaceDefinition;
+                        parseDefinition(owner, prefixes, begin, line, kind);
+                    } else if (keyword == "item") {
+                        take();
+                        parseUsage(owner, ElementKind::ItemUsage, prefixes, begin, line);
+                    } else if (keyword == "port") {
+                        take();
+                        parseUsage(owner, ElementKind::PortUsage, prefixes, begin, line);
+                    } else if (keyword == "enum" && ownerKind(owner) == ElementKind::EnumerationDefinition) {
+                        take();
+                        parseUsage(owner, ElementKind::EnumerationLiteral, prefixes, begin, line);
+                    } else if ((keyword == "connection" || keyword == "interface") && prefixes.empty()) {
+                        take();
+                        parseConnection(owner, begin, line, keyword == "interface");
                     } else if (keyword == "perform") {
                         take();
                         parsePerform(owner, prefixes, begin, line);
@@ -830,7 +947,7 @@ namespace StructuraSystems::Diagram {
                     } else if (keyword == "bind" && prefixes.empty()) {
                         take();
                         parseBind(owner, begin, line);
-                    } else if (keyword == "flow" && prefixes.empty() && (isWord("from", 1) || isWord("of", 1))) {
+                    } else if (keyword == "flow" && prefixes.empty()) {
                         take();
                         parseFlow(owner, begin, line);
                     } else {
@@ -849,6 +966,39 @@ namespace StructuraSystems::Diagram {
                     } else {
                         fallBackToText(owner, begin, line);
                     }
+                }
+            }
+
+            /// One prefix word or metadata reference (#name) in front of a declaration keyword; false if there is none.
+            bool readPrefix(std::vector<std::string> &prefixes) {
+                if (peek().Type == TokenType::Identifier && PrefixWords.count(peek().Text) > 0 &&
+                    !isSymbol(";", 1) && !isSymbol(":", 1) && !isSymbol("{", 1)) {
+                    prefixes.push_back(take().Text);
+                    return true;
+                }
+                if (isSymbol("#") && isNameToken(1)) {
+                    take();
+                    prefixes.push_back("#" + readReferenceText());
+                    return true;
+                }
+                return false;
+            }
+
+            /// Index (as for peek) of the first token behind the prefixes that start at ahead.
+            std::size_t behindPrefixes(std::size_t ahead) {
+                while (true) {
+                    if (peek(ahead).Type == TokenType::Identifier && PrefixWords.count(peek(ahead).Text) > 0 &&
+                        !isSymbol(";", ahead + 1) && !isSymbol(":", ahead + 1) && !isSymbol("{", ahead + 1)) {
+                        ++ahead;
+                        continue;
+                    }
+                    if (isSymbol("#", ahead) && isNameToken(ahead + 1)) {
+                        ahead += 2;
+                        while ((isSymbol("::", ahead) || isSymbol(".", ahead)) && isNameToken(ahead + 1))
+                            ahead += 2;
+                        continue;
+                    }
+                    return ahead;
                 }
             }
 
@@ -890,6 +1040,7 @@ namespace StructuraSystems::Diagram {
 
             void parsePackage(ElementId owner, const std::vector<std::string> &prefixes, std::size_t begin,
                               std::size_t line) {
+                const std::string shortName = readShortName();
                 const std::string name = readName();
                 if (name.empty() || (!isSymbol(";") && !isSymbol("{"))) {
                     fallBackToText(owner, begin, line);
@@ -901,6 +1052,7 @@ namespace StructuraSystems::Diagram {
                     return;
                 }
                 applyPrefixes(*id, prefixes);
+                applyShortName(*id, shortName, line);
                 finishDeclaration(*id);
             }
 
@@ -914,8 +1066,13 @@ namespace StructuraSystems::Diagram {
                 }
             }
 
+            ElementKind ownerKind(ElementId owner) const {
+                return owner == RootId ? ElementKind::Package : Model.element(owner).kind();
+            }
+
             void parseDefinition(ElementId owner, const std::vector<std::string> &prefixes, std::size_t begin,
-                                 std::size_t line) {
+                                 std::size_t line, ElementKind kind = ElementKind::PartDefinition) {
+                const std::string shortName = Dialect == SysMLTextImporter::Dialect::SysML ? readShortName() : std::string();
                 const std::string name = readName();
                 std::vector<Reference> specializations;
                 while (!name.empty() && (isSymbol(":>") || isWord("specializes") || isWord("subclassifies"))) {
@@ -929,16 +1086,17 @@ namespace StructuraSystems::Diagram {
                     fallBackToText(owner, begin, line);
                     return;
                 }
-                const auto id = add(ElementKind::PartDefinition, name, owner);
+                const auto id = add(kind, name, owner);
                 if (!id) {
                     fallBackToText(owner, begin, line);
                     return;
                 }
                 if (!kerml)
                     applyPrefixes(*id, prefixes);
+                applyShortName(*id, shortName, line);
                 for (auto &reference: specializations)
                     Pendings.push_back({Pending::Type::Specialization, *id, owner, std::move(reference.Path), {}, line,
-                                        reference.Text, 0, 0});
+                                        reference.Text, 0, 0, {}, {}, {}, {}, {}, std::nullopt});
                 finishDeclaration(*id);
             }
 
@@ -959,8 +1117,10 @@ namespace StructuraSystems::Diagram {
             void parseUsage(ElementId owner, ElementKind kind, const std::vector<std::string> &prefixes, std::size_t begin,
                             std::size_t line, PerformStyle style = PerformStyle::DeclareAction,
                             const std::optional<std::string> &declaredKeyword = std::nullopt) {
+                const std::string shortName = Dialect == SysMLTextImporter::Dialect::SysML ? readShortName() : std::string();
                 const std::string name = readName();
-                if (name.empty()) {
+                // "objective { ... }", "requirement : R;" without a name
+                if (name.empty() && !(kind == ElementKind::RequirementUsage && shortName.empty())) {
                     fallBackToText(owner, begin, line);
                     return;
                 }
@@ -970,6 +1130,7 @@ namespace StructuraSystems::Diagram {
                 std::vector<Reference> specializations;
                 std::string valueOperator;
                 std::string value;
+                std::string qualifiers; // ordered, nonunique
                 bool plain = true; // false: something the model cannot hold -> the statement is kept as text
 
                 while (plain && !atEnd() && !isSymbol(";") && !isSymbol("{") && !isSymbol("}")) {
@@ -985,6 +1146,11 @@ namespace StructuraSystems::Diagram {
                         take();
                         for (auto &reference: readReferenceList())
                             specializations.push_back(std::move(reference));
+                    } else if ((isWord("ordered") || isWord("nonunique")) && qualifiers.empty()) {
+                        qualifiers = take().Text;
+                        if (qualifiers == "ordered" && isWord("nonunique"))
+                            qualifiers += " " + take().Text;
+                        plain = !isWord("ordered") && !isWord("nonunique"); // "nonunique ordered": kept as written
                     } else if ((isSymbol("=") || isSymbol(":=") || isWord("default")) && value.empty()) {
                         valueOperator = take().Text;
                         if (valueOperator == "default" && (isSymbol("=") || isSymbol(":=")))
@@ -999,8 +1165,23 @@ namespace StructuraSystems::Diagram {
                 }
 
                 const bool hasBody = isSymbol("{");
+                const bool bodyAllowed = kind == ElementKind::ActionUsage || kind == ElementKind::StateUsage ||
+                                         kind == ElementKind::PartUsage || kind == ElementKind::PortUsage ||
+                                         kind == ElementKind::ItemUsage || kind == ElementKind::RequirementUsage ||
+                                         kind == ElementKind::UseCaseUsage || kind == ElementKind::VerificationUsage ||
+                                         kind == ElementKind::OccurrenceUsage || kind == ElementKind::AnalysisUsage;
+                const bool multiplicityAllowed = kind == ElementKind::PartUsage || kind == ElementKind::Attribute ||
+                                                 kind == ElementKind::ItemUsage || kind == ElementKind::PortUsage ||
+                                                 kind == ElementKind::Subject || kind == ElementKind::Actor ||
+                                                 kind == ElementKind::OccurrenceUsage;
+                const bool valueAllowed = kind == ElementKind::Attribute || kind == ElementKind::PartUsage ||
+                                          kind == ElementKind::Subject || kind == ElementKind::OccurrenceUsage;
                 if (!plain || (kind == ElementKind::Attribute && !specializations.empty()) ||
-                    (kind != ElementKind::PartUsage && hasBody) ||
+                    (!qualifiers.empty() && !multiplicityAllowed) ||
+                    (!bodyAllowed && hasBody) || (multiplicity && !multiplicityAllowed) || (!value.empty() && !valueAllowed) ||
+                    ((kind == ElementKind::ActionUsage || kind == ElementKind::StateUsage) && !value.empty()) ||
+                    (kind == ElementKind::EnumerationLiteral &&
+                     (!value.empty() || !typeName.empty() || multiplicity || !specializations.empty())) ||
                     (kind == ElementKind::ActionPerformance && (multiplicity || !value.empty())) ||
                     (Dialect == SysMLTextImporter::Dialect::KerML && !prefixes.empty() && !inEvaluationBody(owner))) {
                     fallBackToText(owner, begin, line);
@@ -1017,6 +1198,8 @@ namespace StructuraSystems::Diagram {
                         Model.setTypeName(*id, typeName);
                     if (multiplicity)
                         Model.setMultiplicity(*id, multiplicity);
+                    if (!qualifiers.empty())
+                        Model.setMultiplicityQualifiers(*id, qualifiers);
                     if (kind == ElementKind::ActionPerformance)
                         Model.setPerformStyle(*id, style);
                     if (!value.empty())
@@ -1027,9 +1210,10 @@ namespace StructuraSystems::Diagram {
                 } catch (const std::exception &exception) {
                     lost(std::string(exception.what()) + " (" + name + ")", line);
                 }
+                applyShortName(*id, shortName, line);
                 for (auto &reference: specializations)
                     Pendings.push_back({Pending::Type::Specialization, *id, owner, std::move(reference.Path), {}, line,
-                                        reference.Text, 0, 0});
+                                        reference.Text, 0, 0, {}, {}, {}, {}, {}, std::nullopt});
                 finishDeclaration(*id);
             }
 
@@ -1041,11 +1225,15 @@ namespace StructuraSystems::Diagram {
             void parseEvaluation(ElementId owner, ElementKind kind, const std::optional<std::string> &declaredKeyword,
                                  const std::vector<std::string> &prefixes, std::size_t begin, std::size_t line) {
                 const bool definition = isDefinitionKind(kind);
+                const std::string shortName = Dialect == SysMLTextImporter::Dialect::SysML ? readShortName() : std::string();
                 const std::string name = readName();
                 std::string typeName;
                 std::optional<Multiplicity> multiplicity;
                 std::vector<Reference> specializations;
-                bool plain = !name.empty();
+                // "require constraint { ... }" / "assume constraint { ... }" are usually unnamed
+                const bool unnamedAllowed = declaredKeyword == "require constraint" || declaredKeyword == "assume constraint" ||
+                                            declaredKeyword == "assert constraint";
+                bool plain = !name.empty() || (unnamedAllowed && shortName.empty());
                 while (plain && !atEnd() && !isSymbol(";") && !isSymbol("{") && !isSymbol("}")) {
                     if (!definition && isSymbol(":") && typeName.empty()) {
                         take();
@@ -1086,9 +1274,10 @@ namespace StructuraSystems::Diagram {
                 } catch (const std::exception &exception) {
                     lost(std::string(exception.what()) + " (" + name + ")", line);
                 }
+                applyShortName(*id, shortName, line);
                 for (auto &reference: specializations)
                     Pendings.push_back({Pending::Type::Specialization, *id, owner, std::move(reference.Path), {}, line,
-                                        reference.Text, 0, 0});
+                                        reference.Text, 0, 0, {}, {}, {}, {}, {}, std::nullopt});
                 finishDeclaration(*id);
             }
 
@@ -1106,7 +1295,730 @@ namespace StructuraSystems::Diagram {
                 }
                 take();
                 Pendings.push_back({Pending::Type::Connection, RootId, owner, std::move(source), std::move(target), line,
-                                    std::string(), begin, LastEnd});
+                                    std::string(), begin, LastEnd, {}, {}, {}, {}, {}, std::nullopt});
+                reserve();
+            }
+
+            bool acceptsBareParameters(ElementId owner) const {
+                if (owner == RootId)
+                    return false;
+                const ElementKind kind = Model.element(owner).kind();
+                return isConstraintOrCalc(kind) || kind == ElementKind::ActionDefinition || kind == ElementKind::ActionUsage ||
+                       isAnalysisKind(kind);
+            }
+
+            bool inAnalysisBody(ElementId owner) const {
+                return owner != RootId && isAnalysisKind(Model.element(owner).kind());
+            }
+
+            /// Snapshots and time slices of parts and items are ends of successions as well.
+            bool isSuccessionEndElement(ElementId id) const {
+                const auto &element = Model.element(id);
+                return isSuccessionEnd(element.kind()) ||
+                       ((element.kind() == ElementKind::PartUsage || element.kind() == ElementKind::ItemUsage) &&
+                        isTemporalKeyword(element.declaredKeyword()));
+            }
+
+            /// What "variant name;" declares inside a variation of the given kind (std::nullopt: kept as text).
+            std::optional<ElementKind> variantKind(ElementId owner) const {
+                if (owner == RootId)
+                    return std::nullopt;
+                const auto &element = Model.element(owner);
+                if (std::find(element.prefixes().begin(), element.prefixes().end(), "variation") == element.prefixes().end())
+                    return std::nullopt;
+                switch (element.kind()) {
+                    case ElementKind::PartDefinition:
+                    case ElementKind::PartUsage:
+                        return ElementKind::PartUsage;
+                    case ElementKind::AttributeDefinition:
+                        return ElementKind::Attribute;
+                    case ElementKind::ItemDefinition:
+                    case ElementKind::ItemUsage:
+                        return ElementKind::ItemUsage;
+                    case ElementKind::ActionDefinition:
+                    case ElementKind::ActionUsage:
+                        return ElementKind::ActionUsage;
+                    case ElementKind::OccurrenceDefinition:
+                    case ElementKind::OccurrenceUsage:
+                        return ElementKind::OccurrenceUsage;
+                    case ElementKind::PortDefinition:
+                    case ElementKind::PortUsage:
+                        return ElementKind::PortUsage;
+                    default:
+                        return std::nullopt;
+                }
+            }
+
+            /// The implicit start / done / entry of an action or state (created on first use).
+            std::optional<ElementId> implicitControl(ElementId owner, const std::string &keyword) {
+                for (const ElementId child: Model.children(owner)) {
+                    const auto &element = Model.element(child);
+                    if (element.kind() == ElementKind::ControlNode && element.declaredKeyword() == keyword)
+                        return child;
+                }
+                try {
+                    const ElementId id = Model.addElement(ElementKind::ControlNode, keyword, owner);
+                    Model.setDeclaredKeyword(id, keyword);
+                    return id;
+                } catch (const std::exception &) {
+                    return std::nullopt;
+                }
+            }
+
+            /// Source text up to one of the stop words (or ';' / '{' / '}') at bracket depth 0.
+            std::string spanUntil(std::initializer_list<std::string_view> stopWords) {
+                const std::size_t from = peek().Begin;
+                int depth = 0;
+                while (!atEnd()) {
+                    const Token &token = peek();
+                    if (depth == 0) {
+                        if (token.Type == TokenType::Symbol && (token.Text == ";" || token.Text == "{" || token.Text == "}"))
+                            break;
+                        bool stop = false;
+                        for (const auto word: stopWords)
+                            stop = stop || (token.Type == TokenType::Identifier && token.Text == word);
+                        if (stop)
+                            break;
+                    }
+                    if (token.Type == TokenType::Symbol && (token.Text == "(" || token.Text == "["))
+                        ++depth;
+                    else if (token.Type == TokenType::Symbol && (token.Text == ")" || token.Text == "]") && depth > 0)
+                        --depth;
+                    take();
+                }
+                return LastEnd > from ? expressionText(from, LastEnd) : std::string();
+            }
+
+            void addSuccession(Pending::Type type, ElementId owner, std::optional<ElementId> source,
+                               std::vector<std::string> first, std::vector<std::string> target, std::size_t line,
+                               std::size_t begin, const std::string &name, const std::string &guard,
+                               const std::string &trigger, const std::string &effect) {
+                const bool longForm = !first.empty();
+                Pendings.push_back({type, source.value_or(RootId), owner, std::move(first), std::move(target), line,
+                                    std::string(), begin, LastEnd, name, std::string(), guard, trigger, effect, std::nullopt});
+                if (longForm)
+                    reserve();
+            }
+
+            /// Statements of actions and states; false if the statement is none of them.
+            bool parseBehavior(ElementId owner, const std::string &keyword, const std::vector<std::string> &prefixes,
+                               std::size_t begin, std::size_t line) {
+                const auto previous = [&]() -> std::optional<ElementId> {
+                    const auto it = Previous.find(owner);
+                    return it == Previous.end() ? std::nullopt : std::optional<ElementId>(it->second);
+                };
+                const bool statePart = ownerKind(owner) == ElementKind::StateDefinition ||
+                                       ownerKind(owner) == ElementKind::StateUsage;
+                if ((keyword == "action" || keyword == "state") && isWord("def", 1)) {
+                    take();
+                    take();
+                    parseDefinition(owner, prefixes, begin, line,
+                                    keyword == "action" ? ElementKind::ActionDefinition : ElementKind::StateDefinition);
+                    return true;
+                }
+                if (keyword == "action" || keyword == "state") {
+                    take();
+                    parseUsage(owner, keyword == "action" ? ElementKind::ActionUsage : ElementKind::StateUsage, prefixes,
+                               begin, line);
+                    return true;
+                }
+                if (keyword == "exhibit" && isWord("state", 1)) {
+                    take();
+                    take();
+                    parseUsage(owner, ElementKind::StateUsage, prefixes, begin, line, PerformStyle::DeclareAction,
+                               std::string("exhibit state"));
+                    return true;
+                }
+                if ((keyword == "entry" || keyword == "do" || keyword == "exit") && isWord("action", 1)) {
+                    take();
+                    take();
+                    parseUsage(owner, ElementKind::ActionUsage, prefixes, begin, line, PerformStyle::DeclareAction,
+                               keyword + " action");
+                    return true;
+                }
+                if (keyword == "decide" || keyword == "merge" || keyword == "fork" || keyword == "join") {
+                    take();
+                    const std::string shortName = readShortName();
+                    const std::string name = isSymbol(";") ? std::string() : readName();
+                    if (name.empty() || !isSymbol(";")) {
+                        fallBackToText(owner, begin, line);
+                        return true;
+                    }
+                    take();
+                    const auto id = add(ElementKind::ControlNode, name, owner);
+                    if (!id) {
+                        keepText(owner, begin, LastEnd, line);
+                        return true;
+                    }
+                    Model.setDeclaredKeyword(*id, keyword);
+                    applyShortName(*id, shortName, line);
+                    applyPrefixes(*id, prefixes);
+                    return true;
+                }
+                if (!prefixes.empty())
+                    return false;
+                if (keyword == "entry" && isSymbol(";", 1) && statePart) {
+                    take();
+                    take();
+                    if (const auto entry = implicitControl(owner, "entry"))
+                        Previous[owner] = *entry;
+                    return true;
+                }
+                if (keyword == "first" || keyword == "succession") {
+                    take();
+                    std::string name;
+                    if (keyword == "succession") {
+                        if (isNameToken() && !isWord("first"))
+                            name = Source.substr(peek().Begin, peek().End - peek().Begin), take();
+                        if (!isWord("first")) {
+                            fallBackToText(owner, begin, line);
+                            return true;
+                        }
+                        take();
+                    }
+                    auto source = readPath();
+                    if (source.empty()) {
+                        fallBackToText(owner, begin, line);
+                        return true;
+                    }
+                    if (isSymbol(";") && keyword == "first") {
+                        // "first start;" / "first a;": the source of the following "then" statements
+                        take();
+                        std::optional<ElementId> found;
+                        if (source.size() == 1 && source.front() == "start") {
+                            found = implicitControl(owner, "start");
+                        } else if (source.size() == 1) {
+                            for (const ElementId child: Model.children(owner))
+                                if (Model.element(child).name() == source.front() && isSuccessionEndElement(child))
+                                    found = child;
+                        }
+                        if (!found)
+                            keepText(owner, begin, LastEnd, line);
+                        else
+                            Previous[owner] = *found;
+                        return true;
+                    }
+                    std::string guard;
+                    if (isWord("if")) {
+                        take();
+                        guard = spanUntil({"then"});
+                    }
+                    if (!isWord("then")) {
+                        fallBackToText(owner, begin, line);
+                        return true;
+                    }
+                    take();
+                    auto target = readPath();
+                    if (target.empty() || !isSymbol(";")) {
+                        fallBackToText(owner, begin, line);
+                        return true;
+                    }
+                    take();
+                    if (name.empty() && keyword == "first") {
+                        // written again as "then b;" after a: fine, same meaning
+                    }
+                    addSuccession(Pending::Type::Succession, owner, std::nullopt, std::move(source), std::move(target), line,
+                                  begin, name, guard, {}, {});
+                    return true;
+                }
+                if ((keyword == "then" || keyword == "if" || keyword == "else") && previous()) {
+                    take();
+                    std::string guard = keyword == "else" ? std::string("else") : std::string();
+                    if (keyword == "if") {
+                        guard = spanUntil({"then"});
+                        if (guard.empty() || !isWord("then")) {
+                            fallBackToText(owner, begin, line);
+                            return true;
+                        }
+                        take();
+                    }
+                    auto target = readPath();
+                    if (target.empty() || !isSymbol(";")) {
+                        fallBackToText(owner, begin, line);
+                        return true;
+                    }
+                    take();
+                    addSuccession(Pending::Type::Succession, owner, previous(), {}, std::move(target), line, begin, {},
+                                  guard, {}, {});
+                    return true;
+                }
+                if (keyword == "transition" || (keyword == "accept" && previous() &&
+                                                Model.element(*previous()).kind() == ElementKind::StateUsage)) {
+                    const bool shorthand = keyword == "accept";
+                    std::string name;
+                    std::vector<std::string> source;
+                    if (!shorthand) {
+                        take();
+                        if (isNameToken() && !isWord("first"))
+                            name = Source.substr(peek().Begin, peek().End - peek().Begin), take();
+                        if (!isWord("first")) {
+                            fallBackToText(owner, begin, line);
+                            return true;
+                        }
+                        take();
+                        source = readPath();
+                        if (source.empty()) {
+                            fallBackToText(owner, begin, line);
+                            return true;
+                        }
+                    }
+                    std::string trigger;
+                    std::string guard;
+                    std::string effect;
+                    if (isWord("accept")) {
+                        take();
+                        trigger = spanUntil({"if", "do", "then"});
+                    }
+                    if (isWord("if")) {
+                        take();
+                        guard = spanUntil({"do", "then"});
+                    }
+                    if (isWord("do")) {
+                        take();
+                        effect = spanUntil({"then"});
+                    }
+                    if (!isWord("then") || (shorthand && trigger.empty())) {
+                        fallBackToText(owner, begin, line);
+                        return true;
+                    }
+                    take();
+                    auto target = readPath();
+                    if (target.empty() || !isSymbol(";")) {
+                        fallBackToText(owner, begin, line);
+                        return true;
+                    }
+                    take();
+                    addSuccession(Pending::Type::Transition, owner, shorthand ? previous() : std::nullopt, std::move(source),
+                                  std::move(target), line, begin, name, guard, trigger, effect);
+                    return true;
+                }
+                return false;
+            }
+
+            /// Statements of interactions (occurrences, events, messages), allocations and dependencies;
+            /// false if the statement is none of them.
+            bool parseOccurrence(ElementId owner, const std::string &keyword, const std::vector<std::string> &prefixes,
+                                 std::size_t begin, std::size_t line) {
+                if (keyword == "occurrence" && isWord("def", 1)) {
+                    take();
+                    take();
+                    parseDefinition(owner, prefixes, begin, line, ElementKind::OccurrenceDefinition);
+                    return true;
+                }
+                if (keyword == "occurrence") {
+                    take();
+                    parseUsage(owner, ElementKind::OccurrenceUsage, prefixes, begin, line);
+                    return true;
+                }
+                if (keyword == "event" && isWord("occurrence", 1)) {
+                    take();
+                    take();
+                    parseUsage(owner, ElementKind::EventOccurrence, prefixes, begin, line);
+                    return true;
+                }
+                if (keyword == "allocation" && isWord("def", 1)) {
+                    take();
+                    take();
+                    parseDefinition(owner, prefixes, begin, line, ElementKind::AllocationDefinition);
+                    return true;
+                }
+                if (keyword == "snapshot" || keyword == "timeslice") {
+                    // "snapshot delivery;", "timeslice ownership[0..*] ordered { ... }", "snapshot part t0 : Vehicle_1 { ... }"
+                    take();
+                    ElementKind kind = ElementKind::OccurrenceUsage;
+                    std::string declared = keyword;
+                    if (isWord("part") || isWord("item")) {
+                        kind = isWord("part") ? ElementKind::PartUsage : ElementKind::ItemUsage;
+                        declared += " " + take().Text;
+                    }
+                    const std::size_t before = Model.children(owner).size();
+                    parseUsage(owner, kind, prefixes, begin, line, PerformStyle::DeclareAction, declared);
+                    const auto &children = Model.children(owner);
+                    if (children.size() > before && Model.element(children.back()).kind() == kind)
+                        Previous[owner] = children.back(); // source of a following "then ..."
+                    return true;
+                }
+                if (!prefixes.empty())
+                    return false;
+                const auto previous = Previous.find(owner);
+                const std::size_t declaration = behindPrefixes(1); // "then #m occurrence b;"
+                if (keyword == "then" && previous != Previous.end() &&
+                    ((isWord("event", declaration) && isWord("occurrence", declaration + 1)) ||
+                     isWord("occurrence", declaration) || isWord("snapshot", declaration) || isWord("timeslice", declaration) ||
+                     (isWord("action", declaration) && !isWord("def", declaration + 1)))) {
+                    // "then event occurrence b;", "then timeslice ownership { ... }": b, and a succession from the
+                    // previous one (event, occurrence, action, ...) to it
+                    const ElementId source = previous->second;
+                    take();
+                    std::vector<std::string> innerPrefixes;
+                    while (readPrefix(innerPrefixes)) {
+                    }
+                    const std::size_t before = Model.children(owner).size();
+                    const std::string inner = peek().Text;
+                    if (inner == "action")
+                        parseBehavior(owner, inner, innerPrefixes, begin, line); // written back as "then b; action b ..."
+                    else
+                        parseOccurrence(owner, inner, innerPrefixes, begin, line);
+                    const auto &children = Model.children(owner);
+                    if (children.size() > before && Model.element(children.back()).kind() != ElementKind::Textual &&
+                        children.back() != source) {
+                        Pendings.push_back({Pending::Type::Succession, source, owner, {}, {Model.element(children.back()).name()},
+                                            line, std::string(), begin, LastEnd, {}, {}, {}, {}, {}, std::nullopt});
+                    }
+                    return true;
+                }
+                if (keyword == "message" || (keyword == "then" && isWord("message", 1))) {
+                    const bool sequenced = keyword == "then";
+                    take();
+                    if (sequenced)
+                        take();
+                    parseMessage(owner, begin, line, sequenced);
+                    return true;
+                }
+                if (keyword == "allocate" || keyword == "allocation") {
+                    take();
+                    parseAllocation(owner, begin, line, keyword == "allocation");
+                    return true;
+                }
+                if (keyword == "dependency") {
+                    take();
+                    parseDependency(owner, begin, line);
+                    return true;
+                }
+                return false;
+            }
+
+            /// message [name] [of Payload] from a to b;   (after "message")
+            void parseMessage(ElementId owner, std::size_t begin, std::size_t line, bool sequenced) {
+                std::string name;
+                std::string typeName;
+                if (isNameToken() && !isWord("of") && !isWord("from"))
+                    name = Source.substr(peek().Begin, peek().End - peek().Begin), take();
+                if (isWord("of")) {
+                    take();
+                    typeName = readTypeText();
+                    if (typeName.empty()) {
+                        fallBackToText(owner, begin, line);
+                        return;
+                    }
+                }
+                if (!isWord("from")) {
+                    fallBackToText(owner, begin, line); // e.g. "message m of T;" (events given elsewhere)
+                    return;
+                }
+                take();
+                auto source = readPath();
+                if (source.empty() || !isWord("to")) {
+                    fallBackToText(owner, begin, line);
+                    return;
+                }
+                take();
+                auto target = readPath();
+                if (target.empty() || !isSymbol(";")) {
+                    fallBackToText(owner, begin, line);
+                    return;
+                }
+                take();
+                Pendings.push_back({sequenced ? Pending::Type::MessageThen : Pending::Type::Message, RootId, owner,
+                                    std::move(source), std::move(target), line, std::string(), begin, LastEnd, name,
+                                    typeName, {}, {}, {}, std::nullopt});
+                reserve();
+            }
+
+            /// dependency [name] from a to b;   (after "dependency"; several clients / suppliers are kept as text)
+            void parseDependency(ElementId owner, std::size_t begin, std::size_t line) {
+                std::string name;
+                if (isNameToken() && !isWord("from"))
+                    name = Source.substr(peek().Begin, peek().End - peek().Begin), take();
+                if (!isWord("from")) {
+                    fallBackToText(owner, begin, line);
+                    return;
+                }
+                take();
+                auto source = readPath();
+                if (source.empty() || !isWord("to")) {
+                    fallBackToText(owner, begin, line);
+                    return;
+                }
+                take();
+                auto target = readPath();
+                if (target.empty() || !isSymbol(";")) {
+                    fallBackToText(owner, begin, line);
+                    return;
+                }
+                take();
+                Pendings.push_back({Pending::Type::Dependency, RootId, owner, std::move(source), std::move(target), line,
+                                    std::string(), begin, LastEnd, name, {}, {}, {}, {}, std::nullopt});
+                reserve();
+            }
+
+            struct AllocationStatement {
+                std::vector<std::string> Source;
+                std::vector<std::string> Target;
+                std::string Name;
+                std::string TypeName;
+                std::vector<AllocationStatement> Refined;
+            };
+
+            /// "a to b ;" or "a to b { allocate c to d; ... }" at the raw token index (after "allocate"); index is moved
+            /// behind it. std::nullopt for anything else (comments included): the statement is then kept as text.
+            std::optional<AllocationStatement> scanAllocate(std::size_t &index) const {
+                const auto at = [&](std::size_t i) -> const Token & { return Tokens[std::min(i, Tokens.size() - 1)]; };
+                const auto isName = [&](std::size_t i) {
+                    return at(i).Type == TokenType::Identifier || at(i).Type == TokenType::Name;
+                };
+                const auto symbol = [&](std::size_t i, std::string_view text) {
+                    return at(i).Type == TokenType::Symbol && at(i).Text == text;
+                };
+                const auto path = [&](std::vector<std::string> &out) {
+                    if (!isName(index) || (at(index).Type == TokenType::Identifier && at(index).Text == "to"))
+                        return false;
+                    out.push_back(at(index++).Text);
+                    while ((symbol(index, "::") || symbol(index, ".")) && isName(index + 1)) {
+                        out.push_back(at(index + 1).Text);
+                        index += 2;
+                    }
+                    return true;
+                };
+                AllocationStatement statement;
+                if (!path(statement.Source) || !(at(index).Type == TokenType::Identifier && at(index).Text == "to"))
+                    return std::nullopt;
+                ++index;
+                if (!path(statement.Target))
+                    return std::nullopt;
+                if (symbol(index, ";")) {
+                    ++index;
+                    return statement;
+                }
+                if (!symbol(index, "{"))
+                    return std::nullopt;
+                ++index;
+                const auto word = [&](std::size_t i, std::string_view text) {
+                    return at(i).Type == TokenType::Identifier && at(i).Text == text;
+                };
+                while (!symbol(index, "}")) {
+                    // allocate c to d ...   allocation [name] [: Type] allocate c to d ...
+                    std::string name;
+                    std::string typeName;
+                    if (word(index, "allocation")) {
+                        ++index;
+                        if (isName(index) && !word(index, "allocate"))
+                            name = Source.substr(at(index).Begin, at(index).End - at(index).Begin), ++index;
+                        if (symbol(index, ":")) {
+                            ++index;
+                            std::vector<std::string> type;
+                            const std::size_t from = index;
+                            if (!path(type))
+                                return std::nullopt;
+                            typeName = Source.substr(at(from).Begin, at(index - 1).End - at(from).Begin);
+                        }
+                        if (name.empty() && typeName.empty())
+                            return std::nullopt;
+                    }
+                    if (!word(index, "allocate"))
+                        return std::nullopt;
+                    ++index;
+                    auto refined = scanAllocate(index);
+                    if (!refined)
+                        return std::nullopt;
+                    refined->Name = name;
+                    refined->TypeName = typeName;
+                    statement.Refined.push_back(std::move(*refined));
+                }
+                ++index;
+                if (statement.Refined.empty())
+                    return std::nullopt; // "{ }": kept as written
+                return statement;
+            }
+
+            void addAllocation(ElementId owner, AllocationStatement statement, std::size_t line, std::size_t begin,
+                               const std::string &name, const std::string &typeName, std::optional<std::size_t> parent) {
+                const std::size_t index = Pendings.size();
+                Pendings.push_back({Pending::Type::Allocation, RootId, owner, std::move(statement.Source),
+                                    std::move(statement.Target), line, std::string(), begin, LastEnd, name, typeName,
+                                    {}, {}, {}, std::nullopt});
+                if (parent)
+                    AllocationParent[index] = *parent;
+                for (auto &refined: statement.Refined) {
+                    const std::string refinedName = refined.Name;
+                    const std::string refinedType = refined.TypeName;
+                    addAllocation(owner, std::move(refined), line, begin, refinedName, refinedType, index);
+                }
+            }
+
+            /// allocate a to b [{ ... }]   allocation [name] [: Type] allocate a to b [{ ... }]   (after the keyword)
+            void parseAllocation(ElementId owner, std::size_t begin, std::size_t line, bool usage) {
+                std::string name;
+                std::string typeName;
+                if (usage) {
+                    if (isNameToken() && !isWord("allocate"))
+                        name = Source.substr(peek().Begin, peek().End - peek().Begin), take();
+                    if (isSymbol(":")) {
+                        take();
+                        typeName = readTypeText();
+                    }
+                    if ((name.empty() && typeName.empty()) || !isWord("allocate")) {
+                        fallBackToText(owner, begin, line); // e.g. "allocation a : T;" without "allocate"
+                        return;
+                    }
+                    take();
+                }
+                std::size_t index = Position;
+                auto statement = scanAllocate(index);
+                if (!statement) {
+                    fallBackToText(owner, begin, line);
+                    return;
+                }
+                Position = index;
+                LastEnd = Tokens[index - 1].End;
+                const std::size_t top = Pendings.size();
+                addAllocation(owner, std::move(*statement), line, begin, name, typeName, std::nullopt);
+                // the whole statement (with its refining allocations) stays as text until all of it is resolved
+                auto &pending = Pendings[top];
+                pending.Placeholder = keepText(pending.Scope, pending.Begin, pending.End, pending.Line);
+            }
+
+            /// Statements of requirements, use cases and verifications; false if the statement is none of them.
+            bool parseRequirementOrCase(ElementId owner, const std::string &keyword, const std::vector<std::string> &prefixes,
+                                        std::size_t begin, std::size_t line) {
+                const ElementKind ownerKindValue = ownerKind(owner);
+                const bool inCase = owner != RootId && isCaseKind(ownerKindValue);
+                const bool inRequirement = owner != RootId && isRequirementKind(ownerKindValue);
+                const auto definitionOrUsage = [&](std::size_t words, ElementKind definition, ElementKind usage) {
+                    for (std::size_t i = 0; i < words; ++i)
+                        take();
+                    if (isWord("def")) {
+                        take();
+                        parseDefinition(owner, prefixes, begin, line, definition);
+                    } else {
+                        parseUsage(owner, usage, prefixes, begin, line);
+                    }
+                    return true;
+                };
+                if (keyword == "requirement")
+                    return definitionOrUsage(1, ElementKind::RequirementDefinition, ElementKind::RequirementUsage);
+                if (keyword == "use" && isWord("case", 1))
+                    return definitionOrUsage(2, ElementKind::UseCaseDefinition, ElementKind::UseCaseUsage);
+                if (keyword == "verification")
+                    return definitionOrUsage(1, ElementKind::VerificationDefinition, ElementKind::VerificationUsage);
+                if (keyword == "analysis")
+                    return definitionOrUsage(1, ElementKind::AnalysisDefinition, ElementKind::AnalysisUsage);
+                if ((keyword == "require" || keyword == "assume") && isWord("constraint", 1) && inRequirement) {
+                    take();
+                    take();
+                    parseEvaluation(owner, ElementKind::ConstraintUsage, keyword + " constraint", prefixes, begin, line);
+                    return true;
+                }
+                if (keyword == "subject" && (inCase || inRequirement)) {
+                    take();
+                    parseUsage(owner, ElementKind::Subject, prefixes, begin, line);
+                    return true;
+                }
+                if ((keyword == "actor" && (inCase || inRequirement)) || (keyword == "stakeholder" && inRequirement)) {
+                    take();
+                    parseUsage(owner, ElementKind::Actor, prefixes, begin, line, PerformStyle::DeclareAction,
+                               keyword == "stakeholder" ? std::optional<std::string>("stakeholder") : std::nullopt);
+                    return true;
+                }
+                if (keyword == "objective" && inCase) {
+                    take();
+                    parseUsage(owner, ElementKind::RequirementUsage, prefixes, begin, line, PerformStyle::DeclareAction,
+                               std::string("objective"));
+                    return true;
+                }
+                if (keyword == "include" && isUseCaseKind(ownerKindValue) && owner != RootId) {
+                    take();
+                    if (isWord("use") && isWord("case", 1)) {
+                        take();
+                        take();
+                        parseUsage(owner, ElementKind::UseCaseUsage, prefixes, begin, line, PerformStyle::DeclareAction,
+                                   std::string("include use case"));
+                        return true;
+                    }
+                    auto target = readPath();
+                    if (!prefixes.empty() || target.empty() || !isSymbol(";")) {
+                        fallBackToText(owner, begin, line);
+                        return true;
+                    }
+                    take();
+                    Pendings.push_back({Pending::Type::Include, owner, owner, std::move(target), {}, line, std::string(),
+                                        begin, LastEnd, {}, {}, {}, {}, {}, std::nullopt});
+                    reserve();
+                    return true;
+                }
+                if (keyword == "verify" && prefixes.empty() && Model.contains(owner) &&
+                    Model.element(owner).kind() == ElementKind::RequirementUsage &&
+                    Model.element(owner).declaredKeyword() == "objective" &&
+                    isVerificationKind(ownerKind(Model.element(owner).owner())) && !isWord("requirement", 1)) {
+                    take();
+                    auto target = readPath();
+                    if (target.empty() || !isSymbol(";")) {
+                        fallBackToText(owner, begin, line);
+                        return true;
+                    }
+                    take();
+                    Pendings.push_back({Pending::Type::Verify, Model.element(owner).owner(), owner, std::move(target), {},
+                                        line, std::string(), begin, LastEnd, {}, {}, {}, {}, {}, std::nullopt});
+                    reserve();
+                    return true;
+                }
+                if (keyword == "satisfy" && prefixes.empty() && !isWord("requirement", 1)) {
+                    take();
+                    auto requirement = readPath();
+                    if (requirement.empty() || !isWord("by")) {
+                        fallBackToText(owner, begin, line);
+                        return true;
+                    }
+                    take();
+                    auto by = readPath();
+                    if (by.empty() || !isSymbol(";")) {
+                        fallBackToText(owner, begin, line);
+                        return true;
+                    }
+                    take();
+                    Pendings.push_back({Pending::Type::Satisfy, RootId, owner, std::move(requirement), std::move(by), line,
+                                        std::string(), begin, LastEnd, {}, {}, {}, {}, {}, std::nullopt});
+                    reserve();
+                    return true;
+                }
+                return false;
+            }
+
+            /// connection [name] [: Type] connect a to b;   interface [name] [: Type] connect a to b;
+            void parseConnection(ElementId owner, std::size_t begin, std::size_t line, bool interface) {
+                std::string name;
+                std::string typeName;
+                if (isNameToken() && !isWord("connect"))
+                    name = Source.substr(peek().Begin, peek().End - peek().Begin), take();
+                if (isSymbol(":")) {
+                    take();
+                    typeName = readTypeText();
+                    if (typeName.empty()) {
+                        fallBackToText(owner, begin, line);
+                        return;
+                    }
+                }
+                if (!isWord("connect") || (!interface && name.empty() && typeName.empty())) {
+                    fallBackToText(owner, begin, line);
+                    return;
+                }
+                take();
+                auto source = readPath();
+                if (source.empty() || !isWord("to")) {
+                    fallBackToText(owner, begin, line);
+                    return;
+                }
+                take();
+                auto target = readPath();
+                if (target.empty() || !isSymbol(";")) {
+                    fallBackToText(owner, begin, line);
+                    return;
+                }
+                take();
+                Pendings.push_back({interface ? Pending::Type::Interface : Pending::Type::Connection, RootId, owner,
+                                    std::move(source), std::move(target), line, std::string(), begin, LastEnd, name,
+                                    typeName, {}, {}, {}, std::nullopt});
+                reserve();
             }
 
             void parseBind(ElementId owner, std::size_t begin, std::size_t line) {
@@ -1123,11 +2035,21 @@ namespace StructuraSystems::Diagram {
                 }
                 take();
                 Pendings.push_back({Pending::Type::Binding, RootId, owner, std::move(source), std::move(target), line,
-                                    std::string(), begin, LastEnd});
+                                    std::string(), begin, LastEnd, {}, {}, {}, {}, {}, std::nullopt});
+                reserve();
             }
 
+            /// flow [name] [of Type] from a to b;
             void parseFlow(ElementId owner, std::size_t begin, std::size_t line) {
+                std::string name;
+                std::string typeName;
+                if (isNameToken() && !isWord("of") && !isWord("from"))
+                    name = Source.substr(peek().Begin, peek().End - peek().Begin), take();
                 if (isWord("of")) {
+                    take();
+                    typeName = readTypeText();
+                }
+                if (!isWord("from")) {
                     fallBackToText(owner, begin, line);
                     return;
                 }
@@ -1145,7 +2067,8 @@ namespace StructuraSystems::Diagram {
                 }
                 take();
                 Pendings.push_back({Pending::Type::Flow, RootId, owner, std::move(source), std::move(target), line,
-                                    std::string(), begin, LastEnd});
+                                    std::string(), begin, LastEnd, name, typeName, {}, {}, {}, std::nullopt});
+                reserve();
             }
 
             // --- name resolution ----------------------------------------------------------------
@@ -1154,7 +2077,9 @@ namespace StructuraSystems::Diagram {
 
             std::optional<ElementId> child(ElementId owner, const std::string &name, const Accept &accept = {}) const {
                 for (const ElementId id: Model.children(owner)) {
-                    if (Model.element(id).name() == name && (!accept || accept(id)))
+                    // statements kept as text (also the placeholders of pending relationships) are never meant
+                    if (Model.element(id).kind() != ElementKind::Textual && Model.element(id).name() == name &&
+                        (!accept || accept(id)))
                         return id;
                 }
                 return std::nullopt;
@@ -1199,7 +2124,18 @@ namespace StructuraSystems::Diagram {
             }
 
             void resolve() {
-                for (const auto &pending: Pendings) {
+                for (std::size_t index = 0; index < Pendings.size(); ++index) {
+                    const auto &pending = Pendings[index];
+                    if (pending.Kind == Pending::Type::Allocation) {
+                        if (AllocationParent.count(index) == 0)
+                            resolveAllocation(index);
+                        continue;
+                    }
+                    if (pending.Kind == Pending::Type::Message || pending.Kind == Pending::Type::MessageThen ||
+                        pending.Kind == Pending::Type::Dependency) {
+                        resolveMessageOrDependency(pending);
+                        continue;
+                    }
                     if (pending.Kind == Pending::Type::Specialization) {
                         if (!Model.contains(pending.Source))
                             continue;
@@ -1219,22 +2155,39 @@ namespace StructuraSystems::Diagram {
                                         "specialization of " + sourceName + " by " + joinPath(pending.First), pending.Line);
                         continue;
                     }
+                    if (pending.Kind == Pending::Type::Succession || pending.Kind == Pending::Type::Transition) {
+                        resolveSuccession(pending);
+                        continue;
+                    }
+                    if (pending.Kind == Pending::Type::Satisfy || pending.Kind == Pending::Type::Verify ||
+                        pending.Kind == Pending::Type::Include) {
+                        resolveRequirementRelationship(pending);
+                        continue;
+                    }
                     const bool binding = pending.Kind == Pending::Type::Binding;
                     const std::string label = binding ? "bind " + joinPath(pending.First) + " = " + joinPath(pending.Second)
-                                              : (pending.Kind == Pending::Type::Connection ? "connect " : "flow from ") +
+                                              : (pending.Kind == Pending::Type::Connection ? "connect "
+                                                 : pending.Kind == Pending::Type::Interface ? "interface " : "flow from ") +
                                                 joinPath(pending.First) + " to " + joinPath(pending.Second);
-                    const ElementKind endKind = binding ? ElementKind::Attribute : ElementKind::PartUsage;
-                    const Accept isEnd = [&](ElementId id) { return Model.element(id).kind() == endKind; };
+                    const Accept isEnd = [&](ElementId id) {
+                        const ElementKind kind = Model.element(id).kind();
+                        if (binding)
+                            return kind == ElementKind::Attribute;
+                        if (pending.Kind == Pending::Type::Interface)
+                            return kind == ElementKind::PortUsage;
+                        return kind == ElementKind::PartUsage || kind == ElementKind::PortUsage;
+                    };
                     const auto source = resolve(pending.Scope, pending.First, false, isEnd);
                     const auto target = resolve(pending.Scope, pending.Second, false, isEnd);
                     const RelationshipKind kind = binding ? RelationshipKind::Binding
                                                   : pending.Kind == Pending::Type::Connection ? RelationshipKind::Connection
-                                                                                              : RelationshipKind::Flow;
+                                                  : pending.Kind == Pending::Type::Interface ? RelationshipKind::Interface
+                                                                                             : RelationshipKind::Flow;
                     if (!source || !target || !RelationshipRules::canRelate(Model, kind, *source, *target)) {
-                        keepText(pending.Scope, pending.Begin, pending.End, pending.Line); // kept as written
-                        continue;
+                        continue; // kept as written (placeholder)
                     }
-                    addRelationship(kind, *source, *target, label, pending.Line);
+                    release(pending);
+                    addRelationship(kind, *source, *target, label, pending.Line, pending.Name, pending.TypeName);
                 }
                 for (auto &[id, references]: External) {
                     try {
@@ -1245,10 +2198,152 @@ namespace StructuraSystems::Diagram {
                 }
             }
 
-            void addRelationship(RelationshipKind kind, ElementId source, ElementId target, const std::string &label,
-                                 std::size_t line) {
+            void resolveSuccession(const Pending &pending) {
+                const bool transition = pending.Kind == Pending::Type::Transition;
+                const Accept isEnd = [&](ElementId id) { return isSuccessionEndElement(id); };
+                const auto endOf = [&](const std::vector<std::string> &path, bool source) -> std::optional<ElementId> {
+                    if (const auto found = resolve(pending.Scope, path, false, isEnd))
+                        return found;
+                    if (path.size() == 1 && (path.front() == "done" || (source && path.front() == "start")))
+                        return implicitControl(pending.Scope, path.front());
+                    return std::nullopt;
+                };
+                const std::optional<ElementId> source = pending.First.empty() ? std::optional<ElementId>(pending.Source)
+                                                                                : endOf(pending.First, true);
+                const auto target = endOf(pending.Second, false);
+                const RelationshipKind kind = transition ? RelationshipKind::Transition : RelationshipKind::Succession;
+                const std::string label = (transition ? "transition to " : "succession to ") + joinPath(pending.Second);
+                if (!source || !target || !RelationshipRules::canRelate(Model, kind, *source, *target)) {
+                    if (pending.First.empty())
+                        lost(label + " (not found)", pending.Line); // a shorthand belongs right after its source
+                    return; // the long form is kept as written (placeholder)
+                }
+                release(pending);
                 try {
-                    Model.addRelationship(kind, source, target);
+                    const auto id = Model.addRelationship(kind, *source, *target);
+                    if (!pending.Name.empty())
+                        Model.setRelationshipLabel(id, pending.Name, std::string());
+                    if (!pending.Guard.empty() || !pending.Trigger.empty() || !pending.Effect.empty())
+                        Model.setBehaviorDetails(id, pending.Guard, pending.Trigger, pending.Effect);
+                    ++Report.ImportedRelationships;
+                } catch (const std::exception &exception) {
+                    lost(label + " (" + exception.what() + ")", pending.Line);
+                }
+            }
+
+            void resolveMessageOrDependency(const Pending &pending) {
+                const bool dependency = pending.Kind == Pending::Type::Dependency;
+                const Accept isEnd = [&](ElementId id) {
+                    return dependency || isMessageEnd(Model.element(id).kind());
+                };
+                const auto source = resolve(pending.Scope, pending.First, false, isEnd);
+                const auto target = resolve(pending.Scope, pending.Second, false, isEnd);
+                const RelationshipKind kind = dependency ? RelationshipKind::Dependency : RelationshipKind::Message;
+                if (!source || !target || !RelationshipRules::canRelate(Model, kind, *source, *target))
+                    return; // kept as written (placeholder)
+                release(pending);
+                const std::string label = (dependency ? "dependency from " : "message from ") + joinPath(pending.First) +
+                                          " to " + joinPath(pending.Second);
+                try {
+                    const auto id = Model.addRelationship(kind, *source, *target);
+                    if (!pending.Name.empty() || !pending.TypeName.empty())
+                        Model.setRelationshipLabel(id, pending.Name, pending.TypeName);
+                    if (pending.Kind == Pending::Type::MessageThen)
+                        Model.setSequenced(id, true);
+                    Model.setRelationshipContext(id, pending.Scope); // stays where it was declared
+                    ++Report.ImportedRelationships;
+                } catch (const std::exception &exception) {
+                    lost(label + " (" + exception.what() + ")", pending.Line);
+                }
+            }
+
+            /// A top-level allocation with the allocations refining it: all of them, or the statement stays text.
+            void resolveAllocation(std::size_t top) {
+                std::vector<std::size_t> group{top}; // pre-order: a refined allocation before its refining ones
+                for (std::size_t i = top + 1; i < Pendings.size(); ++i) {
+                    const auto parent = AllocationParent.find(i);
+                    if (parent == AllocationParent.end() ||
+                        std::find(group.begin(), group.end(), parent->second) == group.end())
+                        break;
+                    group.push_back(i);
+                }
+                const Accept isEnd = [&](ElementId id) {
+                    const ElementKind kind = Model.element(id).kind();
+                    return isUsageKind(kind) && kind != ElementKind::EnumerationLiteral && kind != ElementKind::ControlNode;
+                };
+                std::vector<std::pair<ElementId, ElementId>> ends;
+                for (const std::size_t index: group) {
+                    const auto &pending = Pendings[index];
+                    const auto source = resolve(pending.Scope, pending.First, false, isEnd);
+                    const auto target = resolve(pending.Scope, pending.Second, false, isEnd);
+                    if (!source || !target || !RelationshipRules::canRelate(Model, RelationshipKind::Allocation, *source, *target))
+                        return; // kept as written (placeholder)
+                    ends.emplace_back(*source, *target);
+                }
+                release(Pendings[top]);
+                std::map<std::size_t, RelationshipId> created;
+                for (std::size_t k = 0; k < group.size(); ++k) {
+                    const auto &pending = Pendings[group[k]];
+                    try {
+                        const auto id = Model.addRelationship(RelationshipKind::Allocation, ends[k].first, ends[k].second);
+                        if (!pending.Name.empty() || !pending.TypeName.empty())
+                            Model.setRelationshipLabel(id, pending.Name, pending.TypeName);
+                        if (const auto parent = AllocationParent.find(group[k]); parent != AllocationParent.end())
+                            Model.setParentRelationship(id, created.at(parent->second));
+                        else
+                            Model.setRelationshipContext(id, pending.Scope); // stays where it was declared
+                        created[group[k]] = id;
+                        ++Report.ImportedRelationships;
+                    } catch (const std::exception &exception) {
+                        lost("allocate " + joinPath(pending.First) + " to " + joinPath(pending.Second) + " (" +
+                             exception.what() + ")", pending.Line);
+                        return;
+                    }
+                }
+            }
+
+            void resolveRequirementRelationship(const Pending &pending) {
+                const auto ofKind = [&](std::vector<ElementKind> kinds) -> Accept {
+                    return [this, kinds = std::move(kinds)](ElementId id) {
+                        return std::find(kinds.begin(), kinds.end(), Model.element(id).kind()) != kinds.end();
+                    };
+                };
+                std::optional<ElementId> source;
+                std::optional<ElementId> target;
+                RelationshipKind kind = RelationshipKind::Satisfy;
+                std::string label;
+                switch (pending.Kind) {
+                    case Pending::Type::Satisfy:
+                        target = resolve(pending.Scope, pending.First, false, ofKind({ElementKind::RequirementUsage}));
+                        source = resolve(pending.Scope, pending.Second, false,
+                                         ofKind({ElementKind::PartUsage, ElementKind::PortUsage}));
+                        label = "satisfy " + joinPath(pending.First) + " by " + joinPath(pending.Second);
+                        break;
+                    case Pending::Type::Verify:
+                        kind = RelationshipKind::Verify;
+                        source = Model.contains(pending.Source) ? std::optional<ElementId>(pending.Source) : std::nullopt;
+                        target = resolve(pending.Scope, pending.First, false, ofKind({ElementKind::RequirementUsage}));
+                        label = "verify " + joinPath(pending.First);
+                        break;
+                    default:
+                        kind = RelationshipKind::Include;
+                        source = Model.contains(pending.Source) ? std::optional<ElementId>(pending.Source) : std::nullopt;
+                        target = resolve(pending.Scope, pending.First, false, ofKind({ElementKind::UseCaseUsage}));
+                        label = "include " + joinPath(pending.First);
+                        break;
+                }
+                if (!source || !target || !RelationshipRules::canRelate(Model, kind, *source, *target))
+                    return; // kept as written (placeholder)
+                release(pending);
+                addRelationship(kind, *source, *target, label, pending.Line);
+            }
+
+            void addRelationship(RelationshipKind kind, ElementId source, ElementId target, const std::string &label,
+                                 std::size_t line, const std::string &name = {}, const std::string &typeName = {}) {
+                try {
+                    const auto id = Model.addRelationship(kind, source, target);
+                    if (!name.empty() || !typeName.empty())
+                        Model.setRelationshipLabel(id, name, typeName);
                     ++Report.ImportedRelationships;
                 } catch (const std::exception &exception) {
                     lost(label + " (" + exception.what() + ")", line);
@@ -1264,7 +2359,9 @@ namespace StructuraSystems::Diagram {
             std::size_t Position = 0;
             std::size_t LastEnd = 0;   ///< offset behind the last consumed token
             std::vector<Pending> Pendings;
+            std::map<ElementId, ElementId> Previous; ///< per body: last action / control node / state
             std::map<ElementId, std::vector<std::string>> External;
+            std::map<std::size_t, std::size_t> AllocationParent; ///< pending refining allocation -> the refined one
         };
     }
 
@@ -1729,8 +2826,13 @@ namespace StructuraSystems::Diagram {
         }
         summary.Expression = element.expression().empty() ? returnValue : oneLine(element.expression());
 
-        const bool assertion = element.declaredKeyword().has_value() && *element.declaredKeyword() == "assert constraint";
-        std::string display = (assertion ? "assert " : "") + element.name();
+        // "assert", "require", "assume" in front of the name (an unnamed one shows only its expression)
+        const std::string declared = element.declaredKeyword().value_or("");
+        const bool prefixed = declared == "assert constraint" || declared == "require constraint" ||
+                              declared == "assume constraint";
+        std::string display = prefixed ? declared.substr(0, declared.find(' ')) : std::string();
+        if (!element.name().empty())
+            display += (display.empty() ? "" : " ") + element.name();
         if (!element.typeName().empty())
             display += " : " + element.typeName();
         if (summary.Kind == StatementSummary::Category::Constraint) {
@@ -1741,7 +2843,7 @@ namespace StructuraSystems::Diagram {
                 display += ")";
             }
             if (!summary.Expression.empty())
-                display += " { " + summary.Expression + " }";
+                display += (display.empty() ? "{ " : " { ") + summary.Expression + " }";
         } else {
             if (!summary.Parameters.empty() || element.typeName().empty()) {
                 display += "(";
@@ -1758,12 +2860,80 @@ namespace StructuraSystems::Diagram {
         return summary;
     }
 
+    std::string SysMLTextImporter::commentBody(const std::string &statement) {
+        const std::size_t open = statement.find("/*");
+        std::string body;
+        if (open == std::string::npos) {
+            const std::size_t line = statement.find("//");
+            body = line == std::string::npos ? std::string() : statement.substr(line + 2);
+        } else {
+            const std::size_t close = statement.find("*/", open + 2);
+            body = statement.substr(open + 2, close == std::string::npos ? std::string::npos : close - open - 2);
+        }
+        std::vector<std::string> lines;
+        std::size_t start = 0;
+        while (start <= body.size()) {
+            std::size_t end = body.find('\n', start);
+            if (end == std::string::npos)
+                end = body.size();
+            std::string line = body.substr(start, end - start);
+            const std::size_t first = line.find_first_not_of(" \t\r");
+            line = first == std::string::npos ? std::string() : line.substr(first);
+            if (!line.empty() && line.front() == '*' && (line.size() == 1 || line[1] == ' '))
+                line = line.substr(line.size() > 1 ? 2 : 1);
+            while (!line.empty() && (line.back() == ' ' || line.back() == '\t' || line.back() == '\r'))
+                line.pop_back();
+            lines.push_back(line);
+            start = end + 1;
+        }
+        while (!lines.empty() && lines.front().empty())
+            lines.erase(lines.begin());
+        while (!lines.empty() && lines.back().empty())
+            lines.pop_back();
+        std::string result;
+        for (std::size_t i = 0; i < lines.size(); ++i)
+            result += (i > 0 ? "\n" : "") + lines[i];
+        return result;
+    }
+
+    std::string SysMLTextImporter::docStatement(const std::string &body) {
+        std::string text = body;
+        for (std::size_t at = text.find("*/"); at != std::string::npos; at = text.find("*/", at))
+            text.replace(at, 2, "* /");
+        while (!text.empty() && (text.back() == '\n' || text.back() == ' '))
+            text.pop_back();
+        if (text.find('\n') == std::string::npos)
+            return "doc /* " + text + " */";
+        std::string result = "doc /*";
+        std::size_t start = 0;
+        while (start <= text.size()) {
+            std::size_t end = text.find('\n', start);
+            if (end == std::string::npos)
+                end = text.size();
+            const std::string line = text.substr(start, end - start);
+            result += "\n *" + (line.empty() ? std::string() : " " + line);
+            start = end + 1;
+        }
+        return result + "\n */";
+    }
+
+    std::optional<ElementId> SysMLTextImporter::docOf(const SemanticModel &model, ElementId id) {
+        for (const ElementId child: model.children(id)) {
+            const auto &element = model.element(child);
+            if (element.kind() == ElementKind::Textual && element.keyword() == "doc")
+                return child;
+        }
+        return std::nullopt;
+    }
+
     void SysMLTextImporter::clear(SemanticModel &model) {
         const std::vector<ElementId> roots = model.children(RootId);
         for (const ElementId id: roots)
             model.removeElement(id);
         const auto relationships = model.relationships();
-        for (const auto &relationship: relationships)
-            model.removeRelationship(relationship.Id);
+        for (const auto &relationship: relationships) {
+            if (model.containsRelationship(relationship.Id)) // refining allocations go with the refined one
+                model.removeRelationship(relationship.Id);
+        }
     }
 }

@@ -25,6 +25,12 @@ namespace StructuraSystems::Client {
         connect(Controller, &DiagramController::statusMessage, this, &DiagramEditorModel::statusMessage);
         Parametric = new ParametricController(Model, Controller, this);
         connect(Parametric, &ParametricController::statusMessage, this, &DiagramEditorModel::statusMessage);
+        Behavior = new BehaviorController(Model, this);
+        connect(Behavior, &BehaviorController::statusMessage, this, &DiagramEditorModel::statusMessage);
+        UseCases = new UseCaseController(Model, this);
+        connect(UseCases, &UseCaseController::statusMessage, this, &DiagramEditorModel::statusMessage);
+        Sequence = new SequenceController(Model, this);
+        connect(Sequence, &SequenceController::statusMessage, this, &DiagramEditorModel::statusMessage);
 
         ListenerToken = Model.addListener([this](const Diagram::ModelChange &) {
             if (!Loading)
@@ -38,7 +44,13 @@ namespace StructuraSystems::Client {
 
     DiagramEditorModel::~DiagramEditorModel() {
         Model.removeListener(ListenerToken);
-        delete Parametric; // both listen to Model, which is destroyed before the QObject children
+        delete Sequence; // all listen to Model, which is destroyed before the QObject children
+        Sequence = nullptr;
+        delete UseCases;
+        UseCases = nullptr;
+        delete Behavior;
+        Behavior = nullptr;
+        delete Parametric;
         Parametric = nullptr;
         delete Controller;
         Controller = nullptr;
@@ -122,6 +134,8 @@ namespace StructuraSystems::Client {
 
         Controller->layoutAll();
         Parametric->layoutAll();
+        Behavior->layoutAll();
+        UseCases->layoutAll();
         const std::string code = Generator.generate(Model);
         if (code != LastCode) {
             LastCode = code;

@@ -34,8 +34,12 @@ namespace StructuraSystems::Diagram {
 
     private:
         void generateElement(const SemanticModel &model, ElementId id, std::size_t depth, std::string &out) const;
+        void generateSuccessionsFrom(const SemanticModel &model, ElementId source, std::size_t depth, std::string &out) const;
         void generateOwnedRelationships(const SemanticModel &model, ElementId owner, std::size_t depth,
                                         std::string &out) const;
+        /// One relationship written in the body of owner (an allocation with the allocations refining it).
+        void generateRelationship(const SemanticModel &model, const Relationship &relationship, ElementId owner,
+                                  std::size_t depth, std::string &out) const;
         [[nodiscard]] std::string declaration(const SemanticModel &model, ElementId id) const;
         [[nodiscard]] std::string indent(std::size_t depth) const;
 

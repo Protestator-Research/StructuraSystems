@@ -31,7 +31,8 @@ namespace StructuraSystems::Diagram {
             ElementChanged,
             ElementReparented,
             RelationshipAdded,
-            RelationshipRemoved
+            RelationshipRemoved,
+            RelationshipChanged
         };
 
         Type ChangeType;
@@ -46,7 +47,8 @@ namespace StructuraSystems::Diagram {
         SemanticModel() = default;
 
         // --- elements -------------------------------------------------------------------
-        /// Names must be unique among the siblings; Textual elements may have an empty name and are not checked.
+        /// Names must be unique among the siblings; Textual elements may have an empty name and are not checked,
+        /// as are unnamed constraints and requirements (mayBeUnnamed: "require constraint { ... }", "objective").
         ElementId addElement(ElementKind kind, const std::string &name, ElementId owner = RootId);
         /// Removes the element, all owned elements (recursively) and every relationship touching them.
         void removeElement(ElementId id);
@@ -65,10 +67,16 @@ namespace StructuraSystems::Diagram {
         /// Keyword as written instead of the default one of the kind (std::nullopt = default), e.g. "function",
         /// "assert constraint", "feature", "" (parameter without keyword). Letters and single spaces only.
         void setDeclaredKeyword(ElementId id, std::optional<std::string> keyword);
+        /// "ordered", "nonunique", "ordered nonunique" after the multiplicity of a usage (empty removes them).
+        void setMultiplicityQualifiers(ElementId id, const std::string &qualifiers);
+        /// Short name (id) written between < >: a basic name ("R1") or a quoted one ("'1.2'"); empty removes it.
+        void setShortName(ElementId id, const std::string &shortName);
         /// Textual only: statement text, its keywords and its name (may be empty).
         void setText(ElementId id, const std::string &text, const std::string &keyword, const std::string &name);
         /// Composition: moves the element below a new owner (appended as last child).
         void reparent(ElementId id, ElementId newOwner);
+        /// Moves the element to another place among its siblings (0 = first; larger values = last).
+        void setChildIndex(ElementId id, std::size_t index);
 
         [[nodiscard]] bool contains(ElementId id) const;
         [[nodiscard]] const SysMLElement &element(ElementId id) const;
@@ -85,6 +93,22 @@ namespace StructuraSystems::Diagram {
         // --- relationships --------------------------------------------------------------
         RelationshipId addRelationship(RelationshipKind kind, ElementId source, ElementId target);
         void removeRelationship(RelationshipId id);
+        /// Name and type of a connection, flow or interface (empty = none); a flow's type is its item ("flow of T").
+        void setRelationshipLabel(RelationshipId id, const std::string &name, const std::string &typeName);
+        /// Guard of a succession; trigger, guard and effect of a transition (empty = none).
+        void setBehaviorDetails(RelationshipId id, const std::string &guard, const std::string &trigger,
+                                const std::string &effect);
+        /// Message only: written as "then message ..." (true) or "message ..." (false).
+        void setSequenced(RelationshipId id, bool sequenced);
+        /// Allocation only: the allocation this one refines (written in its body); std::nullopt = top level.
+        /// Removing an allocation removes the allocations that refine it.
+        void setParentRelationship(RelationshipId id, std::optional<RelationshipId> parent);
+        /// Message, allocation, dependency: the body it is declared in (RootId = top level); std::nullopt = the
+        /// innermost element owning both ends. Reset when that element is removed.
+        void setRelationshipContext(RelationshipId id, std::optional<ElementId> context);
+        /// Moves the relationship to another place in the order of all relationships (the order of the text;
+        /// 0 = first, larger values = last).
+        void setRelationshipIndex(RelationshipId id, std::size_t index);
         [[nodiscard]] bool containsRelationship(RelationshipId id) const;
         [[nodiscard]] const Relationship &relationship(RelationshipId id) const;
         /// All relationships in creation order.

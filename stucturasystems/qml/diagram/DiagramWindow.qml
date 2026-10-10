@@ -18,9 +18,13 @@ ApplicationWindow {
     property string blockElementId: ""
     readonly property DiagramController controller: editorModel.controller
     readonly property ParametricController parametric: editorModel.parametric
-    /** 0 structure, 1 parametric view */
+    readonly property BehaviorController behavior: editorModel.behavior
+    readonly property UseCaseController useCases: editorModel.useCases
+    readonly property SequenceController sequence: editorModel.sequence
+    /** 0 structure, 1 parametric view, 2 behavior view, 3 use case view, 4 sequence view */
     property int view: 0
-    readonly property Item activeCanvas: view === 0 ? canvas : parametricCanvas
+    readonly property Item activeCanvas: view === 0 ? canvas : view === 1 ? parametricCanvas
+                                         : view === 2 ? behaviorCanvas : view === 3 ? useCaseCanvas : sequenceCanvas
 
     /** Emitted when the window was closed; the main window destroys it then. */
     signal finished
@@ -45,7 +49,16 @@ ApplicationWindow {
 
     onClosing: window.finished()
     // The parametric view shows everything when it is opened.
-    onViewChanged: if (view === 1) Qt.callLater(parametricCanvas.fitToContent)
+    onViewChanged: {
+        if (view === 1)
+            Qt.callLater(parametricCanvas.fitToContent)
+        else if (view === 2)
+            Qt.callLater(behaviorCanvas.fitToContent)
+        else if (view === 3)
+            Qt.callLater(useCaseCanvas.fitToContent)
+        else if (view === 4)
+            Qt.callLater(sequenceCanvas.fitToContent)
+    }
 
     DiagramEditorModel {
         id: editorModel
@@ -88,6 +101,7 @@ ApplicationWindow {
             spacing: 10
 
             Label {
+                visible: window.width >= 1500 // room for the five views
                 text: qsTr("Code generation")
                 color: Theme.textSecondary
             }
@@ -152,7 +166,7 @@ ApplicationWindow {
 
             SegmentedControl {
                 objectName: "viewSwitch"
-                model: [qsTr("Structure"), qsTr("Parametric")]
+                model: [qsTr("Structure"), qsTr("Parametric"), qsTr("Behavior"), qsTr("Use Cases"), qsTr("Sequence")]
                 currentIndex: window.view
                 onActivated: index => window.view = index
             }
@@ -160,7 +174,7 @@ ApplicationWindow {
                 id: contextBox
                 objectName: "contextBox"
                 visible: window.view === 1
-                Layout.preferredWidth: 260
+                Layout.preferredWidth: 200
                 model: window.parametric.contexts
                 textRole: "title"
                 valueRole: "id"
@@ -175,6 +189,72 @@ ApplicationWindow {
                 onActivated: index => window.parametric.contextId = window.parametric.contexts[index].id
                 ToolTip.visible: hovered
                 ToolTip.text: qsTr("Part whose values, constraints and calculations are shown")
+                ToolTip.delay: 700
+            }
+
+            ComboBox {
+                id: behaviorBox
+                objectName: "behaviorContextBox"
+                visible: window.view === 2
+                Layout.preferredWidth: 200
+                model: window.behavior.contexts
+                textRole: "title"
+                valueRole: "id"
+                currentIndex: {
+                    const list = window.behavior.contexts
+                    for (let i = 0; i < list.length; ++i) {
+                        if (list[i].id === window.behavior.contextId)
+                            return i
+                    }
+                    return -1
+                }
+                onActivated: index => window.behavior.contextId = window.behavior.contexts[index].id
+                ToolTip.visible: hovered
+                ToolTip.text: qsTr("Action or state whose flow / state machine is shown")
+                ToolTip.delay: 700
+            }
+
+            ComboBox {
+                id: useCaseBox
+                objectName: "useCaseContextBox"
+                visible: window.view === 3
+                Layout.preferredWidth: 200
+                model: window.useCases.contexts
+                textRole: "title"
+                valueRole: "id"
+                currentIndex: {
+                    const list = window.useCases.contexts
+                    for (let i = 0; i < list.length; ++i) {
+                        if (list[i].id === window.useCases.contextId)
+                            return i
+                    }
+                    return -1
+                }
+                onActivated: index => window.useCases.contextId = window.useCases.contexts[index].id
+                ToolTip.visible: hovered
+                ToolTip.text: qsTr("Package whose use cases are shown")
+                ToolTip.delay: 700
+            }
+
+            ComboBox {
+                id: sequenceBox
+                objectName: "sequenceContextBox"
+                visible: window.view === 4
+                Layout.preferredWidth: 200
+                model: window.sequence.contexts
+                textRole: "title"
+                valueRole: "id"
+                currentIndex: {
+                    const list = window.sequence.contexts
+                    for (let i = 0; i < list.length; ++i) {
+                        if (list[i].id === window.sequence.contextId)
+                            return i
+                    }
+                    return -1
+                }
+                onActivated: index => window.sequence.contextId = window.sequence.contexts[index].id
+                ToolTip.visible: hovered
+                ToolTip.text: qsTr("Interaction (occurrence definition) whose lifelines and messages are shown")
                 ToolTip.delay: 700
             }
 
@@ -252,6 +332,24 @@ ApplicationWindow {
                         structure: window.controller
                         onStatusMessage: message => window.showStatus(message)
                     }
+                    BehaviorCanvas {
+                        id: behaviorCanvas
+                        controller: window.behavior
+                        structure: window.controller
+                        onStatusMessage: message => window.showStatus(message)
+                    }
+                    UseCaseCanvas {
+                        id: useCaseCanvas
+                        controller: window.useCases
+                        structure: window.controller
+                        onStatusMessage: message => window.showStatus(message)
+                    }
+                    SequenceCanvas {
+                        id: sequenceCanvas
+                        controller: window.sequence
+                        structure: window.controller
+                        onStatusMessage: message => window.showStatus(message)
+                    }
                 }
                 Rectangle {
                     Layout.fillHeight: true
@@ -260,9 +358,14 @@ ApplicationWindow {
                 }
                 ToolPalette {
                     Layout.fillHeight: true
-                    Layout.preferredWidth: 200
+                    Layout.preferredWidth: 224
                     controller: window.controller
                     parametric: window.view === 1
+                    behavior: window.view === 2
+                    useCase: window.view === 3
+                    sequence: window.view === 4
+                    sequenceController: window.sequence
+                    stateMachine: window.behavior.stateMachine
                     definitions: window.parametric.definitions
                     onToolDropped: (tool, sceneX, sceneY) => window.activeCanvas.dropTool(tool, sceneX, sceneY)
                     onToolClicked: tool => window.activeCanvas.insertTool(tool)

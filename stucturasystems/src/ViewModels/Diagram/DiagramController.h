@@ -116,6 +116,11 @@ namespace StructuraSystems::Client {
         Q_INVOKABLE QString updateElement(const QString &id, const QVariantMap &values);
         /// e.g. "part definition", for menu texts.
         Q_INVOKABLE QString kindLabel(const QString &id) const;
+        /// Name and type of a connection / flow / interface for the edge dialog: {kindLabel, editable, name, typeName, ...}
+        Q_INVOKABLE QVariantMap edgeDetails(const QString &key) const;
+        Q_INVOKABLE QString updateEdge(const QString &key, const QVariantMap &values);
+        /// Border of its part a port sits on: "left", "right", "top" or "bottom" (for its label).
+        Q_INVOKABLE QString portSide(const QString &id) const;
 
         /// Applies pending model changes to the node and edge models immediately.
         void syncNow();
@@ -161,6 +166,12 @@ namespace StructuraSystems::Client {
         QString addStatement(const QPointF &point);
         /// Parameter and expression of a new constraint / calculation (inside a model change).
         void fillNewEvaluation(Diagram::ElementId id);
+        [[nodiscard]] bool acceptsFeature(Diagram::ElementId owner, int tool) const;
+        [[nodiscard]] std::vector<Diagram::ElementId> portsOf(Diagram::ElementId anchor) const;
+        [[nodiscard]] QRectF portSlot(Diagram::ElementId port) const;
+        void placePorts(Diagram::ElementId anchor);
+        void translatePorts(Diagram::ElementId anchor, const QPointF &delta);
+        static QPointF onBorder(const QRectF &rect, const QPointF &point);
         void moveFrameContent(Diagram::ElementId frame, const QPointF &delta);
         void updateContainment(Diagram::ElementId id);
         bool runModelChange(const std::function<void()> &change);

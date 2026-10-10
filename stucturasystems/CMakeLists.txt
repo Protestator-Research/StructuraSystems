@@ -103,9 +103,17 @@ qt_add_qml_module(StructuraSystems
             qml/diagram/EdgeKindMenu.qml
             qml/diagram/BlockStateBar.qml
             qml/diagram/ElementEditDialog.qml
+            qml/diagram/EdgeEditDialog.qml
             qml/diagram/DiagramPreview.qml
             qml/diagram/ParametricCanvas.qml
             qml/diagram/ParametricNode.qml
+            qml/diagram/BehaviorCanvas.qml
+            qml/diagram/BehaviorNode.qml
+            qml/diagram/UseCaseCanvas.qml
+            qml/diagram/UseCaseNode.qml
+            qml/diagram/GroupEditDialog.qml
+            qml/diagram/SequenceCanvas.qml
+            qml/diagram/SequenceNode.qml
         RESOURCES
             qml/diagram/diagram-editor.png
         SOURCES
@@ -143,7 +151,13 @@ qt_add_qml_module(StructuraSystems
             src/ViewModels/Diagram/DiagramPreviewModel.cpp
             src/ViewModels/Diagram/DiagramPreviewModel.h
             src/ViewModels/Diagram/ParametricController.cpp
-            src/ViewModels/Diagram/ParametricController.h)
+            src/ViewModels/Diagram/ParametricController.h
+            src/ViewModels/Diagram/BehaviorController.cpp
+            src/ViewModels/Diagram/BehaviorController.h
+            src/ViewModels/Diagram/UseCaseController.cpp
+            src/ViewModels/Diagram/UseCaseController.h
+            src/ViewModels/Diagram/SequenceController.cpp
+            src/ViewModels/Diagram/SequenceController.h)
 
 
 

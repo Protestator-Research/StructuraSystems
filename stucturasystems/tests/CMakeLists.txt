@@ -47,7 +47,16 @@ add_executable(StructuraDiagramViewModelTests
         ${DIAGRAM_VIEWMODEL_DIR}/DiagramPreviewModel.cpp
         ${DIAGRAM_VIEWMODEL_DIR}/ParametricController.h
         ${DIAGRAM_VIEWMODEL_DIR}/ParametricController.cpp
-        ViewModels/ParametricControllerTest.cpp)
+        ${DIAGRAM_VIEWMODEL_DIR}/BehaviorController.h
+        ${DIAGRAM_VIEWMODEL_DIR}/BehaviorController.cpp
+        ${DIAGRAM_VIEWMODEL_DIR}/UseCaseController.h
+        ${DIAGRAM_VIEWMODEL_DIR}/UseCaseController.cpp
+        ${DIAGRAM_VIEWMODEL_DIR}/SequenceController.h
+        ${DIAGRAM_VIEWMODEL_DIR}/SequenceController.cpp
+        ViewModels/ParametricControllerTest.cpp
+        ViewModels/BehaviorControllerTest.cpp
+        ViewModels/UseCaseControllerTest.cpp
+        ViewModels/SequenceControllerTest.cpp)
 
 target_include_directories(StructuraDiagramViewModelTests PRIVATE "${DIAGRAM_VIEWMODEL_DIR}")
 # Qt6::Qml only for the QML registration macros in the headers.

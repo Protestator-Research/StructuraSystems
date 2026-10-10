@@ -29,6 +29,9 @@
 
 #include "DiagramController.h"
 #include "ParametricController.h"
+#include "BehaviorController.h"
+#include "UseCaseController.h"
+#include "SequenceController.h"
 #include "SysMLBlockTarget.h"
 
 namespace StructuraSystems::Client {
@@ -43,6 +46,12 @@ namespace StructuraSystems::Client {
         Q_PROPERTY(StructuraSystems::Client::DiagramController *controller READ controller CONSTANT)
         /// Parametric view (values, calculations, constraints and their bindings) of one part.
         Q_PROPERTY(StructuraSystems::Client::ParametricController *parametric READ parametric CONSTANT)
+        /// Behavior view (actions, control nodes, states, successions, transitions) of one action or state.
+        Q_PROPERTY(StructuraSystems::Client::BehaviorController *behavior READ behavior CONSTANT)
+        /// Use case view (use cases, actors, system boundary, «include») of one package or the top level.
+        Q_PROPERTY(StructuraSystems::Client::UseCaseController *useCases READ useCases CONSTANT)
+        /// Sequence view (lifelines, events, messages) of one interaction (occurrence definition or usage).
+        Q_PROPERTY(StructuraSystems::Client::SequenceController *sequence READ sequence CONSTANT)
         Q_PROPERTY(GenerationMode generationMode READ generationMode WRITE setGenerationMode NOTIFY generationModeChanged)
         Q_PROPERTY(BlockState blockState READ blockState NOTIFY blockStateChanged)
         Q_PROPERTY(bool pendingChanges READ hasPendingChanges NOTIFY pendingChangesChanged)
@@ -86,6 +95,9 @@ namespace StructuraSystems::Client {
         void setBlockElementId(const QString &elementId);
         [[nodiscard]] DiagramController *controller() const { return Controller; }
         [[nodiscard]] ParametricController *parametric() const { return Parametric; }
+        [[nodiscard]] BehaviorController *behavior() const { return Behavior; }
+        [[nodiscard]] UseCaseController *useCases() const { return UseCases; }
+        [[nodiscard]] SequenceController *sequence() const { return Sequence; }
 
         [[nodiscard]] Diagram::SemanticModel &semanticModel() { return Model; }
         [[nodiscard]] const Diagram::SemanticModel &semanticModel() const { return Model; }
@@ -148,6 +160,9 @@ namespace StructuraSystems::Client {
         /// Child QObject, deleted explicitly before Model (it listens to the model).
         DiagramController *Controller = nullptr;
         ParametricController *Parametric = nullptr;
+        BehaviorController *Behavior = nullptr;
+        UseCaseController *UseCases = nullptr;
+        SequenceController *Sequence = nullptr;
         QPointer<QObject> Document;
         QString BlockElementId;
         bool Completing = false;

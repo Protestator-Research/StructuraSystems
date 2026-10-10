@@ -33,6 +33,60 @@ namespace StructuraSystems::Diagram {
         ConstraintUsage,
         /// calc name [: Type] { ... }
         CalcUsage,
+        /// attribute def Name [:> ...] { attributes }
+        AttributeDefinition,
+        /// enum def Name { enum a; enum b; }
+        EnumerationDefinition,
+        /// enum a;  (owned by an enum def)
+        EnumerationLiteral,
+        /// item def Name { attributes, items }
+        ItemDefinition,
+        /// [in|out] item name [: Type];
+        ItemUsage,
+        /// port def Name { in item fuel : Fuel; ... }
+        PortDefinition,
+        /// port name : [~]PortDef;  (drawn on the border of its part)
+        PortUsage,
+        /// interface def Name { end a : P; end b : ~P; }
+        InterfaceDefinition,
+        /// action def Name { action a; then b; ... }
+        ActionDefinition,
+        /// action name [: Type] [{ ... }]  (also "entry action", "do action", "exit action" in a state)
+        ActionUsage,
+        /// decide / merge / fork / join name;  and the implicit start, done and entry (declared keyword)
+        ControlNode,
+        /// state def Name { entry; then off; state off; ... }
+        StateDefinition,
+        /// state name [: Type] [{ ... }]  ("exhibit state" in a part)
+        StateUsage,
+        /// requirement def [<'R1'>] Name { doc /* ... */ subject ...; require constraint { ... } }
+        RequirementDefinition,
+        /// requirement [<'R1'>] name [: Type] [{ ... }]  ("objective" in a use case / verification, may be unnamed)
+        RequirementUsage,
+        /// subject name [: Type];  (of a requirement, use case or verification: the system boundary)
+        Subject,
+        /// actor name [: Type];  ("stakeholder" in a requirement)
+        Actor,
+        /// use case def Name { subject ...; actor ...; objective { ... } include use case ...; }
+        UseCaseDefinition,
+        /// use case name [: Type] [{ ... }]  ("include use case" inside another use case)
+        UseCaseUsage,
+        /// verification def Name { subject ...; objective { verify requirement; } }
+        VerificationDefinition,
+        /// verification name [: Type] [{ ... }]
+        VerificationUsage,
+        /// occurrence def Name { ref part driver : Driver { event occurrence sent; } message ... }  (an interaction)
+        OccurrenceDefinition,
+        /// occurrence name [: Type] [{ ... }]
+        OccurrenceUsage,
+        /// event occurrence name [: Type];  (on a lifeline: a part of an interaction)
+        EventOccurrence,
+        /// allocation def Name { end logical : LogicalElement; end physical : PhysicalElement; }
+        AllocationDefinition,
+        /// analysis def Name { subject ...; objective { ... } in attribute ...; action ...; return result : T = ...; }
+        AnalysisDefinition,
+        /// analysis name [: Type] [{ subject vehicle = vehicle_c1; in scenario = cityScenario; }]
+        AnalysisUsage,
         /// Any other statement kept word for word (assert constraint, function, constraint def, import,
         /// comment, ...). Shown in a compartment of its owner or as node; never interpreted.
         Textual
@@ -45,7 +99,25 @@ namespace StructuraSystems::Diagram {
         Flow,
         Specialization,
         /// bind source = target;  between two attributes (also parameters of constraints / calculations)
-        Binding
+        Binding,
+        /// interface [name] [: Type] connect a to b;  between two ports
+        Interface,
+        /// first a then b;  (written as "then b;" right after a when possible), with an optional guard
+        Succession,
+        /// transition [name] first a [accept trigger] [if guard] [do effect] then b;
+        Transition,
+        /// satisfy target by source;  (source: the part / port that satisfies, target: a requirement usage)
+        Satisfy,
+        /// verify target;  inside the objective of the source (a verification); target: a requirement usage
+        Verify,
+        /// include target;  inside the source use case; target: a use case usage
+        Include,
+        /// [then] message [name] [of Payload] from a to b;  between two event occurrences (or occurrences)
+        Message,
+        /// allocate a to b [{ allocate ... }];  allocation [name] [: Type] allocate a to b;  (nested ones: Parent)
+        Allocation,
+        /// dependency [name] from a to b;  between any two named elements
+        Dependency
     };
 
     /// constraint def, calc def and their usages: own parameters (directed attributes) and a body expression.
@@ -60,7 +132,92 @@ namespace StructuraSystems::Diagram {
 
     [[nodiscard]] inline bool isDefinitionKind(ElementKind kind) {
         return kind == ElementKind::PartDefinition || kind == ElementKind::ConstraintDefinition ||
-               kind == ElementKind::CalcDefinition;
+               kind == ElementKind::CalcDefinition || kind == ElementKind::AttributeDefinition ||
+               kind == ElementKind::EnumerationDefinition || kind == ElementKind::ItemDefinition ||
+               kind == ElementKind::PortDefinition || kind == ElementKind::InterfaceDefinition ||
+               kind == ElementKind::ActionDefinition || kind == ElementKind::StateDefinition ||
+               kind == ElementKind::RequirementDefinition || kind == ElementKind::UseCaseDefinition ||
+               kind == ElementKind::VerificationDefinition || kind == ElementKind::OccurrenceDefinition ||
+               kind == ElementKind::AllocationDefinition || kind == ElementKind::AnalysisDefinition;
+    }
+
+    [[nodiscard]] inline bool isAnalysisKind(ElementKind kind) {
+        return kind == ElementKind::AnalysisDefinition || kind == ElementKind::AnalysisUsage;
+    }
+
+    [[nodiscard]] inline bool isOccurrenceKind(ElementKind kind) {
+        return kind == ElementKind::OccurrenceDefinition || kind == ElementKind::OccurrenceUsage;
+    }
+
+    /// Ends of messages: events and the occurrences they happen to (parts, items, ports, actions, occurrences).
+    [[nodiscard]] inline bool isMessageEnd(ElementKind kind) {
+        return kind == ElementKind::EventOccurrence || kind == ElementKind::OccurrenceUsage ||
+               kind == ElementKind::PartUsage || kind == ElementKind::ItemUsage || kind == ElementKind::PortUsage ||
+               kind == ElementKind::ActionUsage || kind == ElementKind::ActionPerformance;
+    }
+
+    [[nodiscard]] inline bool isRequirementKind(ElementKind kind) {
+        return kind == ElementKind::RequirementDefinition || kind == ElementKind::RequirementUsage;
+    }
+
+    [[nodiscard]] inline bool isUseCaseKind(ElementKind kind) {
+        return kind == ElementKind::UseCaseDefinition || kind == ElementKind::UseCaseUsage;
+    }
+
+    [[nodiscard]] inline bool isVerificationKind(ElementKind kind) {
+        return kind == ElementKind::VerificationDefinition || kind == ElementKind::VerificationUsage;
+    }
+
+    /// Use cases, verifications and analyses: cases with subject, actors and an objective (and a flow of actions).
+    [[nodiscard]] inline bool isCaseKind(ElementKind kind) {
+        return isUseCaseKind(kind) || isVerificationKind(kind) || isAnalysisKind(kind);
+    }
+
+    /// Elements whose inside is a flow (actions, cases) or a state machine (states).
+    [[nodiscard]] inline bool isBehaviorKind(ElementKind kind) {
+        return kind == ElementKind::ActionDefinition || kind == ElementKind::ActionUsage ||
+               kind == ElementKind::StateDefinition || kind == ElementKind::StateUsage || isCaseKind(kind);
+    }
+
+    /// Elements that may be unnamed: "require constraint { ... }", "assume constraint { ... }", "objective { ... }".
+    [[nodiscard]] inline bool mayBeUnnamed(ElementKind kind) {
+        return kind == ElementKind::ConstraintUsage || kind == ElementKind::RequirementUsage;
+    }
+
+    /// Ends of successions: actions, performed actions, control nodes, states and event occurrences.
+    [[nodiscard]] inline bool isSuccessionEnd(ElementKind kind) {
+        return kind == ElementKind::ActionUsage || kind == ElementKind::ActionPerformance ||
+               kind == ElementKind::ControlNode || kind == ElementKind::StateUsage || kind == ElementKind::EventOccurrence ||
+               kind == ElementKind::OccurrenceUsage || kind == ElementKind::AnalysisUsage;
+    }
+
+    /// "snapshot", "timeslice", "snapshot part", "timeslice item", ...: a portion of the lifetime of its owner.
+    [[nodiscard]] inline bool isTemporalKeyword(const std::optional<std::string> &keyword) {
+        return keyword && (keyword->rfind("snapshot", 0) == 0 || keyword->rfind("timeslice", 0) == 0);
+    }
+
+    /// Control nodes that are not declared in the text but stand for "start", "done" and "entry".
+    [[nodiscard]] inline bool isImplicitControlKeyword(const std::string &keyword) {
+        return keyword == "start" || keyword == "done" || keyword == "entry";
+    }
+
+    /// Definitions of phase 2 (structure): attribute, enumeration, item, port and interface definitions.
+    [[nodiscard]] inline bool isTypeDefinitionKind(ElementKind kind) {
+        return kind == ElementKind::AttributeDefinition || kind == ElementKind::EnumerationDefinition ||
+               kind == ElementKind::ItemDefinition || kind == ElementKind::PortDefinition ||
+               kind == ElementKind::InterfaceDefinition;
+    }
+
+    /// Features written with a name and an optional type, e.g. "port p : P;", "item fuel : Fuel;".
+    [[nodiscard]] inline bool isUsageKind(ElementKind kind) {
+        return kind == ElementKind::PartUsage || kind == ElementKind::Attribute || kind == ElementKind::ActionPerformance ||
+               kind == ElementKind::ConstraintUsage || kind == ElementKind::CalcUsage || kind == ElementKind::ItemUsage ||
+               kind == ElementKind::PortUsage || kind == ElementKind::EnumerationLiteral ||
+               kind == ElementKind::ActionUsage || kind == ElementKind::ControlNode || kind == ElementKind::StateUsage ||
+               kind == ElementKind::RequirementUsage || kind == ElementKind::Subject || kind == ElementKind::Actor ||
+               kind == ElementKind::UseCaseUsage || kind == ElementKind::VerificationUsage ||
+               kind == ElementKind::OccurrenceUsage || kind == ElementKind::EventOccurrence ||
+               kind == ElementKind::AnalysisUsage;
     }
 
     /// SysML multiplicity, e.g. [6], [0..1], [1..*].
@@ -116,6 +273,10 @@ namespace StructuraSystems::Diagram {
         [[nodiscard]] const std::optional<std::string> &declaredKeyword() const { return DeclaredKeyword; }
         /// Specializations whose target is not part of the model (e.g. a library type), as written after ":>".
         [[nodiscard]] const std::vector<std::string> &externalSpecializations() const { return ExternalSpecializations; }
+        /// Short name (id) as written between < >, e.g. "'R1'" or "R1" (empty = none).
+        [[nodiscard]] const std::string &shortName() const { return ShortName; }
+        /// Written after the multiplicity: "ordered", "nonunique" or "ordered nonunique" (empty = none).
+        [[nodiscard]] const std::string &multiplicityQualifiers() const { return MultiplicityQualifiers; }
 
     private:
         friend class SemanticModel;
@@ -136,6 +297,8 @@ namespace StructuraSystems::Diagram {
         std::vector<std::string> ExternalSpecializations;
         std::string Expression;
         std::optional<std::string> DeclaredKeyword;
+        std::string ShortName;
+        std::string MultiplicityQualifiers;
     };
 
     struct Relationship {
@@ -143,9 +306,28 @@ namespace StructuraSystems::Diagram {
         RelationshipKind Kind;
         ElementId Source;
         ElementId Target;
+        /// Connection / flow / interface: optional name and type ("connection c : Pipe connect ...",
+        /// "flow of Fuel from ...", "interface : FuelInterface connect ...").
+        std::string Name;
+        std::string TypeName;
+        /// Succession / transition: "if" condition ("else" for the else branch of a decision)
+        std::string Guard;
+        /// Transition: what follows "accept", e.g. "StartSignal"
+        std::string Trigger;
+        /// Transition: what follows "do", e.g. "action ignite"
+        std::string Effect;
+        /// Message: written as "then message ..." (after the lexically previous message / occurrence)
+        bool Sequenced = false;
+        /// Allocation: the allocation this one refines (written inside its body), std::nullopt = top level
+        std::optional<RelationshipId> Parent;
+        /// Message / allocation / dependency: the body it is declared in (RootId = top level);
+        /// std::nullopt = the innermost element owning both ends (as for all other relationships)
+        std::optional<ElementId> Context;
     };
 
     [[nodiscard]] std::string toString(ElementKind kind);
+    /// Keyword of the textual notation, e.g. "part def", "port", "enum" (empty for Textual).
+    [[nodiscard]] std::string defaultKeyword(ElementKind kind);
     [[nodiscard]] std::string toString(RelationshipKind kind);
 }
 

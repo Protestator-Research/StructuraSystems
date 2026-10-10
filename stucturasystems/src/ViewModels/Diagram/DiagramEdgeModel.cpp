@@ -32,6 +32,8 @@ namespace StructuraSystems::Client {
                 return QString::number(edge.Target);
             case SelectedRole:
                 return edge.Selected;
+            case LabelRole:
+                return edge.Label;
             default:
                 return {};
         }
@@ -43,7 +45,8 @@ namespace StructuraSystems::Client {
             {EdgeKindRole, "edgeKind"},
             {SourceIdRole, "sourceId"},
             {TargetIdRole, "targetId"},
-            {SelectedRole, "selected"}
+            {SelectedRole, "selected"},
+            {LabelRole, "label"}
         };
     }
 

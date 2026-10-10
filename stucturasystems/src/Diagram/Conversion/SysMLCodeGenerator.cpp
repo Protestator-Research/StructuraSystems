@@ -5,6 +5,7 @@
 #include "SysMLCodeGenerator.h"
 
 #include <algorithm>
+#include <optional>
 #include <iterator>
 #include <string_view>
 #include <utility>
@@ -58,10 +59,9 @@ namespace StructuraSystems::Diagram {
             return common;
         }
 
-        bool isUsageKind(ElementKind kind) {
-            return kind == ElementKind::PartUsage || kind == ElementKind::Attribute ||
-                   kind == ElementKind::ActionPerformance || kind == ElementKind::ConstraintUsage ||
-                   kind == ElementKind::CalcUsage;
+        bool isImplicitControl(const SysMLElement &element) {
+            return element.kind() == ElementKind::ControlNode && element.declaredKeyword().has_value() &&
+                   isImplicitControlKeyword(*element.declaredKeyword());
         }
 
         /// Reference to 'target' as seen from inside 'context' (RootId = top level):
@@ -69,12 +69,16 @@ namespace StructuraSystems::Diagram {
         std::string referenceFrom(const SemanticModel &model, ElementId context, ElementId target) {
             const auto path = model.ownershipPath(target);
             auto start = path.begin();
+            if (context == target) // the body it is written in: by its name, as seen from outside
+                context = model.element(target).owner();
             if (context != RootId) {
                 const auto contextPosition = std::find(path.begin(), path.end(), context);
                 if (contextPosition != path.end())
                     start = contextPosition + 1;
             }
 
+            if (isImplicitControl(model.element(target)))
+                return *model.element(target).declaredKeyword(); // start, done, entry
             std::string reference;
             ElementKind previousKind = ElementKind::Package;
             for (auto it = start; it != path.end(); ++it) {
@@ -101,21 +105,98 @@ namespace StructuraSystems::Diagram {
             return qualified;
         }
 
+        /// An unnamed succession within one body is written as "then b;" right after its source
+        /// (between events of different lifelines: "first a.x then b.y;" in the common owner).
+        bool isShorthand(const SemanticModel &model, const Relationship &relationship) {
+            return relationship.Kind == RelationshipKind::Succession && relationship.Name.empty() &&
+                   model.element(relationship.Source).owner() == model.element(relationship.Target).owner();
+        }
+
+        /// "event occurrence a; then event occurrence b;", "snapshot t0; then snapshot t1;": the succession to an
+        /// event / occurrence declared right after its source is written in front of that declaration ("then" +
+        /// declaration) instead of as "then b;".
+        std::optional<RelationshipId> mergedThen(const SemanticModel &model, ElementId id) {
+            const auto &element = model.element(id);
+            const bool temporal = (element.kind() == ElementKind::PartUsage || element.kind() == ElementKind::ItemUsage) &&
+                                  isTemporalKeyword(element.declaredKeyword());
+            if (element.kind() != ElementKind::EventOccurrence && element.kind() != ElementKind::OccurrenceUsage && !temporal)
+                return std::nullopt;
+            const auto &siblings = model.children(element.owner());
+            const auto position = std::find(siblings.begin(), siblings.end(), id);
+            if (position == siblings.begin())
+                return std::nullopt;
+            const ElementId previous = *(position - 1);
+            for (const auto &relationship: model.relationships()) {
+                if (isShorthand(model, relationship) && relationship.Source == previous && relationship.Target == id &&
+                    relationship.Guard.empty())
+                    return relationship.Id;
+            }
+            return std::nullopt;
+        }
+
+        bool isObjective(const SysMLElement &element) {
+            return element.kind() == ElementKind::RequirementUsage && element.declaredKeyword() == "objective";
+        }
+
+        /// The objective the "verify" statements of a verification are written into (the first one).
+        std::optional<ElementId> objectiveOf(const SemanticModel &model, ElementId verification) {
+            for (const ElementId child: model.children(verification)) {
+                if (isObjective(model.element(child)))
+                    return child;
+            }
+            return std::nullopt;
+        }
+
+        bool hasRelationshipFrom(const SemanticModel &model, RelationshipKind kind, ElementId source) {
+            return std::any_of(model.relationships().begin(), model.relationships().end(),
+                               [&](const Relationship &relationship) {
+                                   return relationship.Kind == kind && relationship.Source == source;
+                               });
+        }
+
         bool isOwnedByContext(const SemanticModel &model, const Relationship &relationship, ElementId context) {
-            if (relationship.Kind == RelationshipKind::Specialization)
+            // verify / include are written into their source (see generateElement), refining allocations into the
+            // body of the allocation they refine
+            if (relationship.Kind == RelationshipKind::Specialization || isShorthand(model, relationship) ||
+                relationship.Kind == RelationshipKind::Verify || relationship.Kind == RelationshipKind::Include ||
+                relationship.Parent.has_value())
                 return false;
+            if (relationship.Context)
+                return *relationship.Context == context;
             return commonOwner(model, relationship.Source, relationship.Target) == context;
         }
+
     }
 
     SysMLCodeGenerator::SysMLCodeGenerator(Options options) :
             GeneratorOptions(std::move(options)) {
     }
 
+    void SysMLCodeGenerator::generateSuccessionsFrom(const SemanticModel &model, ElementId source, std::size_t depth,
+                                                     std::string &out) const {
+        const ElementId owner = model.element(source).owner();
+        for (const auto &relationship: model.relationships()) {
+            if (!isShorthand(model, relationship) || relationship.Source != source)
+                continue;
+            if (mergedThen(model, relationship.Target) == relationship.Id)
+                continue; // "then event occurrence b;"
+
+            const std::string target = referenceFrom(model, owner, relationship.Target);
+            if (relationship.Guard.empty())
+                out += indent(depth) + "then " + target + ";\n";
+            else if (relationship.Guard == "else")
+                out += indent(depth) + "else " + target + ";\n";
+            else
+                out += indent(depth) + "if " + relationship.Guard + " then " + target + ";\n";
+        }
+    }
+
     std::string SysMLCodeGenerator::generate(const SemanticModel &model) const {
         std::string out;
-        for (const ElementId id: model.children(RootId))
+        for (const ElementId id: model.children(RootId)) {
             generateElement(model, id, 0, out);
+            generateSuccessionsFrom(model, id, 0, out);
+        }
         generateOwnedRelationships(model, RootId, 0, out);
         return out;
     }
@@ -160,21 +241,62 @@ namespace StructuraSystems::Diagram {
             }
             return;
         }
-        out += indent(depth) + declaration(model, id);
+        if (isImplicitControl(element)) {
+            // not declared: "first start;" / "entry;" only to start the successions that follow; "done" not at all
+            const std::string &keyword = *element.declaredKeyword();
+            const bool used = std::any_of(model.relationships().begin(), model.relationships().end(),
+                                          [&](const Relationship &relationship) {
+                                              return isShorthand(model, relationship) && relationship.Source == id;
+                                          });
+            if (keyword == "start" && used)
+                out += indent(depth) + "first start;\n";
+            else if (keyword == "entry")
+                out += indent(depth) + "entry;\n";
+            return;
+        }
+        out += indent(depth) + (mergedThen(model, id) ? "then " : "") + declaration(model, id);
 
         const bool hasRelationships = std::any_of(
                 model.relationships().begin(), model.relationships().end(),
                 [&](const Relationship &relationship) { return isOwnedByContext(model, relationship, id); });
+        // "verify r;" in the objective of a verification (an objective of its own if it has none),
+        // "include u;" in a use case
+        const bool verification = isVerificationKind(element.kind());
+        const bool verifies = verification && hasRelationshipFrom(model, RelationshipKind::Verify, id);
+        const bool objectiveWithVerifies = isObjective(element) && element.owner() != RootId &&
+                                           isVerificationKind(model.element(element.owner()).kind()) &&
+                                           objectiveOf(model, element.owner()) == id &&
+                                           hasRelationshipFrom(model, RelationshipKind::Verify, element.owner());
+        const bool includes = isUseCaseKind(element.kind()) && hasRelationshipFrom(model, RelationshipKind::Include, id);
 
         const std::string &expression = element.expression();
-        if (element.ownedElements().empty() && !hasRelationships && expression.empty()) {
+        if (element.ownedElements().empty() && !hasRelationships && expression.empty() && !verifies &&
+            !objectiveWithVerifies && !includes) {
             out += ";\n";
             return;
         }
 
         out += " {\n";
-        for (const ElementId child: element.ownedElements())
+        for (const ElementId child: element.ownedElements()) {
             generateElement(model, child, depth + 1, out);
+            generateSuccessionsFrom(model, child, depth + 1, out);
+        }
+        const auto writeReferences = [&](RelationshipKind kind, ElementId source, ElementId context,
+                                          const std::string &keyword, std::size_t level) {
+            for (const auto &relationship: model.relationships()) {
+                if (relationship.Kind == kind && relationship.Source == source)
+                    out += indent(level) + keyword + " " + referenceFrom(model, context, relationship.Target) + ";\n";
+            }
+        };
+        if (objectiveWithVerifies)
+            writeReferences(RelationshipKind::Verify, element.owner(), id, "verify", depth + 1);
+        if (verifies && !objectiveOf(model, id)) {
+            out += indent(depth + 1) + "objective {\n";
+            writeReferences(RelationshipKind::Verify, id, id, "verify", depth + 2);
+            out += indent(depth + 1) + "}\n";
+        }
+        if (includes)
+            writeReferences(RelationshipKind::Include, id, id, "include", depth + 1);
         generateOwnedRelationships(model, id, depth + 1, out);
         // Body expression of a constraint / calculation: last, without ';'.
         if (!expression.empty()) {
@@ -197,14 +319,85 @@ namespace StructuraSystems::Diagram {
         for (const auto &relationship: model.relationships()) {
             if (!isOwnedByContext(model, relationship, owner))
                 continue;
+            generateRelationship(model, relationship, owner, depth, out);
+        }
+    }
+
+    void SysMLCodeGenerator::generateRelationship(const SemanticModel &model, const Relationship &relationship,
+                                                  ElementId owner, std::size_t depth, std::string &out) const {
+        {
             const std::string source = referenceFrom(model, owner, relationship.Source);
             const std::string target = referenceFrom(model, owner, relationship.Target);
-            if (relationship.Kind == RelationshipKind::Connection)
-                out += indent(depth) + "connect " + source + " to " + target + ";\n";
-            else if (relationship.Kind == RelationshipKind::Binding)
-                out += indent(depth) + "bind " + source + " = " + target + ";\n";
-            else
-                out += indent(depth) + "flow from " + source + " to " + target + ";\n";
+            // optional name and type: "connection c : Pipe connect", "flow f of Fuel from", "interface : I connect"
+            std::string label;
+            if (!relationship.Name.empty())
+                label += " " + relationship.Name;
+            switch (relationship.Kind) {
+                case RelationshipKind::Connection:
+                    if (!relationship.TypeName.empty())
+                        label += " : " + relationship.TypeName;
+                    out += indent(depth) + (label.empty() ? "" : "connection" + label + " ") + "connect " + source + " to " +
+                           target + ";\n";
+                    break;
+                case RelationshipKind::Interface:
+                    if (!relationship.TypeName.empty())
+                        label += " : " + relationship.TypeName;
+                    out += indent(depth) + "interface" + label + " connect " + source + " to " + target + ";\n";
+                    break;
+                case RelationshipKind::Binding:
+                    out += indent(depth) + "bind " + source + " = " + target + ";\n";
+                    break;
+                case RelationshipKind::Flow:
+                    if (!relationship.TypeName.empty())
+                        label += " of " + relationship.TypeName;
+                    out += indent(depth) + "flow" + label + " from " + source + " to " + target + ";\n";
+                    break;
+                case RelationshipKind::Succession:
+                    // named, or between events of different lifelines (other unnamed ones follow their source)
+                    out += indent(depth) + (label.empty() ? std::string() : "succession" + label + " ") + "first " + source +
+                           (relationship.Guard.empty() ? std::string() : " if " + relationship.Guard) + " then " + target + ";\n";
+                    break;
+                case RelationshipKind::Transition:
+                    out += indent(depth) + "transition" + label + " first " + source +
+                           (relationship.Trigger.empty() ? std::string() : " accept " + relationship.Trigger) +
+                           (relationship.Guard.empty() ? std::string() : " if " + relationship.Guard) +
+                           (relationship.Effect.empty() ? std::string() : " do " + relationship.Effect) +
+                           " then " + target + ";\n";
+                    break;
+                case RelationshipKind::Satisfy:
+                    out += indent(depth) + "satisfy " + target + " by " + source + ";\n";
+                    break;
+                case RelationshipKind::Message:
+                    if (!relationship.TypeName.empty())
+                        label += " of " + relationship.TypeName;
+                    out += indent(depth) + (relationship.Sequenced ? "then message" : "message") + label + " from " +
+                           source + " to " + target + ";\n";
+                    break;
+                case RelationshipKind::Dependency:
+                    out += indent(depth) + "dependency" + label + " from " + source + " to " + target + ";\n";
+                    break;
+                case RelationshipKind::Allocation: {
+                    if (!relationship.TypeName.empty())
+                        label += " : " + relationship.TypeName;
+                    out += indent(depth) + (label.empty() ? "" : "allocation" + label + " ") + "allocate " + source +
+                           " to " + target;
+                    bool refined = false;
+                    for (const auto &child: model.relationships()) {
+                        if (child.Parent != relationship.Id)
+                            continue;
+                        if (!refined)
+                            out += " {\n";
+                        refined = true;
+                        generateRelationship(model, child, owner, depth + 1, out);
+                    }
+                    out += refined ? indent(depth) + "}\n" : ";\n";
+                    break;
+                }
+                case RelationshipKind::Specialization:
+                case RelationshipKind::Verify:
+                case RelationshipKind::Include:
+                    break;
+            }
         }
     }
 
@@ -214,48 +407,30 @@ namespace StructuraSystems::Diagram {
         for (const auto &prefix: element.prefixes())
             text += prefix + " ";
 
-        std::string keyword;
-        switch (element.kind()) {
-            case ElementKind::Package:
-                keyword = "package";
-                break;
-            case ElementKind::PartDefinition:
-                keyword = "part def";
-                break;
-            case ElementKind::PartUsage:
-                keyword = "part";
-                break;
-            case ElementKind::Attribute:
-                keyword = "attribute";
-                break;
-            case ElementKind::ActionPerformance:
-                keyword = element.performStyle() == PerformStyle::DeclareAction ? "perform action" : "perform";
-                break;
-            case ElementKind::ConstraintDefinition:
-                keyword = "constraint def";
-                break;
-            case ElementKind::CalcDefinition:
-                keyword = "calc def";
-                break;
-            case ElementKind::ConstraintUsage:
-                keyword = "constraint";
-                break;
-            case ElementKind::CalcUsage:
-                keyword = "calc";
-                break;
-            case ElementKind::Textual:
-                break;
-        }
+        std::string keyword = defaultKeyword(element.kind());
+        if (element.kind() == ElementKind::ActionPerformance && element.performStyle() == PerformStyle::ReferenceAction)
+            keyword = "perform";
         if (element.declaredKeyword().has_value())
             keyword = *element.declaredKeyword();
-        if (!keyword.empty())
-            text += keyword + " ";
-        text += formatName(element.name());
+        const auto word = [&text](const std::string &next) {
+            if (next.empty())
+                return;
+            if (!text.empty() && text.back() != ' ')
+                text += ' ';
+            text += next;
+        };
+        word(keyword);
+        if (!element.shortName().empty())
+            word("<" + element.shortName() + ">");
+        if (!element.name().empty())
+            word(formatName(element.name()));
 
         if (!element.typeName().empty())
             text += " : " + element.typeName();
         if (element.multiplicity().has_value())
             text += element.multiplicity()->toString();
+        if (!element.multiplicityQualifiers().empty())
+            text += " " + element.multiplicityQualifiers();
 
         std::string specializations;
         for (const auto &relationship: model.relationships()) {

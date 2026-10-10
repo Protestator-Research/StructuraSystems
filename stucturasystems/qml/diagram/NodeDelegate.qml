@@ -32,10 +32,16 @@ Item {
     property bool readOnly: false
 
     readonly property bool isFrame: nodeKind === DiagramTypes.PackageNode
+    readonly property bool isPort: nodeKind === DiagramTypes.PortNode
+    /** Border of the part the port sits on (for its label); re-read when the port or its part moves. */
+    readonly property string portSide: isPort && controller ? (nodeX, nodeY, controller.portSide(elementId)) : "right"
     readonly property bool isDefinition: nodeKind === DiagramTypes.PartDefinitionNode
+                                         || nodeKind === DiagramTypes.DefinitionNode
                                          || nodeKind === DiagramTypes.TextualNode
                                          || nodeKind === DiagramTypes.ConstraintDefinitionNode
                                          || nodeKind === DiagramTypes.CalcDefinitionNode
+                                         || ((nodeKind === DiagramTypes.RequirementNode || nodeKind === DiagramTypes.CaseNode)
+                                             && keyword.indexOf(" def»") >= 0)
     readonly property color lineColor: selected ? Theme.accent : Theme.textPrimary
     readonly property real padding: 8
 
@@ -73,15 +79,15 @@ Item {
     }
 
     function reportSize() {
-        if (!isFrame && controller)
+        if (!isFrame && !isPort && controller)
             controller.setNodeSize(elementId, width, height)
     }
 
     x: nodeX
     y: nodeY
-    width: isFrame ? nodeWidth : Math.max(140, partContent.contentWidth + 2 * padding)
-    height: isFrame ? nodeHeight : partContent.implicitHeight + padding
-    z: isFrame ? depth : 1000 + depth
+    width: isFrame || isPort ? nodeWidth : Math.max(140, partContent.contentWidth + 2 * padding)
+    height: isFrame || isPort ? nodeHeight : partContent.implicitHeight + padding
+    z: isFrame ? depth : isPort ? 3000 + depth : 1000 + depth
 
     onWidthChanged: reportSize()
     onHeightChanged: reportSize()
@@ -165,7 +171,7 @@ Item {
     Rectangle {
         id: partBox
 
-        visible: !node.isFrame
+        visible: !node.isFrame && !node.isPort
         anchors.fill: parent
         radius: node.isDefinition ? 2 : 10
         color: Theme.card
@@ -271,6 +277,31 @@ Item {
             owner: node
             anchors.fill: parent
         }
+    }
+
+    // ---------------------------------------------------------------- port on the border of its part
+    Rectangle {
+        visible: node.isPort
+        anchors.fill: parent
+        color: Theme.card
+        border.width: node.selected ? 2 : 1.4
+        border.color: node.lineColor
+
+        Grip {
+            owner: node
+            anchors.fill: parent
+            anchors.margins: -4
+        }
+    }
+    Label {
+        visible: node.isPort
+        text: node.title
+        textFormat: Text.PlainText
+        font.pixelSize: 12
+        color: Theme.textPrimary
+        // outside the part, next to the square
+        x: node.portSide === "left" ? -implicitWidth - 6 : node.portSide === "right" ? node.width + 6 : node.width / 2 - implicitWidth / 2
+        y: node.portSide === "top" ? -implicitHeight - 2 : node.portSide === "bottom" ? node.height + 2 : -implicitHeight + 1
     }
 
     // ---------------------------------------------------------------- package frame
