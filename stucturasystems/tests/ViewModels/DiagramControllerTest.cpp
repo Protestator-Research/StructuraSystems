@@ -19,6 +19,14 @@ namespace {
         return ElementId(id.toULongLong());
     }
 
+    QString key(ElementId id) {
+        return QString::number(id);
+    }
+
+    std::string generated(const SemanticModel &model) {
+        return SysMLCodeGenerator().generate(model);
+    }
+
     bool offers(const QVariantList &kinds, int kind) {
         return kinds.contains(kind);
     }
@@ -795,4 +803,66 @@ TEST_CASE("Controller: variations, variants, individuals, snapshots, time slices
     CHECK_EQ(DiagramNodeModel::entryCount(node, "parameters"), 2);
     CHECK_EQ(DiagramNodeModel::entryCount(node, "attributes"), 1);
     CHECK_EQ(DiagramNodeModel::entryCount(node, "subject"), 1);
+}
+
+TEST_CASE("Structure view: redefinitions, connection and flow definitions") {
+    SemanticModel model;
+    CHECK(SysMLTextImporter::importText("part def Engine {\n"
+                                        "    part cyl : Cylinder[4..6];\n"
+                                        "}\n"
+                                        "part def SmallEngine :> Engine {\n"
+                                        "    part redefines cyl[4];\n"
+                                        "    attribute :>> mass = 120.0;\n"
+                                        "}\n"
+                                        "part vehicle {\n"
+                                        "    part smallEng : SmallEngine redefines eng;\n"
+                                        "}\n"
+                                        "flow def FuelFlow {\n"
+                                        "    ref :>> payload : Fuel;\n"
+                                        "    end port fuelOut : FuelOutPort;\n"
+                                        "    end port fuelIn : FuelInPort;\n"
+                                        "}\n", model).lossless());
+    DiagramController structure(model);
+    const ElementId small = model.children(RootId)[1];
+    const auto *smallNode = structure.nodes()->find(small);
+    CHECK(smallNode != nullptr);
+    QStringList texts;
+    for (const auto &compartment: smallNode->Compartments)
+        for (const auto &entry: compartment.toMap().value("entries").toList())
+            texts.append(entry.toMap().value("text").toString());
+    CHECK(texts.contains(":>> mass = 120.0"));
+    const ElementId vehicle = model.children(RootId)[2];
+    const ElementId smallEngine = model.children(vehicle).front();
+    CHECK_EQ(structure.nodes()->find(smallEngine)->Title, QString("smallEng : SmallEngine redefines eng"));
+    const ElementId flow = model.children(RootId)[3];
+    const auto *flowNode = structure.nodes()->find(flow);
+    CHECK(flowNode != nullptr);
+    CHECK_EQ(flowNode->Keyword, QString("«flow def»"));
+    CHECK_EQ(DiagramNodeModel::entryCount(*flowNode, "ends"), 2);
+
+    // edited: a name of its own, then named like the redefined feature again
+    const ElementId cylinders = model.children(small).front();
+    QVariantMap details = structure.elementDetails(key(cylinders));
+    CHECK(details.value("hasRedefinitions").toBool());
+    CHECK(details.value("nameFromRedefinition").toBool());
+    CHECK_EQ(details.value("redefines").toString(), QString("cyl"));
+    details["nameFromRedefinition"] = false;
+    details["name"] = "cylinders";
+    CHECK(structure.updateElement(key(cylinders), details).isEmpty());
+    CHECK(generated(model).find("    part cylinders[4] redefines cyl;\n") != std::string::npos);
+    details["nameFromRedefinition"] = true;
+    details["redefinitionKeyword"] = ":>>";
+    CHECK(structure.updateElement(key(cylinders), details).isEmpty());
+    CHECK(generated(model).find("    part :>> cyl[4];\n") != std::string::npos);
+
+    // new connection / flow definitions start with their two ends
+    structure.addElement(DiagramTypes::ToolConnectionDefinition, 800, 800);
+    CHECK(generated(model).find("connection def Connection1 {\n    end part source;\n    end part target;\n}\n") !=
+          std::string::npos);
+    structure.addElement(DiagramTypes::ToolFlowDefinition, 1100, 800);
+    CHECK(generated(model).find("flow def Flow1 {\n    end port source;\n    end port target;\n}\n") != std::string::npos);
+
+    SemanticModel again;
+    CHECK(SysMLTextImporter::importText(generated(model), again).lossless());
+    CHECK_EQ(generated(again), generated(model));
 }

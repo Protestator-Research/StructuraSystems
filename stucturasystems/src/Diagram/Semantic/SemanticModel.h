@@ -71,6 +71,24 @@ namespace StructuraSystems::Diagram {
         void setMultiplicityQualifiers(ElementId id, const std::string &qualifiers);
         /// Short name (id) written between < >: a basic name ("R1") or a quoted one ("'1.2'"); empty removes it.
         void setShortName(ElementId id, const std::string &shortName);
+        /// Usages: features redefined (as written, e.g. "eng", "Vehicle::mass") after keyword ":>>" or "redefines";
+        /// no references removes them. nameFromRedefinition: written without a name of its own ("part :>> cyl[4];"),
+        /// the element must then be named like the last segment of the first reference.
+        void setRedefinitions(ElementId id, const std::string &keyword, std::vector<std::string> references,
+                              bool nameFromRedefinition);
+        /// Action usage only: send / accept / assign / terminate / if / while / loop / for and what follows the keyword
+        /// (one line, no ';', '{', '}' outside of strings; empty only for loop and terminate). Plain clears it.
+        void setActionForm(ElementId id, ActionForm form, const std::string &clause);
+        /// loop / while: condition after "until" (empty removes it).
+        void setUntilCondition(ElementId id, const std::string &condition);
+        /// Action usage owned by an if action: its else branch (at most one per if).
+        void setElseBranch(ElementId id, bool elseBranch);
+        /// if / while / loop / for / else branch: "loop action name { ... }" instead of "action name loop { ... }".
+        void setNamedInBody(ElementId id, bool namedInBody);
+        /// Action usage / control node: written as "then action b;" behind the source of its succession.
+        void setDeclaredWithThen(ElementId id, bool declaredWithThen);
+        /// State usage / definition: "parallel" (concurrent nested states).
+        void setParallel(ElementId id, bool parallel);
         /// Textual only: statement text, its keywords and its name (may be empty).
         void setText(ElementId id, const std::string &text, const std::string &keyword, const std::string &name);
         /// Composition: moves the element below a new owner (appended as last child).
@@ -98,6 +116,8 @@ namespace StructuraSystems::Diagram {
         /// Guard of a succession; trigger, guard and effect of a transition (empty = none).
         void setBehaviorDetails(RelationshipId id, const std::string &guard, const std::string &trigger,
                                 const std::string &effect);
+        /// Flow only: flow definition after ':' ("flow : FuelFlow of Fuel from a to b;"), empty = none.
+        void setFlowDefinition(RelationshipId id, const std::string &definition);
         /// Message only: written as "then message ..." (true) or "message ..." (false).
         void setSequenced(RelationshipId id, bool sequenced);
         /// Allocation only: the allocation this one refines (written in its body); std::nullopt = top level.

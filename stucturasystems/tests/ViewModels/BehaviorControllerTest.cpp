@@ -204,3 +204,107 @@ TEST_CASE("Behavior: a state machine with initial state, transitions and entry/d
     const QString initial = key(*find(model, context, "entry"));
     CHECK(behavior.connectNodes(initial, stopped).isEmpty()); // a second initial succession is allowed
 }
+
+TEST_CASE("Behavior: send, accept, assign, if and loop actions are shown and drawn") {
+    SemanticModel model;
+    CHECK(SysMLTextImporter::importText(
+            "action def ChargeBattery {\n"
+            "    first start;\n"
+            "    then accept Plugged;\n"
+            "    loop action charging {\n"
+            "        action monitor;\n"
+            "        then if charge < 100 {\n"
+            "            assign charge := charge + 1;\n"
+            "        }\n"
+            "    } until charge >= 100;\n"
+            "    then send Charged() to driver;\n"
+            "    then done;\n"
+            "}\n", model).lossless());
+    BehaviorController behavior(model);
+    const ElementId definition = model.children(RootId).front();
+    behavior.setContextId(key(definition));
+    // start, accept, charging, send, done
+    CHECK_EQ(behavior.nodes()->count(), 5);
+    QStringList keywords;
+    for (const auto &node: behavior.nodes()->nodes())
+        keywords.append(node.Keyword);
+    CHECK(keywords.contains("«accept»"));
+    CHECK(keywords.contains("«loop»"));
+    CHECK(keywords.contains("«send»"));
+    const ElementId charging = *find(model, definition, "charging");
+    CHECK_EQ(behavior.nodes()->find(charging)->Title, QString("charging: until charge >= 100"));
+    // the body of the loop and of the if can be chosen as well
+    int bodies = 0;
+    for (const auto &context: behavior.contexts()) {
+        const QString title = context.toMap().value("title").toString();
+        bodies += title.startsWith("loop ") || title.startsWith("if ") ? 1 : 0;
+    }
+    CHECK_EQ(bodies, 2);
+
+    // new actions from the palette: unnamed, named as soon as an arrow needs a name
+    const QString send = behavior.addNode(DiagramTypes::ToolSendAction, 400, 400);
+    CHECK(!send.isEmpty());
+    CHECK(model.element(send.toULongLong()).name().empty());
+    CHECK(generated(model).find("    send Signal() to target;\n") != std::string::npos);
+    const ElementId accept = model.children(definition)[1];
+    CHECK(behavior.connectNodes(key(accept), send).isEmpty()); // not declared right after accept: named
+    CHECK(generated(model).find("    then send1;\n") != std::string::npos);
+    CHECK(generated(model).find("    action send1 send Signal() to target;\n") != std::string::npos);
+    const QString loop = behavior.addNode(DiagramTypes::ToolLoopAction, 500, 500);
+    CHECK(behavior.connectNodes(send, loop).isEmpty()); // right after send: "then loop { }"
+    CHECK(generated(model).find("    then loop {\n    }\n") != std::string::npos);
+
+    // edited in the element dialog: what it does
+    DiagramController structure(model);
+    QVariantMap details = structure.elementDetails(loop);
+    CHECK(details.value("isActionUsage").toBool());
+    CHECK_EQ(details.value("actionForm").toString(), QString("loop"));
+    details["actionForm"] = "while";
+    details["actionClause"] = "n < 3";
+    details["until"] = "ready";
+    CHECK(structure.updateElement(loop, details).isEmpty());
+    CHECK(generated(model).find("    then while n < 3 {\n    } until ready;\n") != std::string::npos);
+    details["actionClause"] = "";
+    CHECK(!structure.updateElement(loop, details).isEmpty()); // a while needs a condition
+
+    SemanticModel again;
+    CHECK(SysMLTextImporter::importText(generated(model), again).lossless());
+    CHECK_EQ(generated(again), generated(model));
+}
+
+TEST_CASE("Behavior: parallel states, do and entry actions with a form") {
+    SemanticModel model;
+    CHECK(SysMLTextImporter::importText(
+            "state vehicleStates parallel {\n"
+            "    state healthStates {\n"
+            "        do senseTemperature;\n"
+            "        state normal;\n"
+            "        state maintenance {\n"
+            "            entry assign maintenanceTime := maintenanceTime + interval;\n"
+            "        }\n"
+            "        transition first normal accept at maintenanceTime then maintenance;\n"
+            "        transition first maintenance accept after 48 [h] then normal;\n"
+            "    }\n"
+            "}\n", model).lossless());
+    BehaviorController behavior(model);
+    const ElementId machine = model.children(RootId).front();
+    const ElementId health = *find(model, machine, "healthStates");
+    behavior.setContextId(key(health));
+    CHECK(behavior.stateMachine());
+    CHECK_EQ(behavior.nodes()->count(), 2); // normal, maintenance ("do" is not a node)
+    const ElementId maintenance = *find(model, health, "maintenance");
+    CHECK_EQ(DiagramNodeModel::entryCount(*behavior.nodes()->find(maintenance), ""), 1);
+    QStringList labels;
+    for (const auto &edge: behavior.edges()->edges())
+        labels.append(edge.Label);
+    CHECK(labels.contains("at maintenanceTime"));
+    CHECK(labels.contains("after 48 [h]"));
+
+    DiagramController structure(model);
+    QVariantMap details = structure.elementDetails(key(machine));
+    CHECK(details.value("isState").toBool());
+    CHECK(details.value("parallel").toBool());
+    details["parallel"] = false;
+    CHECK(structure.updateElement(key(machine), details).isEmpty());
+    CHECK(generated(model).rfind("state vehicleStates {\n", 0) == 0);
+}

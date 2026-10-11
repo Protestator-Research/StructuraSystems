@@ -3,7 +3,9 @@
 //
 // Reads the part of the language the diagram models: packages, part definitions, parts, attributes (with
 // prefixes, metadata and values), performed actions, constraint and calc definitions and usages (with their
-// parameters and expression; KerML function / predicate), specializations (:>), connections and flows.
+// parameters and expression; KerML function / predicate), specializations (:>) and redefinitions (:>>, redefines),
+// connections and flows, and everything of the later phases (requirements, cases, actions with send / accept /
+// assign / terminate / if / while / loop / for, states, interactions, allocations, connection and flow definitions).
 // Every other statement (requirements, imports, comments, ...) is kept word for word as Textual element,
 // so a block survives "replace with diagram" completely. Only what cannot be kept at all is listed in the
 // report.

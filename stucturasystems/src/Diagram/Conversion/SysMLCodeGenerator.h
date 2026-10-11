@@ -34,6 +34,8 @@ namespace StructuraSystems::Diagram {
 
     private:
         void generateElement(const SemanticModel &model, ElementId id, std::size_t depth, std::string &out) const;
+        /// ";" or the body in braces (with "until c;" / "else { ... }" behind it) and the line break.
+        void generateBody(const SemanticModel &model, ElementId id, std::size_t depth, std::string &out) const;
         void generateSuccessionsFrom(const SemanticModel &model, ElementId source, std::size_t depth, std::string &out) const;
         void generateOwnedRelationships(const SemanticModel &model, ElementId owner, std::size_t depth,
                                         std::string &out) const;

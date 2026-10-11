@@ -51,9 +51,11 @@ namespace StructuraSystems::Diagram {
         InterfaceDefinition,
         /// action def Name { action a; then b; ... }
         ActionDefinition,
-        /// action name [: Type] [{ ... }]  (also "entry action", "do action", "exit action" in a state)
+        /// action name [: Type] [{ ... }]  (also "entry action", "do action", "exit action" in a state);
+        /// with a form (ActionForm): "send s to t;", "accept s;", "assign x := 1;", "terminate;", "if c { ... }",
+        /// "while c { ... }", "loop { ... } until c;", "for x in xs { ... }" (often unnamed)
         ActionUsage,
-        /// decide / merge / fork / join name;  and the implicit start, done and entry (declared keyword)
+        /// decide / merge / fork / join [name];  and the implicit start, done and entry (declared keyword)
         ControlNode,
         /// state def Name { entry; then off; state off; ... }
         StateDefinition,
@@ -87,6 +89,10 @@ namespace StructuraSystems::Diagram {
         AnalysisDefinition,
         /// analysis name [: Type] [{ subject vehicle = vehicle_c1; in scenario = cityScenario; }]
         AnalysisUsage,
+        /// connection def Name { end [1] part a : A; end [1] part b : B; }  (a part definition between its ends)
+        ConnectionDefinition,
+        /// flow def Name { ref :>> payload : Fuel; end port out : OutPort; end port in : InPort; }
+        FlowDefinition,
         /// Any other statement kept word for word (assert constraint, function, constraint def, import,
         /// comment, ...). Shown in a compartment of its owner or as node; never interpreted.
         Textual
@@ -138,7 +144,13 @@ namespace StructuraSystems::Diagram {
                kind == ElementKind::ActionDefinition || kind == ElementKind::StateDefinition ||
                kind == ElementKind::RequirementDefinition || kind == ElementKind::UseCaseDefinition ||
                kind == ElementKind::VerificationDefinition || kind == ElementKind::OccurrenceDefinition ||
-               kind == ElementKind::AllocationDefinition || kind == ElementKind::AnalysisDefinition;
+               kind == ElementKind::AllocationDefinition || kind == ElementKind::AnalysisDefinition ||
+               kind == ElementKind::ConnectionDefinition || kind == ElementKind::FlowDefinition;
+    }
+
+    /// connection def / flow def: part definitions whose usages connect their ends.
+    [[nodiscard]] inline bool isConnectionDefinitionKind(ElementKind kind) {
+        return kind == ElementKind::ConnectionDefinition || kind == ElementKind::FlowDefinition;
     }
 
     [[nodiscard]] inline bool isAnalysisKind(ElementKind kind) {
@@ -179,9 +191,11 @@ namespace StructuraSystems::Diagram {
                kind == ElementKind::StateDefinition || kind == ElementKind::StateUsage || isCaseKind(kind);
     }
 
-    /// Elements that may be unnamed: "require constraint { ... }", "assume constraint { ... }", "objective { ... }".
+    /// Elements that may be unnamed: "require constraint { ... }", "assume constraint { ... }", "objective { ... }",
+    /// actions such as "then send s to t;", "assign x := 1;", "if c { ... }", control nodes such as "then fork;".
     [[nodiscard]] inline bool mayBeUnnamed(ElementKind kind) {
-        return kind == ElementKind::ConstraintUsage || kind == ElementKind::RequirementUsage;
+        return kind == ElementKind::ConstraintUsage || kind == ElementKind::RequirementUsage ||
+               kind == ElementKind::ActionUsage || kind == ElementKind::ControlNode;
     }
 
     /// Ends of successions: actions, performed actions, control nodes, states and event occurrences.
@@ -239,6 +253,27 @@ namespace StructuraSystems::Diagram {
         ReferenceAction  ///< perform name;          (name must resolve to an existing action)
     };
 
+    /// What an action usage does besides being an action ("action a;" = Plain).
+    enum class ActionForm {
+        Plain,
+        Send,      ///< send <clause>;            e.g. "send new Show(p) to screen", "send s via port"
+        Accept,    ///< accept <clause>;          e.g. "scene : Scene via viewPort", "at t", "after 5 [s]", "when c"
+        Assign,    ///< assign <clause>;          e.g. "position := dynamics.x_out"
+        Terminate, ///< terminate [<clause>];     e.g. "processor.workflowProcess"
+        If,        ///< if <clause> { ... } [else { ... } | else if ...]
+        While,     ///< while <clause> { ... } [until <until>;]
+        Loop,      ///< loop { ... } [until <until>;]
+        For        ///< for <clause> { ... }     e.g. "vehiclePower in powerProfile"
+    };
+
+    /// if / while / loop / for: written with a body in braces.
+    [[nodiscard]] inline bool isControlStructure(ActionForm form) {
+        return form == ActionForm::If || form == ActionForm::While || form == ActionForm::Loop || form == ActionForm::For;
+    }
+
+    /// Keyword of an action form ("send", "if", ...; empty for Plain).
+    [[nodiscard]] std::string toKeyword(ActionForm form);
+
     class SysMLElement {
     public:
         SysMLElement(ElementId id, ElementKind kind, std::string name, ElementId owner);
@@ -278,6 +313,31 @@ namespace StructuraSystems::Diagram {
         /// Written after the multiplicity: "ordered", "nonunique" or "ordered nonunique" (empty = none).
         [[nodiscard]] const std::string &multiplicityQualifiers() const { return MultiplicityQualifiers; }
 
+        /// Features it redefines, as written after ":>>" / "redefines" (e.g. "eng", "Vehicle::mass").
+        [[nodiscard]] const std::vector<std::string> &redefinitions() const { return Redefinitions; }
+        /// ":>>" or "redefines" (empty if it redefines nothing).
+        [[nodiscard]] const std::string &redefinitionKeyword() const { return RedefinitionKeyword; }
+        /// "part redefines cyl[4];", ":>> mass = 2000.0;": no name of its own, the name is the one of the redefined
+        /// feature (the last segment of the first redefinition).
+        [[nodiscard]] bool nameFromRedefinition() const { return NameFromRedefinition; }
+
+        /// Action usage only: send / accept / assign / terminate / if / while / loop / for, with what follows the
+        /// keyword ("new Show(p) to screen", "position := x", the condition, "v in values", ...).
+        [[nodiscard]] ActionForm actionForm() const { return Form; }
+        [[nodiscard]] const std::string &actionClause() const { return ActionClause; }
+        /// loop / while: condition after "until" (empty = none).
+        [[nodiscard]] const std::string &untilCondition() const { return Until; }
+        /// The else branch of the if action that owns it ("} else { ... }", "} else if c { ... }").
+        [[nodiscard]] bool isElseBranch() const { return ElseBranch; }
+        /// if / while / loop / for / else: the name written in front of the body ("loop action charging { ... }")
+        /// instead of in front of the keyword ("action charging loop { ... }").
+        [[nodiscard]] bool namedInBody() const { return NamedInBody; }
+        /// Action / control node: declared as "then action b;" / "then fork f;" behind the source of its succession
+        /// (written so again as long as that succession exists and nothing else is declared in between).
+        [[nodiscard]] bool declaredWithThen() const { return DeclaredWithThen; }
+        /// State usage / definition: its nested states are concurrent ("state s parallel { ... }").
+        [[nodiscard]] bool isParallel() const { return Parallel; }
+
     private:
         friend class SemanticModel;
 
@@ -299,6 +359,16 @@ namespace StructuraSystems::Diagram {
         std::optional<std::string> DeclaredKeyword;
         std::string ShortName;
         std::string MultiplicityQualifiers;
+        std::vector<std::string> Redefinitions;
+        std::string RedefinitionKeyword;
+        bool NameFromRedefinition = false;
+        ActionForm Form = ActionForm::Plain;
+        std::string ActionClause;
+        std::string Until;
+        bool ElseBranch = false;
+        bool NamedInBody = false;
+        bool Parallel = false;
+        bool DeclaredWithThen = false;
     };
 
     struct Relationship {
@@ -320,6 +390,8 @@ namespace StructuraSystems::Diagram {
         bool Sequenced = false;
         /// Allocation: the allocation this one refines (written inside its body), std::nullopt = top level
         std::optional<RelationshipId> Parent;
+        /// Flow: the flow definition after ':' ("flow f : FuelFlow of Fuel from ..."); empty = none
+        std::string Definition;
         /// Message / allocation / dependency: the body it is declared in (RootId = top level);
         /// std::nullopt = the innermost element owning both ends (as for all other relationships)
         std::optional<ElementId> Context;

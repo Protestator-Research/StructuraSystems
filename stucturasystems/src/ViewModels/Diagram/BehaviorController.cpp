@@ -37,11 +37,28 @@ namespace StructuraSystems::Client {
             return element.declaredKeyword().value_or(Diagram::defaultKeyword(element.kind()));
         }
 
-        /// entry / do / exit action of a state (shown inside the state, not as node)
+        /// entry / do / exit action of a state (shown inside the state, not as node): "entry action a;",
+        /// "entry assign t := 0;", "do senseTemperature;"
         bool isStateAction(const Diagram::SysMLElement &element) {
             const auto keyword = element.declaredKeyword().value_or("");
-            return element.kind() == ElementKind::ActionUsage &&
-                   (keyword == "entry action" || keyword == "do action" || keyword == "exit action");
+            return (element.kind() == ElementKind::ActionUsage || element.kind() == ElementKind::ActionPerformance) &&
+                   (keyword == "entry action" || keyword == "do action" || keyword == "exit action" || keyword == "entry" ||
+                    keyword == "do" || keyword == "exit");
+        }
+
+        /// "send new Show(p) to screen", "if x > 0", "loop until c", "else" (empty for a plain action).
+        QString formText(const Diagram::SysMLElement &element) {
+            if (element.kind() != ElementKind::ActionUsage)
+                return {};
+            QString text = element.isElseBranch() ? QStringLiteral("else") : QString();
+            if (element.actionForm() != Diagram::ActionForm::Plain) {
+                text += (text.isEmpty() ? QString() : QStringLiteral(" ")) + q(Diagram::toKeyword(element.actionForm()));
+                if (!element.actionClause().empty())
+                    text += QLatin1Char(' ') + q(element.actionClause());
+            }
+            if (!text.isEmpty() && !element.untilCondition().empty())
+                text += QStringLiteral(" until ") + q(element.untilCondition());
+            return text;
         }
 
         bool isState(ElementKind kind) {
@@ -107,10 +124,26 @@ namespace StructuraSystems::Client {
         std::function<void(ElementId)> visit = [&](ElementId owner) {
             for (const ElementId child: Model.children(owner)) {
                 const auto &element = Model.element(child);
-                if (Diagram::isBehaviorKind(element.kind()) && !isStateAction(element))
+                // actions that only send, accept, assign or terminate have no flow of their own (unless they own one)
+                const bool flowless = element.kind() == ElementKind::ActionUsage &&
+                                      element.actionForm() != Diagram::ActionForm::Plain &&
+                                      !Diagram::isControlStructure(element.actionForm()) && element.ownedElements().empty();
+                if (Diagram::isBehaviorKind(element.kind()) && !isStateAction(element) && !flowless) {
+                    // "action def ChargeBattery", "loop ChargeBattery::charging", "if ChargeBattery::charging::(if c)"
+                    QString path;
+                    for (const ElementId step: Model.ownershipPath(child)) {
+                        const auto &segment = Model.element(step);
+                        const QString form = formText(segment);
+                        path += (path.isEmpty() ? QString() : QStringLiteral("::")) +
+                                (!segment.name().empty() ? q(segment.name())
+                                 : QStringLiteral("(") + (form.isEmpty() ? q(keywordOf(segment)) : form) + QStringLiteral(")"));
+                    }
+                    const QString form = formText(element);
+                    const QString title = (form.isEmpty() ? q(keywordOf(element)) : form.section(QLatin1Char(' '), 0, 0)) +
+                                          QLatin1Char(' ') + path;
                     contexts.append(QVariantMap{{QStringLiteral("id"), QString::number(child)},
-                                                {QStringLiteral("title"), q(keywordOf(element)) + QLatin1Char(' ') +
-                                                                          q(Model.qualifiedName(child))}});
+                                                {QStringLiteral("title"), title}});
+                }
                 visit(child);
             }
         };
@@ -222,15 +255,19 @@ namespace StructuraSystems::Client {
                         node.Title = usageTitle(element);
                         if (element.declaredKeyword())
                             node.Keyword = QStringLiteral("«") + q(*element.declaredKeyword()) + QStringLiteral("»");
+                        if (element.isParallel()) // its states are concurrent
+                            node.Keyword = (node.Keyword + QStringLiteral(" «parallel»")).trimmed();
                         QVariantList entries;
                         for (const ElementId action: element.ownedElements()) {
                             const auto &actionElement = Model.element(action);
                             if (!isStateAction(actionElement))
                                 continue;
                             const std::string keyword = *actionElement.declaredKeyword();
+                            const QString form = formText(actionElement);
                             entries.append(QVariantMap{{QStringLiteral("entryId"), QString::number(action)},
                                                        {QStringLiteral("text"), q(keyword.substr(0, keyword.find(' '))) +
-                                                                                QStringLiteral(" / ") + usageTitle(actionElement)},
+                                                                                QStringLiteral(" / ") +
+                                                                                (form.isEmpty() ? usageTitle(actionElement) : form)},
                                                        {QStringLiteral("tooltip"), QString()}});
                         }
                         if (!entries.isEmpty())
@@ -245,6 +282,14 @@ namespace StructuraSystems::Client {
                             node.Keyword = QStringLiteral("«perform»");
                         else if (element.declaredKeyword())
                             node.Keyword = QStringLiteral("«") + q(*element.declaredKeyword()) + QStringLiteral("»");
+                        if (const QString form = formText(element); !form.isEmpty()) {
+                            // «send» new Show(p) to screen, «if» x > 0, «loop» charging until c
+                            const QString keyword = form.section(QLatin1Char(' '), 0, 0);
+                            const QString rest = form.section(QLatin1Char(' '), 1);
+                            node.Keyword = QStringLiteral("«") + keyword + QStringLiteral("»");
+                            node.Title = element.name().empty() ? rest : usageTitle(element) +
+                                                                         (rest.isEmpty() ? QString() : QStringLiteral(": ") + rest);
+                        }
                         break;
                 }
                 nodes.push_back(node);
@@ -548,6 +593,34 @@ namespace StructuraSystems::Client {
                 case DiagramTypes::ToolState:
                     id = Model.addElement(ElementKind::StateUsage, uniqueName("state", *start), *start);
                     break;
+                case DiagramTypes::ToolSendAction:
+                case DiagramTypes::ToolAcceptAction:
+                case DiagramTypes::ToolAssignAction:
+                case DiagramTypes::ToolTerminateAction:
+                case DiagramTypes::ToolIfAction:
+                case DiagramTypes::ToolWhileAction:
+                case DiagramTypes::ToolLoopAction:
+                case DiagramTypes::ToolForAction: {
+                    // unnamed, as usually written ("then send s to t;"); named when an arrow needs it
+                    const auto form = tool == DiagramTypes::ToolSendAction ? Diagram::ActionForm::Send
+                                      : tool == DiagramTypes::ToolAcceptAction ? Diagram::ActionForm::Accept
+                                      : tool == DiagramTypes::ToolAssignAction ? Diagram::ActionForm::Assign
+                                      : tool == DiagramTypes::ToolTerminateAction ? Diagram::ActionForm::Terminate
+                                      : tool == DiagramTypes::ToolIfAction ? Diagram::ActionForm::If
+                                      : tool == DiagramTypes::ToolWhileAction ? Diagram::ActionForm::While
+                                      : tool == DiagramTypes::ToolLoopAction ? Diagram::ActionForm::Loop
+                                                                             : Diagram::ActionForm::For;
+                    const std::string clause = form == Diagram::ActionForm::Send ? "Signal() to target"
+                                               : form == Diagram::ActionForm::Accept ? "Signal"
+                                               : form == Diagram::ActionForm::Assign ? "x := 0"
+                                               : form == Diagram::ActionForm::If || form == Diagram::ActionForm::While
+                                               ? "condition"
+                                               : form == Diagram::ActionForm::For ? "x in values" : "";
+                    id = Model.addElement(ElementKind::ActionUsage, std::string(), *start);
+                    Model.setActionForm(*id, form, clause);
+                    message = tr("Double-click it to edit what it does.");
+                    break;
+                }
                 case DiagramTypes::ToolDecision:
                 case DiagramTypes::ToolMerge:
                 case DiagramTypes::ToolFork:
@@ -594,6 +667,23 @@ namespace StructuraSystems::Client {
         const bool states = Model.element(*from).kind() == ElementKind::StateUsage &&
                             Model.element(*to).kind() == ElementKind::StateUsage;
         const RelationshipKind kind = states ? RelationshipKind::Transition : RelationshipKind::Succession;
+        // an unnamed action ("send s to t;") that is not declared right after the source gets a name to be referenced
+        const auto &targetElement = Model.element(*to);
+        const bool needsName = targetElement.name().empty() &&
+                               !Diagram::RelationshipRules::canRelate(Model, kind, *from, *to) &&
+                               (targetElement.kind() == ElementKind::ActionUsage ||
+                                targetElement.kind() == ElementKind::ControlNode);
+        if (needsName) {
+            std::string base = targetElement.kind() == ElementKind::ControlNode ? keywordOf(targetElement)
+                                                                                   : Diagram::toKeyword(targetElement.actionForm());
+            if (base.empty())
+                base = "action";
+            const std::string name = uniqueName(base, targetElement.owner());
+            try {
+                Model.rename(*to, name);
+            } catch (const std::exception &) {
+            }
+        }
         if (const auto rule = Diagram::RelationshipRules::canRelate(Model, kind, *from, *to); !rule)
             return QString::fromStdString(rule.Reason);
         runModelChange([&] { Model.addRelationship(kind, *from, *to); });

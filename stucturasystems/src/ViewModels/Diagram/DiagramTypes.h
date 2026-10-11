@@ -68,7 +68,18 @@ namespace StructuraSystems::Client::DiagramTypes {
         ToolIndividualDefinition,  ///< "individual part def"
         ToolIndividual,            ///< "individual part"
         ToolSnapshot,              ///< "snapshot" in a part / individual / occurrence
-        ToolTimeslice              ///< "timeslice" in a part / individual / occurrence
+        ToolTimeslice,             ///< "timeslice" in a part / individual / occurrence
+        // actions of phase 7 (behavior view) and connection / flow definitions (structure view)
+        ToolSendAction,            ///< "send Signal() to target;"
+        ToolAcceptAction,          ///< "accept Signal;" (also "accept after 5 [s];", "accept when c;")
+        ToolAssignAction,          ///< "assign x := 0;"
+        ToolTerminateAction,       ///< "terminate;"
+        ToolIfAction,              ///< "if condition { ... }"
+        ToolWhileAction,           ///< "while condition { ... }"
+        ToolLoopAction,            ///< "loop { ... } until condition;"
+        ToolForAction,             ///< "for x in values { ... }"
+        ToolConnectionDefinition,  ///< "connection def" (its ends: "end part a; end part b;")
+        ToolFlowDefinition         ///< "flow def" (its ends: "end port out; end port in;")
     };
     Q_ENUM_NS(Tool)
 

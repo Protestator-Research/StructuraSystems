@@ -9,6 +9,7 @@
 
 #include "SysMLElement.h"
 
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -36,6 +37,11 @@ namespace StructuraSystems::Diagram {
 
         [[nodiscard]] static RuleResult canRelate(const SemanticModel &model, RelationshipKind kind,
                                                   ElementId source, ElementId target);
+
+        /// The element before id among its siblings that a "then" in front of id continues from: the nearest one
+        /// that a succession can start at (not the never written "done", not an else branch); std::nullopt if none.
+        /// An unnamed action / control node can only be the target of a succession from there ("then fork;").
+        [[nodiscard]] static std::optional<ElementId> previousSuccessionEnd(const SemanticModel &model, ElementId id);
 
         /// Kinds offered in the popup when an arrow is dropped from source onto target.
         [[nodiscard]] static std::vector<RelationshipKind> allowedRelationshipKinds(const SemanticModel &model,

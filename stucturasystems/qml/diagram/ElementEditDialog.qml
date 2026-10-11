@@ -7,7 +7,8 @@ import StructuraSystems
 // Edits one element of the diagram: name, id (short name), type, multiplicity, value and prefixes (e.g. "derived
 // #measurable"), for actions the perform style, for constraints and calculations the expression (and assert /
 // require / assume), for requirements, use cases and verifications their text (doc); other statements kept as text
-// are edited as text.
+// are edited as text. Usages may redefine inherited features (":>> eng", "part redefines cyl[4];"), actions may
+// send, accept, assign, terminate or be an if / while / loop / for, states may be parallel.
 Dialog {
     id: dialog
 
@@ -33,6 +34,13 @@ Dialog {
         shortNameField.text = details.shortName !== undefined ? details.shortName : ""
         docArea.text = details.doc !== undefined ? details.doc : ""
         constraintRoleBox.currentIndex = Math.max(0, constraintRoleBox.roles.indexOf(details.constraintRole))
+        redefinesField.text = details.redefines !== undefined ? details.redefines : ""
+        redefinitionKeywordBox.currentIndex = details.redefinitionKeyword === "redefines" ? 1 : 0
+        nameFromRedefinitionCheck.checked = details.nameFromRedefinition === true
+        formBox.currentIndex = Math.max(0, formBox.forms.indexOf(details.actionForm))
+        clauseField.text = details.actionClause !== undefined ? details.actionClause : ""
+        untilField.text = details.until !== undefined ? details.until : ""
+        parallelCheck.checked = details.parallel === true
         errorLabel.text = ""
         open()
         if (details.isTextual) {
@@ -64,6 +72,18 @@ Dialog {
             values.doc = docArea.text
         if (details.stateAction)
             values.role = ["entry", "do", "exit", "action"][roleBox.currentIndex]
+        if (details.hasRedefinitions) {
+            values.redefines = redefinesField.text
+            values.redefinitionKeyword = redefinitionKeywordBox.currentText
+            values.nameFromRedefinition = nameFromRedefinitionCheck.checked
+        }
+        if (details.isActionUsage) {
+            values.actionForm = formBox.forms[formBox.currentIndex]
+            values.actionClause = clauseField.text
+            values.until = untilField.text
+        }
+        if (details.isState)
+            values.parallel = parallelCheck.checked
         const error = details.isTextual
                       ? controller.updateElement(elementId, { text: textArea.text })
                       : controller.updateElement(elementId, values)
@@ -123,6 +143,7 @@ Dialog {
         TextField {
             id: nameField
             visible: dialog.details.isTextual !== true
+            enabled: !nameFromRedefinitionCheck.checked
             Layout.fillWidth: true
             placeholderText: dialog.details.mayBeUnnamed === true ? qsTr("optional") : ""
             onAccepted: dialog.apply()
@@ -200,6 +221,101 @@ Dialog {
             placeholderText: "derived #measurable"
             onAccepted: dialog.apply()
             Accessible.name: qsTr("Prefixes and metadata")
+        }
+
+        // redefinition of inherited features: "part smallEng : SmallEngine redefines eng;", ":>> mass = 2000.0;"
+        Label {
+            visible: dialog.details.hasRedefinitions === true
+            text: qsTr("Redefines")
+            color: Theme.textSecondary
+        }
+        RowLayout {
+            visible: dialog.details.hasRedefinitions === true
+            Layout.fillWidth: true
+            spacing: 6
+
+            ComboBox {
+                id: redefinitionKeywordBox
+                objectName: "redefinitionKeywordBox"
+                Layout.preferredWidth: 130
+                model: [":>>", "redefines"]
+            }
+            TextField {
+                id: redefinesField
+                objectName: "redefinesField"
+                Layout.fillWidth: true
+                placeholderText: qsTr("optional, e.g. eng or Vehicle::mass")
+                onAccepted: dialog.apply()
+                Accessible.name: qsTr("Redefined features")
+            }
+        }
+        CheckBox {
+            id: nameFromRedefinitionCheck
+            objectName: "nameFromRedefinitionCheck"
+            Layout.columnSpan: 2
+            visible: dialog.details.hasRedefinitions === true
+            enabled: redefinesField.text.trim().length > 0
+            text: qsTr("No name of its own: named like the redefined feature (\"part :>> cyl[4];\")")
+        }
+
+        // what an action does: send / accept / assign / terminate, if / while / loop / for
+        Label {
+            visible: dialog.details.isActionUsage === true
+            text: qsTr("Does")
+            color: Theme.textSecondary
+        }
+        ComboBox {
+            id: formBox
+
+            readonly property var forms: ["action", "send", "accept", "assign", "terminate", "if", "while", "loop", "for"]
+
+            objectName: "actionFormBox"
+            visible: dialog.details.isActionUsage === true
+            Layout.fillWidth: true
+            model: [qsTr("nothing special (action)"), qsTr("send ... to / via ..."), qsTr("accept ... (via, at, after, when)"),
+                    qsTr("assign x := value"), qsTr("terminate"), qsTr("if condition { ... }"),
+                    qsTr("while condition { ... }"), qsTr("loop { ... } until condition"),
+                    qsTr("for x in values { ... }")]
+        }
+        Label {
+            visible: dialog.details.isActionUsage === true && formBox.currentIndex > 0 && formBox.currentIndex !== 7
+            text: formBox.currentIndex === 5 || formBox.currentIndex === 6 ? qsTr("Condition") : qsTr("What")
+            color: Theme.textSecondary
+        }
+        TextField {
+            id: clauseField
+            objectName: "actionClauseField"
+            visible: dialog.details.isActionUsage === true && formBox.currentIndex > 0 && formBox.currentIndex !== 7
+            Layout.fillWidth: true
+            font.family: Theme.monoFamily
+            placeholderText: ["", "new Show(picture) to screen", "scene : Scene via viewPort", "position := x_out",
+                              qsTr("optional, e.g. processor"), "charge < 100", "n < 10", "", "power in powerProfile"]
+                             [formBox.currentIndex]
+            onAccepted: dialog.apply()
+            Accessible.name: qsTr("What the action does")
+        }
+        Label {
+            visible: dialog.details.isActionUsage === true && (formBox.currentIndex === 6 || formBox.currentIndex === 7)
+            text: qsTr("Until")
+            color: Theme.textSecondary
+        }
+        TextField {
+            id: untilField
+            objectName: "untilField"
+            visible: dialog.details.isActionUsage === true && (formBox.currentIndex === 6 || formBox.currentIndex === 7)
+            Layout.fillWidth: true
+            font.family: Theme.monoFamily
+            placeholderText: qsTr("optional, e.g. charge >= 100")
+            onAccepted: dialog.apply()
+            Accessible.name: qsTr("Until condition")
+        }
+
+        CheckBox {
+            id: parallelCheck
+            objectName: "parallelCheck"
+            Layout.columnSpan: 2
+            visible: dialog.details.isState === true
+            text: qsTr("Parallel (its states are concurrent)")
         }
 
         // Expression of a constraint (condition) or calculation (result), written last in its body

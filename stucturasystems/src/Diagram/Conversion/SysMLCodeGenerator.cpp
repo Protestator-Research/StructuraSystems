@@ -3,6 +3,7 @@
 //
 
 #include "SysMLCodeGenerator.h"
+#include "../Semantic/RelationshipRules.h"
 
 #include <algorithm>
 #include <optional>
@@ -119,13 +120,22 @@ namespace StructuraSystems::Diagram {
             const auto &element = model.element(id);
             const bool temporal = (element.kind() == ElementKind::PartUsage || element.kind() == ElementKind::ItemUsage) &&
                                   isTemporalKeyword(element.declaredKeyword());
-            if (element.kind() != ElementKind::EventOccurrence && element.kind() != ElementKind::OccurrenceUsage && !temporal)
+            // actions and control nodes too: "then action b;", "then send s to t;", "then if c { ... }", "then fork;"
+            // (named ones only if declared so: "then b; action b;" is kept as well)
+            const bool unnamed = element.name().empty();
+            const bool actionNode = ((element.kind() == ElementKind::ActionUsage && !element.isElseBranch() &&
+                                      !element.declaredKeyword().has_value()) ||
+                                     (element.kind() == ElementKind::ControlNode && !isImplicitControl(element))) &&
+                                    (unnamed || element.declaredWithThen());
+            if (element.kind() != ElementKind::EventOccurrence && element.kind() != ElementKind::OccurrenceUsage &&
+                !temporal && !actionNode)
                 return std::nullopt;
-            const auto &siblings = model.children(element.owner());
-            const auto position = std::find(siblings.begin(), siblings.end(), id);
-            if (position == siblings.begin())
+            // the source: the nearest element before it that a succession can start at (as "then" in the text
+            // continues from the last action / event declared before)
+            const auto previousEnd = RelationshipRules::previousSuccessionEnd(model, id);
+            if (!previousEnd)
                 return std::nullopt;
-            const ElementId previous = *(position - 1);
+            const ElementId previous = *previousEnd;
             for (const auto &relationship: model.relationships()) {
                 if (isShorthand(model, relationship) && relationship.Source == previous && relationship.Target == id &&
                     relationship.Guard.empty())
@@ -182,6 +192,8 @@ namespace StructuraSystems::Diagram {
                 continue; // "then event occurrence b;"
 
             const std::string target = referenceFrom(model, owner, relationship.Target);
+            if (target.empty())
+                continue; // an unnamed action that is not declared right behind its source cannot be referenced
             if (relationship.Guard.empty())
                 out += indent(depth) + "then " + target + ";\n";
             else if (relationship.Guard == "else")
@@ -255,12 +267,17 @@ namespace StructuraSystems::Diagram {
             return;
         }
         out += indent(depth) + (mergedThen(model, id) ? "then " : "") + declaration(model, id);
+        // "verify r;" in the objective of a verification (an objective of its own if it has none),
+        // "include u;" in a use case: see generateBody
+        generateBody(model, id, depth, out);
+    }
 
+    void SysMLCodeGenerator::generateBody(const SemanticModel &model, ElementId id, std::size_t depth,
+                                          std::string &out) const {
+        const auto &element = model.element(id);
         const bool hasRelationships = std::any_of(
                 model.relationships().begin(), model.relationships().end(),
                 [&](const Relationship &relationship) { return isOwnedByContext(model, relationship, id); });
-        // "verify r;" in the objective of a verification (an objective of its own if it has none),
-        // "include u;" in a use case
         const bool verification = isVerificationKind(element.kind());
         const bool verifies = verification && hasRelationshipFrom(model, RelationshipKind::Verify, id);
         const bool objectiveWithVerifies = isObjective(element) && element.owner() != RootId &&
@@ -268,16 +285,45 @@ namespace StructuraSystems::Diagram {
                                            objectiveOf(model, element.owner()) == id &&
                                            hasRelationshipFrom(model, RelationshipKind::Verify, element.owner());
         const bool includes = isUseCaseKind(element.kind()) && hasRelationshipFrom(model, RelationshipKind::Include, id);
+        // if / while / loop / for and the else branch always have a body; "until c;" / "else ..." follow it
+        const bool control = element.kind() == ElementKind::ActionUsage &&
+                             (isControlStructure(element.actionForm()) || element.isElseBranch());
+        std::optional<ElementId> elseBranch;
+        if (element.kind() == ElementKind::ActionUsage && element.actionForm() == ActionForm::If) {
+            for (const ElementId child: element.ownedElements()) {
+                if (model.element(child).isElseBranch())
+                    elseBranch = child;
+            }
+        }
+        const auto tail = [&] {
+            if (!element.untilCondition().empty()) {
+                out += " until " + element.untilCondition() + ";\n";
+            } else if (elseBranch) {
+                const std::string branch = declaration(model, *elseBranch);
+                out += " else" + (branch.empty() ? std::string() : " " + branch);
+                generateBody(model, *elseBranch, depth, out);
+            } else {
+                out += "\n";
+            }
+        };
 
         const std::string &expression = element.expression();
-        if (element.ownedElements().empty() && !hasRelationships && expression.empty() && !verifies &&
-            !objectiveWithVerifies && !includes) {
-            out += ";\n";
+        const bool empty = std::all_of(element.ownedElements().begin(), element.ownedElements().end(),
+                                       [&](ElementId child) { return child == elseBranch; });
+        if (empty && !hasRelationships && expression.empty() && !verifies && !objectiveWithVerifies && !includes) {
+            if (control) {
+                out += " {\n" + indent(depth) + "}";
+                tail();
+            } else {
+                out += ";\n";
+            }
             return;
         }
 
         out += " {\n";
         for (const ElementId child: element.ownedElements()) {
+            if (child == elseBranch)
+                continue;
             generateElement(model, child, depth + 1, out);
             generateSuccessionsFrom(model, child, depth + 1, out);
         }
@@ -311,7 +357,8 @@ namespace StructuraSystems::Diagram {
                 start = end + 1;
             }
         }
-        out += indent(depth) + "}\n";
+        out += indent(depth) + "}";
+        tail();
     }
 
     void SysMLCodeGenerator::generateOwnedRelationships(const SemanticModel &model, ElementId owner,
@@ -348,6 +395,8 @@ namespace StructuraSystems::Diagram {
                     out += indent(depth) + "bind " + source + " = " + target + ";\n";
                     break;
                 case RelationshipKind::Flow:
+                    if (!relationship.Definition.empty())
+                        label += " : " + relationship.Definition;
                     if (!relationship.TypeName.empty())
                         label += " of " + relationship.TypeName;
                     out += indent(depth) + "flow" + label + " from " + source + " to " + target + ";\n";
@@ -406,12 +455,6 @@ namespace StructuraSystems::Diagram {
         std::string text;
         for (const auto &prefix: element.prefixes())
             text += prefix + " ";
-
-        std::string keyword = defaultKeyword(element.kind());
-        if (element.kind() == ElementKind::ActionPerformance && element.performStyle() == PerformStyle::ReferenceAction)
-            keyword = "perform";
-        if (element.declaredKeyword().has_value())
-            keyword = *element.declaredKeyword();
         const auto word = [&text](const std::string &next) {
             if (next.empty())
                 return;
@@ -419,33 +462,88 @@ namespace StructuraSystems::Diagram {
                 text += ' ';
             text += next;
         };
+        const auto redefinitions = [&] {
+            std::string list;
+            for (const auto &reference: element.redefinitions())
+                list += (list.empty() ? element.redefinitionKeyword() + " " : std::string(", ")) + reference;
+            return list;
+        };
+        const auto nameAndShortName = [&] {
+            if (!element.shortName().empty())
+                word("<" + element.shortName() + ">");
+            if (element.nameFromRedefinition())
+                word(redefinitions()); // "part redefines cyl[4]", ":>> mass = 2000.0"
+            else if (!element.name().empty())
+                word(formatName(element.name()));
+        };
+        // everything after the name: ": Type[1..*] ordered :> a, b redefines c = value"
+        const auto rest = [&] {
+            if (!element.typeName().empty())
+                text += " : " + element.typeName();
+            if (element.multiplicity().has_value())
+                text += element.multiplicity()->toString();
+            if (!element.multiplicityQualifiers().empty())
+                text += " " + element.multiplicityQualifiers();
+
+            std::string specializations;
+            for (const auto &relationship: model.relationships()) {
+                if (relationship.Kind != RelationshipKind::Specialization || relationship.Source != id)
+                    continue;
+                specializations += specializations.empty() ? " :> " : ", ";
+                specializations += specializationReference(model, id, relationship.Target);
+            }
+            for (const auto &reference: element.externalSpecializations()) {
+                specializations += specializations.empty() ? " :> " : ", ";
+                specializations += reference;
+            }
+            text += specializations;
+            if (!element.nameFromRedefinition() && !element.redefinitions().empty())
+                text += " " + redefinitions();
+            if (!element.value().empty())
+                text += " " + element.valueOperator() + " " + element.value();
+            if (element.isParallel())
+                text += " parallel";
+        };
+
+        if (element.kind() == ElementKind::ActionUsage &&
+            (element.actionForm() != ActionForm::Plain || element.isElseBranch())) {
+            // [entry|do|exit] [action name : T] send ... / if c [action name] { ... } / else [action name] { ... }
+            const bool elseBranch = element.isElseBranch(); // "else [if c] [action name] { ... }": nothing in front
+            if (elseBranch)
+                text.clear();
+            if (element.declaredKeyword().has_value() && !elseBranch) {
+                std::string keyword = *element.declaredKeyword(); // "entry action" -> "entry action a assign ..."
+                if (keyword.size() > 7 && keyword.compare(keyword.size() - 7, 7, " action") == 0)
+                    keyword.resize(keyword.size() - 7);
+                word(keyword);
+            }
+            const bool named = !element.name().empty() || !element.shortName().empty();
+            const bool inBody = element.namedInBody() || elseBranch;
+            if (!inBody && (named || !element.typeName().empty() || !element.externalSpecializations().empty() ||
+                            hasRelationshipFrom(model, RelationshipKind::Specialization, id))) {
+                word("action");
+                nameAndShortName();
+                rest();
+            }
+            if (element.actionForm() != ActionForm::Plain) {
+                word(toKeyword(element.actionForm()));
+                word(element.actionClause());
+            }
+            if (inBody && named) {
+                word("action");
+                nameAndShortName();
+            }
+            return text;
+        }
+
+        std::string keyword = defaultKeyword(element.kind());
+        if (element.kind() == ElementKind::ActionPerformance && element.performStyle() == PerformStyle::ReferenceAction)
+            keyword = "perform";
+        if (element.declaredKeyword().has_value())
+            keyword = *element.declaredKeyword();
         word(keyword);
-        if (!element.shortName().empty())
-            word("<" + element.shortName() + ">");
-        if (!element.name().empty())
-            word(formatName(element.name()));
-
-        if (!element.typeName().empty())
-            text += " : " + element.typeName();
-        if (element.multiplicity().has_value())
-            text += element.multiplicity()->toString();
-        if (!element.multiplicityQualifiers().empty())
-            text += " " + element.multiplicityQualifiers();
-
-        std::string specializations;
-        for (const auto &relationship: model.relationships()) {
-            if (relationship.Kind != RelationshipKind::Specialization || relationship.Source != id)
-                continue;
-            specializations += specializations.empty() ? " :> " : ", ";
-            specializations += specializationReference(model, id, relationship.Target);
-        }
-        for (const auto &reference: element.externalSpecializations()) {
-            specializations += specializations.empty() ? " :> " : ", ";
-            specializations += reference;
-        }
-        text += specializations;
-        if (!element.value().empty())
-            text += " " + element.valueOperator() + " " + element.value();
+        nameAndShortName();
+        rest();
         return text;
     }
 

@@ -5,6 +5,7 @@
 #include "RelationshipRules.h"
 #include "SemanticModel.h"
 
+#include <algorithm>
 #include <set>
 
 namespace StructuraSystems::Diagram {
@@ -120,6 +121,7 @@ namespace StructuraSystems::Diagram {
                 return RuleResult::denied("An interface definition can only own its ends (ports) and attributes");
             case ElementKind::ActionDefinition:
             case ElementKind::ActionUsage:
+            case ElementKind::ActionPerformance: // "perform action dynamics : D { in power = p; out x; }"
                 if (childKind == ElementKind::ActionUsage || childKind == ElementKind::ControlNode ||
                     childKind == ElementKind::ActionPerformance || childKind == ElementKind::Attribute ||
                     childKind == ElementKind::ItemUsage || childKind == ElementKind::ConstraintUsage ||
@@ -130,7 +132,7 @@ namespace StructuraSystems::Diagram {
             case ElementKind::StateUsage:
                 if (childKind == ElementKind::StateUsage || childKind == ElementKind::ActionUsage ||
                     childKind == ElementKind::ControlNode || childKind == ElementKind::Attribute ||
-                    childKind == ElementKind::ConstraintUsage || text)
+                    childKind == ElementKind::ActionPerformance || childKind == ElementKind::ConstraintUsage || text)
                     return RuleResult::ok();
                 return RuleResult::denied("A state can only own states, entry/do/exit actions and attributes");
             case ElementKind::RequirementDefinition:
@@ -177,8 +179,16 @@ namespace StructuraSystems::Diagram {
                 if (childKind == ElementKind::PartUsage || childKind == ElementKind::Attribute || text)
                     return RuleResult::ok();
                 return RuleResult::denied("An allocation definition can only own its ends and attributes");
+            case ElementKind::ConnectionDefinition:
+            case ElementKind::FlowDefinition:
+                // its ends ("end [1] part bead : TireBead;", "end port fuelOut : FuelOutPort;"), the payload of a flow
+                // ("ref :>> payload : Fuel;") and attributes
+                if (childKind == ElementKind::PartUsage || childKind == ElementKind::PortUsage ||
+                    childKind == ElementKind::ItemUsage || childKind == ElementKind::Attribute ||
+                    childKind == ElementKind::ConstraintUsage || text)
+                    return RuleResult::ok();
+                return RuleResult::denied(toString(ownerKind) + " can only own its ends, items and attributes");
             case ElementKind::Attribute:
-            case ElementKind::ActionPerformance:
             case ElementKind::EventOccurrence:
             case ElementKind::EnumerationLiteral:
             case ElementKind::ControlNode:
@@ -206,16 +216,35 @@ namespace StructuraSystems::Diagram {
             return RuleResult::denied("Source or target does not exist");
         if (source == target && kind != RelationshipKind::Transition)
             return RuleResult::denied("Source and target must be different elements");
-        // unnamed elements cannot be referenced (the source of verify / include is the body they are written in)
-        const auto named = [&](ElementId id) {
-            for (const ElementId element: model.ownershipPath(id)) {
-                if (model.element(element).name().empty())
+        // unnamed elements cannot be referenced (the source of verify / include is the body they are written in):
+        // every element on the way from the innermost common owner to an end needs a name (all of them for a
+        // specialization, written with its qualified name). A succession within one body is written right after
+        // its source ("then b;", or "then if c { ... }" in front of an unnamed target): no names needed.
+        const auto pathSource = model.ownershipPath(source);
+        const auto pathTarget = model.ownershipPath(target);
+        std::size_t common = 0;
+        if (kind != RelationshipKind::Specialization) {
+            while (common + 1 < pathSource.size() && common + 1 < pathTarget.size() && pathSource[common] == pathTarget[common])
+                ++common;
+        }
+        const auto named = [&](const std::vector<ElementId> &path) {
+            for (std::size_t i = common; i < path.size(); ++i) {
+                if (model.element(path[i]).name().empty())
                     return false;
             }
             return true;
         };
-        if (!named(target) || (!named(source) && kind != RelationshipKind::Verify && kind != RelationshipKind::Include))
+        const bool withinBody = kind == RelationshipKind::Succession &&
+                                model.element(source).owner() == model.element(target).owner();
+        if (!withinBody && (!named(pathTarget) || (!named(pathSource) && kind != RelationshipKind::Verify &&
+                                                   kind != RelationshipKind::Include)))
             return RuleResult::denied("An element without a name cannot be referenced");
+        // "then if c { ... }": an unnamed target is declared right behind its source (and only there)
+        if (withinBody && model.element(target).name().empty() && previousSuccessionEnd(model, target) != source)
+            return RuleResult::denied("An unnamed action can only follow the action declared right before it");
+        // the else branch of an if action is part of it (written behind its body)
+        if (model.element(source).isElseBranch() || model.element(target).isElseBranch())
+            return RuleResult::denied("The else branch of an if action cannot be connected");
 
         const ElementKind sourceKind = model.element(source).kind();
         const ElementKind targetKind = model.element(target).kind();
@@ -352,6 +381,26 @@ namespace StructuraSystems::Diagram {
                 return RuleResult::ok();
         }
         return RuleResult::denied("Unknown relationship kind");
+    }
+
+    std::optional<ElementId> RelationshipRules::previousSuccessionEnd(const SemanticModel &model, ElementId id) {
+        if (!model.contains(id))
+            return std::nullopt;
+        const auto &siblings = model.children(model.element(id).owner());
+        auto position = std::find(siblings.begin(), siblings.end(), id);
+        while (position != siblings.begin()) {
+            --position;
+            const auto &candidate = model.element(*position);
+            if (candidate.kind() == ElementKind::ControlNode && candidate.declaredKeyword() == "done")
+                continue; // never written
+            if (candidate.isElseBranch())
+                continue;
+            if (isSuccessionEnd(candidate.kind()) ||
+                ((candidate.kind() == ElementKind::PartUsage || candidate.kind() == ElementKind::ItemUsage) &&
+                 isTemporalKeyword(candidate.declaredKeyword())))
+                return *position;
+        }
+        return std::nullopt;
     }
 
     std::vector<RelationshipKind> RelationshipRules::allowedRelationshipKinds(const SemanticModel &model,

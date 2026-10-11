@@ -248,7 +248,7 @@ TEST_CASE("Importer: random models survive generate -> import -> generate") {
         SemanticModel model;
         std::vector<ElementId> ids;
         for (int step = 0; step < 25; ++step) {
-            const auto kind = static_cast<ElementKind>(random() % 36); // every kind but Textual
+            const auto kind = static_cast<ElementKind>(random() % 38); // every kind but Textual
             const ElementId owner = ids.empty() || random() % 3 == 0 ? RootId : ids[random() % ids.size()];
             std::string name = names[random() % std::size(names)] + std::to_string(random() % 3);
             if (mayBeUnnamed(kind) && random() % 5 == 0)
@@ -376,12 +376,75 @@ TEST_CASE("Importer: random models survive generate -> import -> generate") {
                     if (keyword > 0)
                         model.setDeclaredKeyword(id, keyword == 1 ? std::string() : std::string("feature"));
                 }
+                // phase 7: redefinitions, actions with a form (send, if, loop, ...), parallel states, connection and
+                // flow definitions with their ends
+                const auto &added = model.element(id);
+                if (kind == ElementKind::ActionUsage && random() % 3 == 0) {
+                    const ActionForm forms[] = {ActionForm::Send, ActionForm::Accept, ActionForm::Assign, ActionForm::Terminate,
+                                                ActionForm::If, ActionForm::While, ActionForm::Loop, ActionForm::For};
+                    const ActionForm form = forms[random() % std::size(forms)];
+                    const char *accepts[] = {"sig : Signal via p", "after 5 [s]", "when x > 0", "at t0"};
+                    const std::string clause = form == ActionForm::Send ? "Ping(\"a;b\") to b"
+                                               : form == ActionForm::Accept ? accepts[random() % 4]
+                                               : form == ActionForm::Assign ? "x := x + 1"
+                                               : form == ActionForm::Terminate ? (random() % 2 ? "" : "a.b")
+                                               : form == ActionForm::If ? "x > 0"
+                                               : form == ActionForm::While ? "n < 3"
+                                               : form == ActionForm::For ? "i in 1..3" : "";
+                    model.setActionForm(id, form, clause);
+                    if ((form == ActionForm::While || form == ActionForm::Loop) && random() % 2)
+                        model.setUntilCondition(id, "n >= 3");
+                    if (isControlStructure(form) && !name.empty() && random() % 2)
+                        model.setNamedInBody(id, true);
+                    if (added.declaredKeyword() == "entry action" || added.declaredKeyword() == "do action")
+                        model.setDeclaredKeyword(id, added.declaredKeyword()->substr(0, added.declaredKeyword()->find(' ')));
+                }
+                if ((kind == ElementKind::ActionUsage || kind == ElementKind::ControlNode) && random() % 2)
+                    model.setDeclaredWithThen(id, true);
+                if ((kind == ElementKind::StateUsage || kind == ElementKind::StateDefinition) && random() % 4 == 0)
+                    model.setParallel(id, true);
+                if (owner != RootId && isConnectionDefinitionKind(model.element(owner).kind()) &&
+                    (kind == ElementKind::PartUsage || kind == ElementKind::PortUsage) && random() % 2) {
+                    auto prefixes = added.prefixes();
+                    prefixes.push_back("end");
+                    if (random() % 2)
+                        prefixes.push_back(random() % 2 ? "[1]" : "[0..*]"); // "end [1] part bead : TireBead;"
+                    model.setPrefixes(id, prefixes);
+                }
+                if (kind == ElementKind::Attribute && owner != RootId &&
+                    model.element(owner).kind() == ElementKind::FlowDefinition && !name.empty() && random() % 2) {
+                    model.setPrefixes(id, {"ref"}); // "ref :>> payload : Fuel;"
+                    model.setDeclaredKeyword(id, std::string());
+                    model.setRedefinitions(id, ":>>", {SysMLCodeGenerator::formatName(name)}, true);
+                }
+                if (isUsageKind(kind) && kind != ElementKind::EnumerationLiteral && kind != ElementKind::ControlNode &&
+                    !name.empty() && added.redefinitions().empty() && added.actionForm() == ActionForm::Plain &&
+                    !(added.declaredKeyword() == std::string() && kind != ElementKind::Attribute) && random() % 5 == 0) {
+                    // "part redefines cyl[4];", ":>> mass = 2;" (named like the redefined feature) or
+                    // "part smallEng : SmallEngine redefines eng;"
+                    const bool own = random() % 2;
+                    const std::string keyword = random() % 2 ? ":>>" : "redefines";
+                    if (own)
+                        model.setRedefinitions(id, keyword, {"base", "Lib::'other one'"}, false);
+                    else
+                        model.setRedefinitions(id, keyword, {"Vehicle::" + SysMLCodeGenerator::formatName(name)}, true);
+                    if (!own && kind == ElementKind::Attribute && random() % 2)
+                        model.setDeclaredKeyword(id, std::string()); // ":>> mass = 2;"
+                }
                 if (random() % 4 == 0) {
                     const ElementId textual = model.addElement(ElementKind::Textual, "c", id == RootId ? RootId : owner);
                     const std::string statement = random() % 2 ? "assert constraint c {\n    x > 0\n}" : "// remark";
                     const auto [keyword, statementName] = SysMLTextImporter::describeStatement(statement);
                     model.setText(textual, statement, keyword, statementName);
                 }
+            } catch (const ModelError &) {
+            }
+        }
+        // else branches of if actions ("} else { ... }", "} else if c { ... }")
+        for (const ElementId id: ids) {
+            try {
+                if (model.contains(id) && random() % 2)
+                    model.setElseBranch(id, true);
             } catch (const ModelError &) {
             }
         }
@@ -442,6 +505,8 @@ TEST_CASE("Importer: random models survive generate -> import -> generate") {
                     model.setRelationshipLabel(relationship, "uses", "");
                 if (kind == RelationshipKind::Message && random() % 3 == 0)
                     model.setSequenced(relationship, true);
+                if (kind == RelationshipKind::Flow && random() % 2)
+                    model.setFlowDefinition(relationship, "FuelFlow");
                 if ((kind == RelationshipKind::Message || kind == RelationshipKind::Allocation ||
                      kind == RelationshipKind::Dependency) && random() % 3 == 0)
                     model.setRelationshipContext(relationship, RootId); // declared on the top level
@@ -614,6 +679,312 @@ TEST_CASE("Importer: allocations with refining allocations, allocation definitio
     CHECK(report.lossless());
     CHECK(partial.relationships().empty());
     CHECK(partial.element(partial.children(RootId).back()).kind() == ElementKind::Textual);
+}
+
+namespace {
+    /// The first element (in id order) with that name and kind.
+    ElementId findElement(const SemanticModel &model, const std::string &name, ElementKind kind) {
+        for (ElementId id = 1; id < 10000; ++id) {
+            if (model.contains(id) && model.element(id).name() == name && model.element(id).kind() == kind)
+                return id;
+        }
+        return RootId;
+    }
+}
+
+TEST_CASE("Importer: redefinitions, parallel states, triggers, connection and flow definitions") {
+    // "Introduction to the SysML v2 Language - Textual Notation": Redefinition, Variants, Snapshots, Local Clocks,
+    // Concurrent States, Change and Time Triggers, Connections, Flow Definitions
+    const std::string text = R"(part def Vehicle {
+    part eng : Engine;
+    attribute mass : Real;
+    ref part driver : Driver;
+}
+part def SmallVehicle :> Vehicle {
+    part smallEng : SmallEngine redefines eng;
+}
+part def BigVehicle :> Vehicle {
+    part bigEng : BigEngine :>> eng;
+}
+part def Engine {
+    part cyl : Cylinder[4..6];
+}
+part def SmallEngine :> Engine {
+    part redefines cyl[4];
+}
+part vehicle_b : Vehicle {
+    :>> mass = 2000.0;
+    ref part :>> driver;
+    snapshot :>> start {
+        :>> mass = 1500.0;
+    }
+}
+part vehicleChoice : Vehicle {
+    part redefines eng = eng::'4cylEngine';
+}
+part def Server {
+    part :>> localClock = new Time::Clock();
+    attribute today : String;
+    port requestPort;
+    state ServerBehavior {
+        state off;
+        state waiting;
+        transition first off accept Start via requestPort then waiting;
+        transition first waiting accept at new Time::Iso8601DateTime(today + "11:59:00") then off;
+        transition first waiting accept after 5 [SI::min] then waiting;
+    }
+}
+state def VehicleStates;
+state vehicleStates : VehicleStates parallel {
+    state operationalStates;
+    state healthStates {
+        in vehicle : Vehicle;
+        in controller : VehicleController;
+        do senseTemperature;
+        state normal;
+        state maintenance {
+            entry assign vehicle.maintenanceTime := vehicle.maintenanceTime + vehicle.maintenanceInterval;
+        }
+        state degraded;
+        transition first normal accept at vehicle.maintenanceTime then maintenance;
+        transition first normal accept when senseTemperature.temp > vehicle.maxTemperature do send new OverTemp() to controller then degraded;
+    }
+}
+connection def PressureSeat {
+    end [1] part bead : TireBead;
+    end [1] part mountingRim : TireMountingRim;
+}
+flow def FuelFlow {
+    ref :>> payload : Fuel;
+    end port fuelOut : FuelOutPort;
+    end port fuelIn : FuelInPort;
+}
+part vehicle : Vehicle {
+    part tankAssy : FuelTankAssembly {
+        port fuelTankPort;
+    }
+    part eng : Engine {
+        port engineFuelPort;
+    }
+    flow : FuelFlow of Fuel from tankAssy.fuelTankPort to eng.engineFuelPort;
+}
+)";
+    SemanticModel model;
+    const auto report = SysMLTextImporter::importText(text, model);
+    CHECK(report.lossless());
+    CHECK_EQ(SysMLCodeGenerator().generate(model), text);
+    for (ElementId id = 1; id < 10000; ++id)
+        CHECK(!model.contains(id) || model.element(id).kind() != ElementKind::Textual);
+
+    const auto &smallEngine = model.element(findElement(model, "smallEng", ElementKind::PartUsage));
+    CHECK(smallEngine.redefinitions() == std::vector<std::string>{"eng"});
+    CHECK_EQ(smallEngine.redefinitionKeyword(), std::string("redefines"));
+    CHECK(!smallEngine.nameFromRedefinition());
+    CHECK_EQ(smallEngine.typeName(), std::string("SmallEngine"));
+    const auto &bigEngine = model.element(findElement(model, "bigEng", ElementKind::PartUsage));
+    CHECK_EQ(bigEngine.redefinitionKeyword(), std::string(":>>"));
+    // "part redefines cyl[4];": named like the redefined feature
+    const auto &cylinders = model.element(model.children(findElement(model, "SmallEngine", ElementKind::PartDefinition)).front());
+    CHECK_EQ(cylinders.name(), std::string("cyl"));
+    CHECK(cylinders.nameFromRedefinition());
+    CHECK(cylinders.multiplicity() == std::optional<Multiplicity>(Multiplicity::exactly(4)));
+    // ":>> mass = 2000.0;": an attribute without keyword
+    const auto &mass = model.element(model.children(findElement(model, "vehicle_b", ElementKind::PartUsage)).front());
+    CHECK(mass.kind() == ElementKind::Attribute);
+    CHECK_EQ(mass.name(), std::string("mass"));
+    CHECK(mass.declaredKeyword() == std::optional<std::string>(std::string()));
+    CHECK_EQ(mass.value(), std::string("2000.0"));
+    const auto &clock = model.element(findElement(model, "localClock", ElementKind::PartUsage));
+    CHECK(clock.nameFromRedefinition());
+    CHECK_EQ(clock.value(), std::string("new Time::Clock()"));
+
+    CHECK(model.element(findElement(model, "vehicleStates", ElementKind::StateUsage)).isParallel());
+    const auto &perform = model.element(findElement(model, "senseTemperature", ElementKind::ActionPerformance));
+    CHECK(perform.declaredKeyword() == std::optional<std::string>("do"));
+    const ElementId maintenance = findElement(model, "maintenance", ElementKind::StateUsage);
+    const auto &entry = model.element(model.children(maintenance).front());
+    CHECK(entry.actionForm() == ActionForm::Assign);
+    CHECK(entry.declaredKeyword() == std::optional<std::string>("entry"));
+    int timeTriggers = 0;
+    for (const auto &relationship: model.relationships())
+        timeTriggers += relationship.Kind == RelationshipKind::Transition &&
+                        (relationship.Trigger.rfind("at ", 0) == 0 || relationship.Trigger.rfind("after ", 0) == 0 ||
+                         relationship.Trigger.rfind("when ", 0) == 0);
+    CHECK_EQ(timeTriggers, 4);
+
+    const ElementId seat = findElement(model, "PressureSeat", ElementKind::ConnectionDefinition);
+    CHECK(seat != RootId);
+    CHECK(model.element(model.children(seat).front()).prefixes() == (std::vector<std::string>{"end", "[1]"}));
+    const ElementId fuelFlow = findElement(model, "FuelFlow", ElementKind::FlowDefinition);
+    const auto &payload = model.element(model.children(fuelFlow).front());
+    CHECK_EQ(payload.name(), std::string("payload"));
+    CHECK(payload.prefixes() == std::vector<std::string>{"ref"});
+    bool flow = false;
+    for (const auto &relationship: model.relationships()) {
+        if (relationship.Kind == RelationshipKind::Flow) {
+            flow = true;
+            CHECK_EQ(relationship.Definition, std::string("FuelFlow"));
+            CHECK_EQ(relationship.TypeName, std::string("Fuel"));
+        }
+    }
+    CHECK(flow);
+
+    // a new name of its own: written with the name and the redefinition
+    model.rename(cylinders.id(), "cylinders");
+    CHECK(SysMLCodeGenerator().generate(model).find("part cylinders[4] redefines cyl;") != std::string::npos);
+}
+
+TEST_CASE("Importer: send, accept, assign, terminate, if, while, loop and for actions") {
+    // "Introduction to the SysML v2 Language - Textual Notation": Control Structures, Terminate Actions, Assignment
+    // Actions, Asynchronous Messaging, Opaque Actions
+    const std::string text = R"(action def ChargeBattery {
+    loop action charging {
+        action monitor : MonitorBattery {
+            out charge;
+        }
+        then if monitor.charge < 100 {
+            action addCharge : AddCharge {
+                in charge = monitor.charge;
+            }
+        }
+    } until charging.monitor.charge >= 100;
+    then action endCharging : EndCharging;
+    then done;
+}
+action def MonitoredActivity {
+    first start;
+    then fork;
+    then performCriticalActivity;
+    then waitForTimeOut;
+    action performCriticalActivity {
+        perform monitorCriticalActivity;
+        perform criticalActivity;
+        then terminate;
+    }
+    then stop;
+    action waitForTimeOut;
+    then stop;
+    action stop terminate;
+}
+action terminateProcessing {
+    in processor : Processor;
+    terminate processor.workflowProcess;
+    terminate processor;
+}
+action def ComputeMotion {
+    in attribute powerProfile[*] :> ISQ::power;
+    out attribute positions[*] :> ISQ::length := ( );
+    private attribute position := initialPosition;
+    for vehiclePower in powerProfile {
+        perform action dynamics : StraightLineDynamics {
+            in power = vehiclePower;
+            out x_out;
+        }
+        then assign position := dynamics.x_out;
+        then assign positions := positions->including(position);
+    }
+}
+part camera : Camera {
+    port viewPort;
+    port displayPort;
+    action takePicture : TakePicture {
+        action trigger accept scene : Scene via viewPort;
+        then action focus : Focus {
+            in scene = trigger.scene;
+            out image;
+        }
+        flow from focus.image to shoot.image;
+        then action shoot : Shoot {
+            in image;
+            out picture;
+        }
+        then send new Show(shoot.picture) via displayPort;
+    }
+}
+action def Decide {
+    in x : Real;
+    if x > 1 {
+        action big;
+    } else if x < 0 {
+        action negative;
+    } else action other {
+        action rest;
+    }
+    while x < 10 action counting {
+        assign x := x + 1;
+    } until x == 5;
+}
+action def UpdateSensors {
+    in sensors : Sensor[*];
+    language "Alf"
+        /*
+         * for (sensor in sensors) {
+         *      if (sensor.ready) {
+         *             Update(sensor);
+         *      }
+         * }
+         */
+}
+)";
+    SemanticModel model;
+    const auto report = SysMLTextImporter::importText(text, model);
+    CHECK(report.lossless());
+    CHECK_EQ(SysMLCodeGenerator().generate(model), text);
+
+    const ElementId charging = findElement(model, "charging", ElementKind::ActionUsage);
+    CHECK(model.element(charging).actionForm() == ActionForm::Loop);
+    CHECK(model.element(charging).namedInBody());
+    CHECK_EQ(model.element(charging).untilCondition(), std::string("charging.monitor.charge >= 100"));
+    const ElementId condition = model.children(charging).back();
+    CHECK(model.element(condition).actionForm() == ActionForm::If);
+    CHECK(model.element(condition).name().empty());
+    CHECK_EQ(model.element(condition).actionClause(), std::string("monitor.charge < 100"));
+    bool thenIf = false;
+    for (const auto &relationship: model.relationships())
+        thenIf = thenIf || (relationship.Kind == RelationshipKind::Succession && relationship.Target == condition);
+    CHECK(thenIf); // "then if ...": a succession from monitor to the if action
+
+    const ElementId monitored = findElement(model, "MonitoredActivity", ElementKind::ActionDefinition);
+    int forks = 0;
+    for (const ElementId child: model.children(monitored))
+        forks += model.element(child).kind() == ElementKind::ControlNode && model.element(child).name().empty();
+    CHECK_EQ(forks, 1); // "then fork;"
+    const auto &stop = model.element(findElement(model, "stop", ElementKind::ActionUsage));
+    CHECK(stop.actionForm() == ActionForm::Terminate);
+    CHECK(stop.actionClause().empty());
+    const auto &trigger = model.element(findElement(model, "trigger", ElementKind::ActionUsage));
+    CHECK(trigger.actionForm() == ActionForm::Accept);
+    CHECK_EQ(trigger.actionClause(), std::string("scene : Scene via viewPort"));
+    const auto &dynamics = model.element(findElement(model, "dynamics", ElementKind::ActionPerformance));
+    CHECK_EQ(dynamics.ownedElements().size(), std::size_t(2)); // in power, out x_out
+
+    // if / else if / else
+    const ElementId decide = findElement(model, "Decide", ElementKind::ActionDefinition);
+    const ElementId first = model.children(decide)[1];
+    CHECK(model.element(first).actionForm() == ActionForm::If);
+    const ElementId elseIf = model.children(first).back();
+    CHECK(model.element(elseIf).isElseBranch());
+    CHECK(model.element(elseIf).actionForm() == ActionForm::If);
+    const ElementId last = model.children(elseIf).back();
+    CHECK(model.element(last).isElseBranch());
+    CHECK_EQ(model.element(last).name(), std::string("other"));
+    const auto &counting = model.element(findElement(model, "counting", ElementKind::ActionUsage));
+    CHECK(counting.actionForm() == ActionForm::While);
+    CHECK_EQ(counting.actionClause(), std::string("x < 10"));
+    CHECK_EQ(counting.untilCondition(), std::string("x == 5"));
+
+    // an else branch cannot be connected, an unnamed action only follows the one before it
+    CHECK(!RelationshipRules::canRelate(model, RelationshipKind::Succession, model.children(decide)[0], last));
+    CHECK_THROWS_AS(model.setActionForm(last, ActionForm::Send, "s to t"), ModelError);
+    CHECK_THROWS_AS(model.setActionForm(first, ActionForm::If, "x; y"), ModelError);
+    // the form edited: written back accordingly
+    model.setActionForm(first, ActionForm::While, "x > 1");
+    CHECK(!model.element(elseIf).isElseBranch()); // no else for a while action
+    const std::string edited = SysMLCodeGenerator().generate(model);
+    CHECK(edited.find("    while x > 1 {\n") != std::string::npos);
+    SemanticModel again;
+    CHECK(SysMLTextImporter::importText(edited, again).lossless());
+    CHECK_EQ(SysMLCodeGenerator().generate(again), edited);
 }
 
 TEST_CASE("Importer: snapshots, time slices, individuals, variations and analysis cases") {

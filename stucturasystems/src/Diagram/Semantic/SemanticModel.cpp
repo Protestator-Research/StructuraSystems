@@ -9,6 +9,55 @@
 
 namespace StructuraSystems::Diagram {
 
+    namespace {
+        /// Last segment of a reference as written ("a::'b c'.d" -> "d", "'x y'" -> "x y").
+        std::string lastSegment(const std::string &reference) {
+            std::string segment;
+            bool quoted = false;
+            for (std::size_t i = 0; i < reference.size(); ++i) {
+                const char c = reference[i];
+                if (quoted) {
+                    if (c == '\\' && i + 1 < reference.size())
+                        segment += reference[++i];
+                    else if (c == '\'')
+                        quoted = false;
+                    else
+                        segment += c;
+                } else if (c == '\'') {
+                    quoted = true;
+                } else if (c == '.' || c == ':') {
+                    if (c == ':' && i + 1 < reference.size() && reference[i + 1] == ':')
+                        ++i;
+                    segment.clear();
+                } else if (c != ' ') {
+                    segment += c;
+                }
+            }
+            return segment;
+        }
+
+        /// ';', '{', '}' or a line break outside of string literals: the text would end its statement.
+        bool breaksStatement(const std::string &text) {
+            char quote = 0;
+            for (std::size_t i = 0; i < text.size(); ++i) {
+                const char c = text[i];
+                if (c == '\n' || c == '\r')
+                    return true;
+                if (quote) {
+                    if (c == '\\')
+                        ++i;
+                    else if (c == quote)
+                        quote = 0;
+                } else if (c == '"' || c == '\'') {
+                    quote = c;
+                } else if (c == ';' || c == '{' || c == '}') {
+                    return true;
+                }
+            }
+            return quote != 0;
+        }
+    }
+
     // --- elements -----------------------------------------------------------------------
 
     ElementId SemanticModel::addElement(ElementKind kind, const std::string &name, ElementId owner) {
@@ -86,6 +135,8 @@ namespace StructuraSystems::Diagram {
         }
         ensureUniqueSiblingName(target.Owner, name, id, target.Kind);
         target.Name = name;
+        if (target.NameFromRedefinition && (target.Redefinitions.empty() || lastSegment(target.Redefinitions.front()) != name))
+            target.NameFromRedefinition = false; // a name of its own now: "part newName :>> cyl;"
         notify(ModelChange::Type::ElementChanged, id);
     }
 
@@ -237,6 +288,141 @@ namespace StructuraSystems::Diagram {
         notify(ModelChange::Type::ElementChanged, id);
     }
 
+    void SemanticModel::setRedefinitions(ElementId id, const std::string &keyword, std::vector<std::string> references,
+                                         bool nameFromRedefinition) {
+        auto &target = mutableElement(id);
+        if (!references.empty() && (!isUsageKind(target.Kind) || target.Kind == ElementKind::EnumerationLiteral ||
+                                    target.Kind == ElementKind::ControlNode))
+            throw ModelError(toString(target.Kind) + " cannot redefine");
+        if (!references.empty() && keyword != ":>>" && keyword != "redefines")
+            throw ModelError("Invalid redefinition keyword '" + keyword + "' (:>>, redefines)");
+        for (const auto &reference: references) {
+            if (reference.empty() || breaksStatement(reference) || reference.find(',') != std::string::npos)
+                throw ModelError("Invalid redefined feature '" + reference + "'");
+        }
+        if (references.empty())
+            nameFromRedefinition = false;
+        if (nameFromRedefinition && lastSegment(references.front()) != target.Name)
+            throw ModelError("The name must be the one of the redefined feature");
+        const std::string newKeyword = references.empty() ? std::string() : keyword;
+        if (target.Redefinitions == references && target.RedefinitionKeyword == newKeyword &&
+            target.NameFromRedefinition == nameFromRedefinition)
+            return;
+        target.Redefinitions = std::move(references);
+        target.RedefinitionKeyword = newKeyword;
+        target.NameFromRedefinition = nameFromRedefinition;
+        notify(ModelChange::Type::ElementChanged, id);
+    }
+
+    void SemanticModel::setActionForm(ElementId id, ActionForm form, const std::string &clause) {
+        auto &target = mutableElement(id);
+        if (target.Kind != ElementKind::ActionUsage && form != ActionForm::Plain)
+            throw ModelError(toString(target.Kind) + " has no action form");
+        const std::string text = form == ActionForm::Plain ? std::string() : clause;
+        if (breaksStatement(text))
+            throw ModelError("'" + text + "' must be one line without ; { }");
+        if (text.empty() && form != ActionForm::Plain && form != ActionForm::Loop && form != ActionForm::Terminate)
+            throw ModelError(toKeyword(form) + " needs " + (form == ActionForm::Send ? "what is sent"
+                                                            : form == ActionForm::Accept ? "what is accepted"
+                                                            : form == ActionForm::Assign ? "\"feature := value\""
+                                                            : form == ActionForm::For ? "\"variable in values\""
+                                                                                      : "a condition"));
+        if (form == ActionForm::Loop && !text.empty())
+            throw ModelError("loop has no condition (use while or until)");
+        if (target.ElseBranch && form != ActionForm::Plain && form != ActionForm::If)
+            throw ModelError("An else branch is a body or another if action (\"else if c { ... }\")");
+        if (target.Form == form && target.ActionClause == text)
+            return;
+        target.Form = form;
+        target.ActionClause = text;
+        if (form != ActionForm::Loop && form != ActionForm::While)
+            target.Until.clear();
+        if (!isControlStructure(form) && !target.ElseBranch)
+            target.NamedInBody = false;
+        if (form != ActionForm::If) {
+            for (const ElementId child: target.OwnedElements) {
+                auto &branch = mutableElement(child);
+                if (branch.ElseBranch) {
+                    branch.ElseBranch = false;
+                    if (!isControlStructure(branch.Form))
+                        branch.NamedInBody = false;
+                    notify(ModelChange::Type::ElementChanged, child);
+                }
+            }
+        }
+        notify(ModelChange::Type::ElementChanged, id);
+    }
+
+    void SemanticModel::setUntilCondition(ElementId id, const std::string &condition) {
+        auto &target = mutableElement(id);
+        if (!condition.empty() && target.Form != ActionForm::Loop && target.Form != ActionForm::While)
+            throw ModelError("Only loop and while actions have an until condition");
+        if (breaksStatement(condition))
+            throw ModelError("'" + condition + "' must be one line without ; { }");
+        if (target.Until == condition)
+            return;
+        target.Until = condition;
+        notify(ModelChange::Type::ElementChanged, id);
+    }
+
+    void SemanticModel::setElseBranch(ElementId id, bool elseBranch) {
+        auto &target = mutableElement(id);
+        if (elseBranch) {
+            if (target.Kind != ElementKind::ActionUsage || target.Owner == RootId ||
+                element(target.Owner).Form != ActionForm::If)
+                throw ModelError("Only an action in an if action can be its else branch");
+            if (target.Form != ActionForm::Plain && target.Form != ActionForm::If)
+                throw ModelError("An else branch is a body or another if action (\"else if c { ... }\")");
+            if (!target.Prefixes.empty() || target.DeclaredKeyword || !target.TypeName.empty() ||
+                !target.Redefinitions.empty() || !target.ExternalSpecializations.empty())
+                throw ModelError("An else branch has a name at most (\"else action name { ... }\")");
+            for (const auto &relationship: Relationships) {
+                if (relationship.Source == id || relationship.Target == id)
+                    throw ModelError("The else branch of an if action cannot be connected");
+            }
+            for (const ElementId sibling: children(target.Owner)) {
+                if (sibling != id && element(sibling).ElseBranch)
+                    throw ModelError("The if action already has an else branch");
+            }
+        }
+        if (target.ElseBranch == elseBranch)
+            return;
+        target.ElseBranch = elseBranch;
+        if (!elseBranch && !isControlStructure(target.Form))
+            target.NamedInBody = false;
+        notify(ModelChange::Type::ElementChanged, id);
+    }
+
+    void SemanticModel::setNamedInBody(ElementId id, bool namedInBody) {
+        auto &target = mutableElement(id);
+        if (namedInBody && !isControlStructure(target.Form) && !target.ElseBranch)
+            throw ModelError("Only if, while, loop, for and else name their body");
+        if (target.NamedInBody == namedInBody)
+            return;
+        target.NamedInBody = namedInBody;
+        notify(ModelChange::Type::ElementChanged, id);
+    }
+
+    void SemanticModel::setDeclaredWithThen(ElementId id, bool declaredWithThen) {
+        auto &target = mutableElement(id);
+        if (declaredWithThen && target.Kind != ElementKind::ActionUsage && target.Kind != ElementKind::ControlNode)
+            throw ModelError("Only actions and control nodes are declared with 'then'");
+        if (target.DeclaredWithThen == declaredWithThen)
+            return;
+        target.DeclaredWithThen = declaredWithThen;
+        notify(ModelChange::Type::ElementChanged, id);
+    }
+
+    void SemanticModel::setParallel(ElementId id, bool parallel) {
+        auto &target = mutableElement(id);
+        if (parallel && target.Kind != ElementKind::StateUsage && target.Kind != ElementKind::StateDefinition)
+            throw ModelError("Only states can be parallel");
+        if (target.Parallel == parallel)
+            return;
+        target.Parallel = parallel;
+        notify(ModelChange::Type::ElementChanged, id);
+    }
+
     void SemanticModel::setText(ElementId id, const std::string &text, const std::string &keyword, const std::string &name) {
         auto &target = mutableElement(id);
         if (target.Kind != ElementKind::Textual)
@@ -261,20 +447,40 @@ namespace StructuraSystems::Diagram {
         oldSiblings.erase(std::remove(oldSiblings.begin(), oldSiblings.end(), id), oldSiblings.end());
         mutableChildren(newOwner).push_back(id);
         target.Owner = newOwner;
+        if (target.ElseBranch) { // the else branch of its old if action only
+            target.ElseBranch = false;
+            if (!isControlStructure(target.Form))
+                target.NamedInBody = false;
+        }
 
         // A connection/flow between an element and its new (indirect) owner is no longer valid.
         std::vector<RelationshipId> invalid;
-        const auto named = [&](ElementId end) {
-            for (const ElementId element: ownershipPath(end)) {
-                if (this->element(element).name().empty())
-                    return false;
-            }
-            return true;
-        };
         for (const auto &relationship: Relationships) {
-            // ends inside an unnamed element ("objective { ... }") cannot be referenced
-            if (!named(relationship.Target) || (!named(relationship.Source) && relationship.Kind != RelationshipKind::Verify &&
-                                                relationship.Kind != RelationshipKind::Include)) {
+            // the ends are referenced from where the relationship is written: from there on, every element on the
+            // way to an end needs a name (not so below an unnamed "objective { ... }" or "if c { ... }" around it)
+            const bool shorthand = relationship.Kind == RelationshipKind::Succession && relationship.Name.empty() &&
+                                   element(relationship.Source).owner() == element(relationship.Target).owner();
+            const auto pathSource = ownershipPath(relationship.Source);
+            const auto pathTarget = ownershipPath(relationship.Target);
+            std::size_t common = 0;
+            if (relationship.Context) {
+                const auto contextPath = *relationship.Context == RootId ? std::vector<ElementId>()
+                                                                          : ownershipPath(*relationship.Context);
+                common = contextPath.size();
+            } else {
+                while (common + 1 < pathSource.size() && common + 1 < pathTarget.size() &&
+                       pathSource[common] == pathTarget[common])
+                    ++common;
+            }
+            const auto named = [&](const std::vector<ElementId> &path) {
+                for (std::size_t i = std::min(common, path.size()); i < path.size(); ++i) {
+                    if (element(path[i]).name().empty())
+                        return false;
+                }
+                return true;
+            };
+            if (!shorthand && (!named(pathTarget) || (!named(pathSource) && relationship.Kind != RelationshipKind::Verify &&
+                                                       relationship.Kind != RelationshipKind::Include))) {
                 invalid.push_back(relationship.Id);
                 continue;
             }
@@ -362,7 +568,7 @@ namespace StructuraSystems::Diagram {
         if (const auto rule = RelationshipRules::canRelate(*this, kind, source, target); !rule)
             throw ModelError(rule.Reason);
         const RelationshipId id = NextRelationshipId++;
-        Relationships.push_back(Relationship{id, kind, source, target, {}, {}, {}, {}, {}, false, std::nullopt, std::nullopt});
+        Relationships.push_back(Relationship{id, kind, source, target, {}, {}, {}, {}, {}, false, std::nullopt, {}, std::nullopt});
         notify(ModelChange::Type::RelationshipAdded, id);
         return id;
     }
@@ -426,6 +632,18 @@ namespace StructuraSystems::Diagram {
             (!contains(*context) || element(*context).kind() == ElementKind::Textual || *context == it->Source ||
              *context == it->Target))
             throw ModelError("A relationship cannot be declared there");
+        if (context) {
+            // the ends are referenced from there: every element on the way needs a name
+            for (const ElementId end: {it->Source, it->Target}) {
+                const auto path = ownershipPath(end);
+                auto from = std::find(path.begin(), path.end(), *context);
+                from = from == path.end() ? path.begin() : from + 1;
+                for (auto step = from; step != path.end(); ++step) {
+                    if (element(*step).name().empty())
+                        throw ModelError("An element without a name cannot be referenced from there");
+                }
+            }
+        }
         if (it->Context == context)
             return;
         it->Context = context;
@@ -472,6 +690,9 @@ namespace StructuraSystems::Diagram {
                 throw ModelError(toString(it->Kind) + " has no name or type");
             return;
         }
+        if (it->Kind == RelationshipKind::Succession && !name.empty() &&
+            (element(it->Source).name().empty() || element(it->Target).name().empty()))
+            throw ModelError("A named succession needs named ends (\"succession s first a then b;\")");
         for (const std::string *text: {&name, &typeName}) {
             if (text->find_first_of(" \t\r\n;{}=,") != std::string::npos &&
                 !(text->size() > 1 && text->front() == '\'' && text->back() == '\''))
@@ -481,6 +702,22 @@ namespace StructuraSystems::Diagram {
             return;
         it->Name = name;
         it->TypeName = typeName;
+        notify(ModelChange::Type::RelationshipChanged, id);
+    }
+
+    void SemanticModel::setFlowDefinition(RelationshipId id, const std::string &definition) {
+        auto it = std::find_if(Relationships.begin(), Relationships.end(),
+                               [id](const Relationship &relationship) { return relationship.Id == id; });
+        if (it == Relationships.end())
+            throw ModelError("Unknown relationship id " + std::to_string(id));
+        if (it->Kind != RelationshipKind::Flow && !definition.empty())
+            throw ModelError("Only flows have a flow definition");
+        if (definition.find_first_of(" \t\r\n;{}=,") != std::string::npos &&
+            !(definition.size() > 1 && definition.front() == '\'' && definition.back() == '\''))
+            throw ModelError("Invalid flow definition '" + definition + "'");
+        if (it->Definition == definition)
+            return;
+        it->Definition = definition;
         notify(ModelChange::Type::RelationshipChanged, id);
     }
 
@@ -495,6 +732,9 @@ namespace StructuraSystems::Diagram {
             throw ModelError(toString(it->Kind) + " has no guard, trigger or effect");
         if (!transition && (!trigger.empty() || !effect.empty()))
             throw ModelError("A succession has a guard only");
+        if (!transition && guard.find_first_not_of(" \t\r\n") != std::string::npos &&
+            element(it->Target).name().empty())
+            throw ModelError("A succession to an unnamed action has no guard (\"then if c { ... }\" follows its source)");
         for (const std::string *text: {&guard, &trigger, &effect}) {
             if (text->find_first_of(";{}") != std::string::npos)
                 throw ModelError("'" + *text + "' must not contain ; { }");

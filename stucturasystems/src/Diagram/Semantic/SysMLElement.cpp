@@ -111,6 +111,10 @@ namespace StructuraSystems::Diagram {
                 return "AnalysisDefinition";
             case ElementKind::AnalysisUsage:
                 return "AnalysisUsage";
+            case ElementKind::ConnectionDefinition:
+                return "ConnectionDefinition";
+            case ElementKind::FlowDefinition:
+                return "FlowDefinition";
             case ElementKind::Textual:
                 return "Textual";
         }
@@ -191,8 +195,36 @@ namespace StructuraSystems::Diagram {
                 return "analysis def";
             case ElementKind::AnalysisUsage:
                 return "analysis";
+            case ElementKind::ConnectionDefinition:
+                return "connection def";
+            case ElementKind::FlowDefinition:
+                return "flow def";
             case ElementKind::Textual:
                 break;
+        }
+        return {};
+    }
+
+    std::string toKeyword(ActionForm form) {
+        switch (form) {
+            case ActionForm::Plain:
+                break;
+            case ActionForm::Send:
+                return "send";
+            case ActionForm::Accept:
+                return "accept";
+            case ActionForm::Assign:
+                return "assign";
+            case ActionForm::Terminate:
+                return "terminate";
+            case ActionForm::If:
+                return "if";
+            case ActionForm::While:
+                return "while";
+            case ActionForm::Loop:
+                return "loop";
+            case ActionForm::For:
+                return "for";
         }
         return {};
     }

@@ -331,6 +331,16 @@ Pane {
                       ? qsTr("An interaction: its parts are the lifelines of the sequence view")
                       : tile.tool === DiagramTypes.ToolAllocationDefinition
                       ? qsTr("An allocation definition with its two ends; draw «allocate» arrows between usages")
+                      : tile.tool === DiagramTypes.ToolConnectionDefinition
+                      ? qsTr("A connection definition with its two ends (end part); its usages connect parts")
+                      : tile.tool === DiagramTypes.ToolFlowDefinition
+                      ? qsTr("A flow definition with its two ends (end port) and an optional payload (ref :>> payload : T)")
+                      : tile.tool === DiagramTypes.ToolSendAction || tile.tool === DiagramTypes.ToolAcceptAction ||
+                        tile.tool === DiagramTypes.ToolAssignAction || tile.tool === DiagramTypes.ToolTerminateAction
+                      ? qsTr("Drop onto the canvas: an action that sends, accepts, assigns or terminates - double-click it to edit")
+                      : tile.tool === DiagramTypes.ToolIfAction || tile.tool === DiagramTypes.ToolWhileAction ||
+                        tile.tool === DiagramTypes.ToolLoopAction || tile.tool === DiagramTypes.ToolForAction
+                      ? qsTr("Drop onto the canvas: a control structure; its body is shown when you choose it above")
                       : tile.tool === DiagramTypes.ToolPort
                       ? qsTr("Drop onto a part (drawn on its border), a port, a port definition or an interface definition (an end)")
                       : tile.tool === DiagramTypes.ToolItem
@@ -800,6 +810,22 @@ Pane {
                     label: qsTr("Event")
                     symbol: 20
                 }
+                Tile {
+                    owner: palette
+                    tool: DiagramTypes.ToolConnectionDefinition
+                    visible: palette.structure
+                    label: qsTr("Connection def")
+                    symbol: 10
+                    glyph: "⟷"
+                }
+                Tile {
+                    owner: palette
+                    tool: DiagramTypes.ToolFlowDefinition
+                    visible: palette.structure
+                    label: qsTr("Flow def")
+                    symbol: 10
+                    glyph: "⇢"
+                }
             }
 
             SectionHeader {
@@ -973,6 +999,28 @@ Pane {
                     visible: !palette.stateMachine
                     label: qsTr("Done")
                     symbol: 16
+                }
+                // actions that do something specific (written unnamed: "then send s to t;"), control structures
+                Repeater {
+                    model: palette.stateMachine ? [] : [
+                        { tool: DiagramTypes.ToolSendAction, label: qsTr("Send"), glyph: "↗" },
+                        { tool: DiagramTypes.ToolAcceptAction, label: qsTr("Accept"), glyph: "↘" },
+                        { tool: DiagramTypes.ToolAssignAction, label: qsTr("Assign"), glyph: ":=" },
+                        { tool: DiagramTypes.ToolTerminateAction, label: qsTr("Terminate"), glyph: "⊗" },
+                        { tool: DiagramTypes.ToolIfAction, label: qsTr("If"), glyph: "if" },
+                        { tool: DiagramTypes.ToolWhileAction, label: qsTr("While"), glyph: "wh" },
+                        { tool: DiagramTypes.ToolLoopAction, label: qsTr("Loop"), glyph: "↻" },
+                        { tool: DiagramTypes.ToolForAction, label: qsTr("For"), glyph: "for" }
+                    ]
+
+                    Tile {
+                        required property var modelData
+                        owner: palette
+                        tool: modelData.tool
+                        label: modelData.label
+                        symbol: 4
+                        glyph: modelData.glyph
+                    }
                 }
             }
 

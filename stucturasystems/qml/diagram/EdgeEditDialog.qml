@@ -24,6 +24,7 @@ Dialog {
         triggerField.text = details.trigger !== undefined ? details.trigger : ""
         effectField.text = details.effect !== undefined ? details.effect : ""
         sequencedBox.checked = details.sequenced === true
+        definitionField.text = details.definition !== undefined ? details.definition : ""
         errorLabel.text = ""
         open()
         nameField.forceActiveFocus()
@@ -32,7 +33,8 @@ Dialog {
     function apply() {
         const error = controller.updateEdge(edgeKey, { name: nameField.text, typeName: typeField.text,
                                                        guard: guardField.text, trigger: triggerField.text,
-                                                       effect: effectField.text, sequenced: sequencedBox.checked })
+                                                       effect: effectField.text, sequenced: sequencedBox.checked,
+                                                       definition: definitionField.text })
         if (error.length > 0)
             errorLabel.text = error
         else
@@ -72,6 +74,20 @@ Dialog {
             id: nameField
             Layout.fillWidth: true
             placeholderText: qsTr("optional")
+            onAccepted: dialog.apply()
+        }
+        // "flow : FuelFlow of Fuel from ...": the flow definition
+        Label {
+            visible: dialog.details.hasDefinition === true
+            text: qsTr("Definition")
+            color: Theme.textSecondary
+        }
+        TextField {
+            id: definitionField
+            objectName: "flowDefinitionField"
+            visible: dialog.details.hasDefinition === true
+            Layout.fillWidth: true
+            placeholderText: qsTr("optional, e.g. FuelFlow")
             onAccepted: dialog.apply()
         }
         Label {

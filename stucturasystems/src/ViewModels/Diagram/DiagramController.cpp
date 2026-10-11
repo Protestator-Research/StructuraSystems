@@ -45,7 +45,7 @@ namespace StructuraSystems::Client {
                    kind == ElementKind::StateDefinition || kind == ElementKind::RequirementDefinition ||
                    kind == ElementKind::UseCaseDefinition || kind == ElementKind::VerificationDefinition ||
                    kind == ElementKind::OccurrenceDefinition || kind == ElementKind::AllocationDefinition ||
-                   kind == ElementKind::AnalysisDefinition;
+                   kind == ElementKind::AnalysisDefinition || Diagram::isConnectionDefinitionKind(kind);
         }
 
         /// "objective { ... }" of a use case / verification (shown in its compartment, not as node).
@@ -300,6 +300,10 @@ namespace StructuraSystems::Client {
                     return QObject::tr("analysis definition");
                 case ElementKind::AnalysisUsage:
                     return QObject::tr("analysis");
+                case ElementKind::ConnectionDefinition:
+                    return QObject::tr("connection definition");
+                case ElementKind::FlowDefinition:
+                    return QObject::tr("flow definition");
                 case ElementKind::Textual:
                     return QObject::tr("statement");
             }
@@ -419,9 +423,10 @@ namespace StructuraSystems::Client {
 
         bool isNodeElement(const Diagram::SemanticModel &model, ElementId id) {
             const auto &element = model.element(id);
-            // the ends of an allocation definition are entries of its compartment "ends"
+            // the ends of an allocation / connection / flow definition are entries of its compartment "ends"
             if (element.kind() == ElementKind::PartUsage && element.owner() != RootId &&
-                model.element(element.owner()).kind() == ElementKind::AllocationDefinition)
+                (model.element(element.owner()).kind() == ElementKind::AllocationDefinition ||
+                 Diagram::isConnectionDefinitionKind(model.element(element.owner()).kind())))
                 return false;
             if (isNodeKind(element.kind()) || portAnchor(model, id))
                 return true;
@@ -450,13 +455,49 @@ namespace StructuraSystems::Client {
             return element.owner() == RootId || model.element(element.owner()).kind() == ElementKind::Package;
         }
 
+        /// ":>> eng", "redefines a, b" (empty if it redefines nothing).
+        QString redefinitionText(const Diagram::SysMLElement &element) {
+            QString text;
+            for (const auto &reference: element.redefinitions())
+                text += (text.isEmpty() ? QString::fromStdString(element.redefinitionKeyword()) + QLatin1Char(' ')
+                                        : QStringLiteral(", ")) + QString::fromStdString(reference);
+            return text;
+        }
+
+        /// "engine : Engine[4]", "smallEng : SmallEngine :>> eng", ":>> cyl[4]" (named like the redefined feature)
         QString usageText(const Diagram::SemanticModel &model, ElementId id) {
             const auto &element = model.element(id);
-            QString text = QString::fromStdString(element.name());
+            const QString redefinitions = redefinitionText(element);
+            QString text = element.nameFromRedefinition() ? redefinitions : QString::fromStdString(element.name());
             if (!element.typeName().empty())
                 text += QStringLiteral(" : ") + QString::fromStdString(element.typeName());
             if (element.multiplicity().has_value())
                 text += QString::fromStdString(element.multiplicity()->toString());
+            if (!element.nameFromRedefinition() && !redefinitions.isEmpty())
+                text += QLatin1Char(' ') + redefinitions;
+            return text;
+        }
+
+        /// An action with a form: "send new Show(p) to screen", "trigger: accept scene : Scene", "loop charging
+        /// until c", "else"; empty for a plain action.
+        QString actionFormText(const Diagram::SysMLElement &element) {
+            if (element.kind() != ElementKind::ActionUsage)
+                return {};
+            QString text;
+            if (element.isElseBranch())
+                text = QStringLiteral("else");
+            if (element.actionForm() != Diagram::ActionForm::Plain) {
+                text += (text.isEmpty() ? QString() : QStringLiteral(" ")) +
+                        QString::fromStdString(Diagram::toKeyword(element.actionForm()));
+                if (!element.actionClause().empty())
+                    text += QLatin1Char(' ') + QString::fromStdString(element.actionClause());
+            }
+            if (text.isEmpty())
+                return {};
+            if (!element.name().empty())
+                text = QString::fromStdString(element.name()) + QStringLiteral(": ") + text;
+            if (!element.untilCondition().empty())
+                text += QStringLiteral(" until ") + QString::fromStdString(element.untilCondition());
             return text;
         }
 
@@ -470,6 +511,8 @@ namespace StructuraSystems::Client {
         /// "pipe : Hose", "of Fuel", "«interface» : FuelInterface" (empty for plain relationships).
         QString edgeLabel(const Diagram::Relationship &relationship) {
             QString label = QString::fromStdString(relationship.Name);
+            if (!relationship.Definition.empty())
+                label += QStringLiteral(" : ") + QString::fromStdString(relationship.Definition);
             if (!relationship.TypeName.empty())
                 label += (relationship.Kind == RelationshipKind::Flow ? QStringLiteral(" of ") : QStringLiteral(" : ")) +
                          QString::fromStdString(relationship.TypeName);
@@ -522,7 +565,8 @@ namespace StructuraSystems::Client {
             std::string keyword = Diagram::defaultKeyword(element.kind());
             if (element.declaredKeyword().has_value() && !element.declaredKeyword()->empty())
                 keyword = *element.declaredKeyword();
-            return QStringLiteral("«") + QString::fromStdString(keyword) + QStringLiteral("»");
+            return QStringLiteral("«") + QString::fromStdString(keyword) + QStringLiteral("»") +
+                   (element.isParallel() ? QStringLiteral(" «parallel»") : QString());
         }
     }
 
@@ -608,6 +652,8 @@ namespace StructuraSystems::Client {
                 {DiagramTypes::ToolOccurrenceDefinition, ElementKind::OccurrenceDefinition},
                 {DiagramTypes::ToolOccurrence, ElementKind::OccurrenceUsage},
                 {DiagramTypes::ToolAllocationDefinition, ElementKind::AllocationDefinition},
+                {DiagramTypes::ToolConnectionDefinition, ElementKind::ConnectionDefinition},
+                {DiagramTypes::ToolFlowDefinition, ElementKind::FlowDefinition},
                 {DiagramTypes::ToolAnalysisDefinition, ElementKind::AnalysisDefinition},
                 {DiagramTypes::ToolAnalysis, ElementKind::AnalysisUsage},
                 {DiagramTypes::ToolVariationDefinition, ElementKind::PartDefinition},
@@ -648,6 +694,8 @@ namespace StructuraSystems::Client {
                                  : kind == ElementKind::OccurrenceDefinition ? "Interaction"
                                  : kind == ElementKind::OccurrenceUsage ? "occurrence"
                                  : kind == ElementKind::AllocationDefinition ? "Allocation"
+                                 : kind == ElementKind::ConnectionDefinition ? "Connection"
+                                 : kind == ElementKind::FlowDefinition ? "Flow"
                                  : "Package";
         const std::string name = uniqueName(base, owner);
         std::optional<ElementId> id;
@@ -672,6 +720,15 @@ namespace StructuraSystems::Client {
                         const ElementId part = Model.addElement(ElementKind::PartUsage, end, *id);
                         Model.setPrefixes(part, {"end"});
                         Model.setDeclaredKeyword(part, std::string());
+                    }
+                }
+                if (Diagram::isConnectionDefinitionKind(kind)) {
+                    // its two ends: "end part source; end part target;" / "end port source; end port target;"
+                    for (const char *end: {"source", "target"}) {
+                        const ElementId part = Model.addElement(kind == ElementKind::FlowDefinition ? ElementKind::PortUsage
+                                                                                                     : ElementKind::PartUsage,
+                                                                end, *id);
+                        Model.setPrefixes(part, {"end"});
                     }
                 }
             }))
@@ -1332,8 +1389,25 @@ namespace StructuraSystems::Client {
                                  (Model.element(element.owner()).kind() == ElementKind::StateUsage ||
                                   Model.element(element.owner()).kind() == ElementKind::StateDefinition);
         const std::string declared = element.declaredKeyword().value_or("");
+        QStringList redefinitions;
+        for (const auto &reference: element.redefinitions())
+            redefinitions.append(QString::fromStdString(reference));
+        const QString redefinitionList = redefinitions.join(QStringLiteral(", "));
         return {
             {QStringLiteral("stateAction"), stateAction},
+            {QStringLiteral("hasRedefinitions"), Diagram::isUsageKind(kind) && kind != ElementKind::EnumerationLiteral &&
+                                                  kind != ElementKind::ControlNode && !element.isElseBranch()},
+            {QStringLiteral("redefines"), redefinitionList},
+            {QStringLiteral("redefinitionKeyword"), QString::fromStdString(element.redefinitionKeyword().empty()
+                                                                           ? std::string(":>>") : element.redefinitionKeyword())},
+            {QStringLiteral("nameFromRedefinition"), element.nameFromRedefinition()},
+            {QStringLiteral("isActionUsage"), kind == ElementKind::ActionUsage && !element.isElseBranch()},
+            {QStringLiteral("actionForm"), QString::fromStdString(element.actionForm() == Diagram::ActionForm::Plain
+                                                                  ? std::string("action") : Diagram::toKeyword(element.actionForm()))},
+            {QStringLiteral("actionClause"), QString::fromStdString(element.actionClause())},
+            {QStringLiteral("until"), QString::fromStdString(element.untilCondition())},
+            {QStringLiteral("isState"), kind == ElementKind::StateUsage || kind == ElementKind::StateDefinition},
+            {QStringLiteral("parallel"), element.isParallel()},
             {QStringLiteral("role"), QString::fromStdString(declared.empty() ? std::string("action")
                                                                               : declared.substr(0, declared.find(' ')))},
             {QStringLiteral("isControl"), kind == ElementKind::ControlNode},
@@ -1354,7 +1428,8 @@ namespace StructuraSystems::Client {
                                               (constraintRole == QLatin1String("require constraint") ||
                                                constraintRole == QLatin1String("assume constraint") ||
                                                constraintRole == QLatin1String("assert constraint"))) ||
-                                             kind == ElementKind::RequirementUsage},
+                                             kind == ElementKind::RequirementUsage || kind == ElementKind::ActionUsage ||
+                                             kind == ElementKind::ControlNode},
             {QStringLiteral("kindLabel"), kindText(element)},
             {QStringLiteral("name"), QString::fromStdString(element.name())},
             {QStringLiteral("typeName"), QString::fromStdString(element.typeName())},
@@ -1427,8 +1502,11 @@ namespace StructuraSystems::Client {
                                ? constraintRole == QLatin1String("assert constraint")
                                : values.contains(QStringLiteral("assertion")) ? values.value(QStringLiteral("assertion")).toBool()
                                : current.declaredKeyword() == "assert constraint";
-        if (name.empty() && !(requirementConstraint || kind == ElementKind::RequirementUsage ||
-                              (kind == ElementKind::ConstraintUsage && assertion)))
+        // "send s to t;", "fork;" may be unnamed; a feature named like the one it redefines takes that name
+        const bool nameFromRedefinition = values.value(QStringLiteral("nameFromRedefinition")).toBool();
+        if (name.empty() && !nameFromRedefinition &&
+            !(requirementConstraint || kind == ElementKind::RequirementUsage || kind == ElementKind::ActionUsage ||
+              kind == ElementKind::ControlNode || (kind == ElementKind::ConstraintUsage && assertion)))
             return tr("The name must not be empty.");
         if (requirementConstraint && !isRequirementOwner(ownerKind))
             return tr("require / assume constraint only in a requirement.");
@@ -1467,10 +1545,51 @@ namespace StructuraSystems::Client {
                 return tr("The expression is written without ';' at its end.");
         }
 
+        // redefined features: "eng", "Vehicle::mass, b"
+        std::vector<std::string> redefinitions;
+        for (const QString &reference: values.value(QStringLiteral("redefines")).toString().split(QLatin1Char(','),
+                                                                                                   Qt::SkipEmptyParts)) {
+            if (!reference.trimmed().isEmpty())
+                redefinitions.push_back(reference.trimmed().toStdString());
+        }
+        if (nameFromRedefinition && redefinitions.empty())
+            return tr("Name it after a redefined feature: enter the feature it redefines.");
+        const auto segments = redefinitions.empty() ? std::vector<std::string>()
+                                                    : SysMLTextImporter::splitReference(redefinitions.front());
+        if (nameFromRedefinition && segments.empty())
+            return tr("'%1' is not a feature name.").arg(QString::fromStdString(redefinitions.front()));
+        const std::string ownName = nameFromRedefinition ? segments.back() : name;
+        const std::string redefinitionKeyword =
+                values.value(QStringLiteral("redefinitionKeyword"), QStringLiteral(":>>")).toString().toStdString();
+        // send / accept / ... with what follows the keyword
+        const QString formName = values.value(QStringLiteral("actionForm"), QStringLiteral("action")).toString();
+        Diagram::ActionForm form = Diagram::ActionForm::Plain;
+        for (const auto candidate: {Diagram::ActionForm::Send, Diagram::ActionForm::Accept, Diagram::ActionForm::Assign,
+                                    Diagram::ActionForm::Terminate, Diagram::ActionForm::If, Diagram::ActionForm::While,
+                                    Diagram::ActionForm::Loop, Diagram::ActionForm::For}) {
+            if (formName.toStdString() == Diagram::toKeyword(candidate))
+                form = candidate;
+        }
+        const std::string clause = values.value(QStringLiteral("actionClause")).toString().simplified().toStdString();
+        const std::string until = values.value(QStringLiteral("until")).toString().simplified().toStdString();
+
         QString error;
         try {
-            if (name != Model.element(*elementId).name())
-                Model.rename(*elementId, name);
+            if (values.contains(QStringLiteral("redefines")) && Diagram::isUsageKind(kind) &&
+                kind != ElementKind::EnumerationLiteral && kind != ElementKind::ControlNode)
+                Model.setRedefinitions(*elementId, redefinitionKeyword, redefinitions, false);
+            if (ownName != Model.element(*elementId).name())
+                Model.rename(*elementId, ownName);
+            if (nameFromRedefinition)
+                Model.setRedefinitions(*elementId, redefinitionKeyword, redefinitions, true);
+            if (kind == ElementKind::ActionUsage && values.contains(QStringLiteral("actionForm"))) {
+                Model.setActionForm(*elementId, form, clause);
+                Model.setUntilCondition(*elementId, form == Diagram::ActionForm::Loop || form == Diagram::ActionForm::While
+                                                    ? until : std::string());
+            }
+            if ((kind == ElementKind::StateUsage || kind == ElementKind::StateDefinition) &&
+                values.contains(QStringLiteral("parallel")))
+                Model.setParallel(*elementId, values.value(QStringLiteral("parallel")).toBool());
             if (kind == ElementKind::PartUsage || kind == ElementKind::Attribute || kind == ElementKind::ActionPerformance ||
                 kind == ElementKind::ConstraintUsage || kind == ElementKind::CalcUsage || kind == ElementKind::PortUsage ||
                 kind == ElementKind::ItemUsage || kind == ElementKind::RequirementUsage || kind == ElementKind::Subject ||
@@ -1574,6 +1693,8 @@ namespace StructuraSystems::Client {
                 {QStringLiteral("editable"), labeled},
                 {QStringLiteral("hasType"), !behavior && relationship.Kind != RelationshipKind::Dependency},
                 {QStringLiteral("hasSequence"), message},
+                {QStringLiteral("hasDefinition"), relationship.Kind == RelationshipKind::Flow},
+                {QStringLiteral("definition"), QString::fromStdString(relationship.Definition)},
                 {QStringLiteral("sequenced"), relationship.Sequenced},
                 {QStringLiteral("hasGuard"), behavior},
                 {QStringLiteral("hasTrigger"), relationship.Kind == RelationshipKind::Transition},
@@ -1606,6 +1727,8 @@ namespace StructuraSystems::Client {
                 const auto kind = Model.relationship(id).Kind;
                 if (kind == RelationshipKind::Message && values.contains(QStringLiteral("sequenced")))
                     Model.setSequenced(id, values.value(QStringLiteral("sequenced")).toBool());
+                if (kind == RelationshipKind::Flow && values.contains(QStringLiteral("definition")))
+                    Model.setFlowDefinition(id, values.value(QStringLiteral("definition")).toString().trimmed().toStdString());
                 if (kind == RelationshipKind::Succession || kind == RelationshipKind::Transition)
                     Model.setBehaviorDetails(id, values.value(QStringLiteral("guard")).toString().toStdString(),
                                              values.value(QStringLiteral("trigger")).toString().toStdString(),
@@ -1973,7 +2096,9 @@ namespace StructuraSystems::Client {
             case ElementKind::ActionUsage:
             case ElementKind::StateUsage:
             case ElementKind::OccurrenceDefinition:
-            case ElementKind::AllocationDefinition: {
+            case ElementKind::AllocationDefinition:
+            case ElementKind::ConnectionDefinition:
+            case ElementKind::FlowDefinition: {
                 node.Kind = DiagramTypes::DefinitionNode;
                 node.Keyword = keywordOf(element);
                 node.Title = decorate(element, name, true) + specializationText(element);
@@ -2072,11 +2197,13 @@ namespace StructuraSystems::Client {
                     literals.append(entry(child, QString::fromStdString(childElement.name())));
                     break;
                 case ElementKind::ActionUsage: {
-                    // "entry / warmUp", "do / run", or "action check : Check"
+                    // "entry / warmUp", "do / run", or "action check : Check"; "send s to t", "if c", ...
                     const std::string keyword = childElement.declaredKeyword().value_or("action");
                     const QString role = keyword == "action" ? QStringLiteral("action ")
                                          : QString::fromStdString(keyword.substr(0, keyword.find(' '))) + QStringLiteral(" / ");
-                    actions.append(entry(child, decorate(childElement, role + usageText(Model, child))));
+                    const QString form = actionFormText(childElement);
+                    actions.append(entry(child, decorate(childElement, form.isEmpty() ? role + usageText(Model, child)
+                                                                      : (keyword == "action" ? QString() : role) + form)));
                     break;
                 }
                 case ElementKind::StateUsage:
@@ -2210,11 +2337,12 @@ namespace StructuraSystems::Client {
         addCompartment(compartments, QStringLiteral("require"), required);
         addCompartment(compartments, QStringLiteral("assume"), assumes);
         addCompartment(compartments, QStringLiteral("values"), literals);
-        addCompartment(compartments, element.kind() == ElementKind::InterfaceDefinition ? QStringLiteral("ends")
-                                                                                         : QStringLiteral("ports"), ports);
+        const bool ends = element.kind() == ElementKind::InterfaceDefinition ||
+                          element.kind() == ElementKind::AllocationDefinition ||
+                          Diagram::isConnectionDefinitionKind(element.kind());
+        addCompartment(compartments, ends ? QStringLiteral("ends") : QStringLiteral("ports"), ports);
         addCompartment(compartments, QStringLiteral("items"), items);
-        addCompartment(compartments, element.kind() == ElementKind::AllocationDefinition ? QStringLiteral("ends")
-                                                                                          : QStringLiteral("parts"), parts);
+        addCompartment(compartments, ends ? QStringLiteral("ends") : QStringLiteral("parts"), parts);
         addCompartment(compartments, QStringLiteral("occurrences"), occurrences);
         addCompartment(compartments, QStringLiteral("events"), events);
         addCompartment(compartments, QStringLiteral("messages"), messages);
