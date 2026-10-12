@@ -331,6 +331,18 @@ Pane {
                       ? qsTr("An interaction: its parts are the lifelines of the sequence view")
                       : tile.tool === DiagramTypes.ToolAllocationDefinition
                       ? qsTr("An allocation definition with its two ends; draw «allocate» arrows between usages")
+                      : tile.tool === DiagramTypes.ToolMetadata
+                      ? qsTr("Drop onto an element: metadata about it (@Name); onto the canvas: metadata about listed elements")
+                      : tile.tool === DiagramTypes.ToolExpose
+                      ? qsTr("Drop onto a view: the elements it shows (expose vehicle::**)")
+                      : tile.tool === DiagramTypes.ToolRender
+                      ? qsTr("Drop onto a view or view definition: how it is rendered (render asTreeDiagram)")
+                      : tile.tool === DiagramTypes.ToolFilter
+                      ? qsTr("Drop onto a package or view: which elements are included (filter @Safety)")
+                      : tile.tool === DiagramTypes.ToolViewpoint || tile.tool === DiagramTypes.ToolConcern
+                      ? qsTr("A viewpoint frames concerns (draw a Frame arrow to the concern); views satisfy viewpoints")
+                      : tile.tool === DiagramTypes.ToolImport || tile.tool === DiagramTypes.ToolAlias
+                      ? qsTr("Drop onto the canvas or a package: an import (private import Lib::*) or an alias")
                       : tile.tool === DiagramTypes.ToolConnectionDefinition
                       ? qsTr("A connection definition with its two ends (end part); its usages connect parts")
                       : tile.tool === DiagramTypes.ToolFlowDefinition
@@ -825,6 +837,45 @@ Pane {
                     label: qsTr("Flow def")
                     symbol: 10
                     glyph: "⇢"
+                }
+            }
+
+            SectionHeader {
+                id: viewSection
+                visible: palette.structure
+                Layout.topMargin: 8
+                text: qsTr("Views and metadata")
+            }
+            GridLayout {
+                Layout.fillWidth: true
+                visible: palette.structure && viewSection.expanded
+                columns: 2
+                columnSpacing: 6
+                rowSpacing: 6
+
+                Repeater {
+                    model: [
+                        { tool: DiagramTypes.ToolViewDefinition, label: qsTr("View def"), symbol: 10, glyph: "▣" },
+                        { tool: DiagramTypes.ToolView, label: qsTr("View"), symbol: 10, glyph: "▢" },
+                        { tool: DiagramTypes.ToolViewpoint, label: qsTr("Viewpoint"), symbol: 10, glyph: "◉" },
+                        { tool: DiagramTypes.ToolConcern, label: qsTr("Concern"), symbol: 10, glyph: "?" },
+                        { tool: DiagramTypes.ToolExpose, label: qsTr("Expose"), symbol: 10, glyph: "⤴" },
+                        { tool: DiagramTypes.ToolRender, label: qsTr("Render"), symbol: 10, glyph: "▤" },
+                        { tool: DiagramTypes.ToolFilter, label: qsTr("Filter"), symbol: 10, glyph: "⊻" },
+                        { tool: DiagramTypes.ToolMetadataDefinition, label: qsTr("Metadata def"), symbol: 10, glyph: "#" },
+                        { tool: DiagramTypes.ToolMetadata, label: qsTr("Metadata"), symbol: 10, glyph: "@" },
+                        { tool: DiagramTypes.ToolImport, label: qsTr("Import"), symbol: 10, glyph: "⇣" },
+                        { tool: DiagramTypes.ToolAlias, label: qsTr("Alias"), symbol: 10, glyph: "≡" }
+                    ]
+
+                    Tile {
+                        required property var modelData
+                        owner: palette
+                        tool: modelData.tool
+                        label: modelData.label
+                        symbol: modelData.symbol
+                        glyph: modelData.glyph
+                    }
                 }
             }
 

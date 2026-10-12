@@ -866,3 +866,94 @@ TEST_CASE("Structure view: redefinitions, connection and flow definitions") {
     CHECK(SysMLTextImporter::importText(generated(model), again).lossless());
     CHECK_EQ(generated(again), generated(model));
 }
+
+TEST_CASE("Structure view: metadata, imports, aliases, views, viewpoints and concerns") {
+    SemanticModel model;
+    CHECK(SysMLTextImporter::importText("private import ScalarValues::*;\n"
+                                        "alias Car for Automobile;\n"
+                                        "metadata def Safety {\n"
+                                        "    attribute isMandatory : Boolean;\n"
+                                        "}\n"
+                                        "part def Automobile;\n"
+                                        "part vehicle {\n"
+                                        "    part seatBelt {\n"
+                                        "        @Safety {\n"
+                                        "            isMandatory = true;\n"
+                                        "        }\n"
+                                        "    }\n"
+                                        "}\n"
+                                        "metadata Safety about vehicle;\n"
+                                        "concern modularity;\n"
+                                        "viewpoint structure {\n"
+                                        "    frame modularity;\n"
+                                        "}\n"
+                                        "view def StructureView {\n"
+                                        "    filter @SysML::PartUsage;\n"
+                                        "    satisfy structure;\n"
+                                        "}\n"
+                                        "view vehicleView : StructureView {\n"
+                                        "    expose vehicle::**;\n"
+                                        "    render asTreeDiagram;\n"
+                                        "}\n", model).lossless());
+    DiagramController structure(model);
+    QMap<QString, const DiagramNode *> byKeyword;
+    for (const auto &node: structure.nodes()->nodes())
+        byKeyword.insert(node.Keyword + " " + node.Title, &node);
+    CHECK(byKeyword.contains("«import» private ScalarValues::*"));
+    CHECK(byKeyword.contains("«alias» Car for Automobile"));
+    CHECK(byKeyword.contains("«metadata def» Safety"));
+    CHECK(byKeyword.contains("«metadata» Safety"));
+    CHECK(byKeyword.contains("«view def» StructureView"));
+    CHECK(byKeyword.contains("«view» vehicleView : StructureView"));
+    CHECK_EQ(DiagramNodeModel::entryCount(*byKeyword.value("«metadata» Safety"), "about"), 1);
+    CHECK_EQ(DiagramNodeModel::entryCount(*byKeyword.value("«view» vehicleView : StructureView"), "expose"), 1);
+    CHECK_EQ(DiagramNodeModel::entryCount(*byKeyword.value("«view» vehicleView : StructureView"), "render"), 1);
+    CHECK_EQ(DiagramNodeModel::entryCount(*byKeyword.value("«view def» StructureView"), "filter"), 1);
+    // the metadata of the seat belt is an entry of its node
+    const ElementId vehicle = model.children(RootId)[4];
+    const ElementId seatBelt = model.children(vehicle).front();
+    CHECK_EQ(DiagramNodeModel::entryCount(*structure.nodes()->find(seatBelt), "metadata"), 1);
+    // «frame» and «satisfy» arrows
+    int frames = 0;
+    int satisfies = 0;
+    for (const auto &edge: structure.edges()->edges()) {
+        frames += edge.Kind == DiagramTypes::Frame ? 1 : 0;
+        satisfies += edge.Kind == DiagramTypes::Satisfy ? 1 : 0;
+    }
+    CHECK_EQ(frames, 1);
+    CHECK_EQ(satisfies, 1);
+
+    // drawn: a concern, a frame arrow from the viewpoint to it, metadata onto a part, an import, a filter
+    const QString concern = structure.addElement(DiagramTypes::ToolConcern, 1200, 100);
+    const ElementId viewpoint = model.children(RootId)[7];
+    CHECK(structure.allowedEdgeKinds(key(viewpoint), concern).contains(int(DiagramTypes::Frame)));
+    CHECK(structure.createEdge(DiagramTypes::Frame, key(viewpoint), concern));
+    CHECK(generated(model).find("    frame concern1;\n") != std::string::npos);
+    const QRectF seatBeltRect = structure.nodeRect(key(seatBelt));
+    CHECK(!structure.addElement(DiagramTypes::ToolMetadata, seatBeltRect.center().x(), seatBeltRect.center().y()).isEmpty());
+    CHECK_EQ(model.children(seatBelt).size(), std::size_t(2));
+    CHECK(generated(model).find("        @Safety;\n") != std::string::npos);
+    const QString import = structure.addElement(DiagramTypes::ToolImport, 1500, 900);
+    CHECK(generated(model).rfind("private import ScalarValues::*;\n") > 0); // a second one, at the end
+    QVariantMap details = structure.elementDetails(import);
+    CHECK(details.value("hasTarget").toBool());
+    CHECK(details.value("anonymous").toBool());
+    details["target"] = "ISQ::**";
+    details["prefixes"] = "public";
+    CHECK(structure.updateElement(import, details).isEmpty());
+    CHECK(generated(model).find("public import ISQ::**;\n") != std::string::npos);
+    details["target"] = "";
+    CHECK(!structure.updateElement(import, details).isEmpty()); // an import needs a target
+
+    // metadata about other elements, edited
+    const ElementId about = model.children(RootId)[5];
+    details = structure.elementDetails(key(about));
+    CHECK(details.value("hasAbout").toBool());
+    details["about"] = "vehicle, vehicle::seatBelt";
+    CHECK(structure.updateElement(key(about), details).isEmpty());
+    CHECK(generated(model).find("metadata Safety about vehicle, vehicle::seatBelt;\n") != std::string::npos);
+
+    SemanticModel again;
+    CHECK(SysMLTextImporter::importText(generated(model), again).lossless());
+    CHECK_EQ(generated(again), generated(model));
+}

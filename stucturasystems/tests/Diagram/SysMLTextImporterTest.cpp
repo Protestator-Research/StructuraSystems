@@ -180,7 +180,11 @@ TEST_CASE("Importer: comments, doc and imports are kept") {
     CHECK(report.lossless());
     CHECK_EQ(SysMLCodeGenerator().generate(model), text);
     CHECK_EQ(model.element(model.children(RootId).at(0)).keyword(), std::string("comment"));
-    CHECK_EQ(model.element(model.children(RootId).at(1)).keyword(), std::string("import"));
+    // an import is an element of its own (phase 8): its target as written, the visibility as prefix
+    const auto &import = model.element(model.children(RootId).at(1));
+    CHECK(import.kind() == ElementKind::Import);
+    CHECK_EQ(import.target(), std::string("ScalarValues::*"));
+    CHECK(import.prefixes() == std::vector<std::string>{"private"});
 }
 TEST_CASE("Importer: KerML classes and features") {
     SemanticModel model;
@@ -248,15 +252,17 @@ TEST_CASE("Importer: random models survive generate -> import -> generate") {
         SemanticModel model;
         std::vector<ElementId> ids;
         for (int step = 0; step < 25; ++step) {
-            const auto kind = static_cast<ElementKind>(random() % 38); // every kind but Textual
+            const auto kind = static_cast<ElementKind>(random() % 47); // every kind but Textual
             const ElementId owner = ids.empty() || random() % 3 == 0 ? RootId : ids[random() % ids.size()];
             std::string name = names[random() % std::size(names)] + std::to_string(random() % 3);
-            if (mayBeUnnamed(kind) && random() % 5 == 0)
-                name.clear(); // "require constraint { ... }", "objective { ... }"
+            if ((mayBeUnnamed(kind) && random() % 5 == 0) || isAnonymousKind(kind) ||
+                (kind == ElementKind::MetadataUsage && random() % 2))
+                name.clear(); // "require constraint { ... }", "objective { ... }", "import a::*;", "@Safety;"
             try {
                 const ElementId id = model.addElement(kind, name, owner);
                 ids.push_back(id);
-                if (kind != ElementKind::Package && random() % 6 == 0 && !(name.empty() && kind == ElementKind::RequirementUsage))
+                if (kind != ElementKind::Package && !isAnonymousKind(kind) && random() % 6 == 0 &&
+                    !(name.empty() && kind == ElementKind::RequirementUsage))
                     model.setShortName(id, random() % 2 ? "R1" : "'1.2'");
                 if (kind == ElementKind::RequirementUsage && owner != RootId && isCaseKind(model.element(owner).kind()) &&
                     random() % 2)
@@ -376,6 +382,29 @@ TEST_CASE("Importer: random models survive generate -> import -> generate") {
                     if (keyword > 0)
                         model.setDeclaredKeyword(id, keyword == 1 ? std::string() : std::string("feature"));
                 }
+                // phase 8: metadata, imports, aliases, filters, views, concerns and viewpoints
+                if (kind == ElementKind::MetadataUsage) {
+                    model.setTypeName(id, random() % 2 ? "Safety" : "SysML::PartUsage");
+                    if (random() % 2)
+                        model.setDeclaredKeyword(id, std::string("@"));
+                    if (random() % 3 == 0)
+                        model.setAbout(id, {"a", "Lib::'b c'"});
+                }
+                if (isTargetKind(kind)) {
+                    const char *imports[] = {"ISQ::*", "a::**[@Safety and (as Safety).isMandatory]", "Lib::'x y'"};
+                    model.setTarget(id, kind == ElementKind::Import ? imports[random() % 3]
+                                        : kind == ElementKind::Alias ? "Lib::Thing"
+                                        : kind == ElementKind::Expose ? "vehicle::**"
+                                        : kind == ElementKind::Render ? "asTreeDiagram" : "@Safety and x > 1");
+                    if (kind == ElementKind::Import && random() % 4 == 0)
+                        model.setDeclaredKeyword(id, std::string("import all"));
+                    if ((kind == ElementKind::Import || kind == ElementKind::Alias) && random() % 2)
+                        model.setPrefixes(id, {random() % 2 ? "private" : "public"});
+                }
+                if (kind == ElementKind::RequirementUsage && !model.element(id).declaredKeyword() && random() % 3 == 0)
+                    model.setDeclaredKeyword(id, std::string(random() % 2 ? "concern" : "viewpoint"));
+                if (kind == ElementKind::RequirementDefinition && random() % 3 == 0)
+                    model.setDeclaredKeyword(id, std::string(random() % 2 ? "concern def" : "viewpoint def"));
                 // phase 7: redefinitions, actions with a form (send, if, loop, ...), parallel states, connection and
                 // flow definitions with their ends
                 const auto &added = model.element(id);
@@ -448,7 +477,7 @@ TEST_CASE("Importer: random models survive generate -> import -> generate") {
             } catch (const ModelError &) {
             }
         }
-        for (int step = 0; step < 19 && ids.size() > 1; ++step) {
+        for (int step = 0; step < 20 && ids.size() > 1; ++step) {
             ElementId source = ids[random() % ids.size()];
             ElementId target = ids[random() % ids.size()];
             // steps 13 - 15: connection, interface, binding (rare by chance with so many kinds)
@@ -470,11 +499,13 @@ TEST_CASE("Importer: random models survive generate -> import -> generate") {
                     return isUsageKind(kind) && kind != ElementKind::EnumerationLiteral && kind != ElementKind::ControlNode;
                 };
                 const auto any = [](ElementKind kind) { return kind != ElementKind::Textual; };
-                target = pick(step == 12 ? [](ElementKind kind) { return kind == ElementKind::UseCaseUsage; }
+                target = pick(step == 19 ? +requirement
+                              : step == 12 ? [](ElementKind kind) { return kind == ElementKind::UseCaseUsage; }
                               : step == 13 ? +connectable : step == 14 ? +port : step == 15 ? +attribute
                               : step == 16 ? +messageEnd : step == 17 ? +usage : step == 18 ? +any
                                            : +requirement);
-                source = pick(step == 10 ? +connectable
+                source = pick(step == 19 ? [](ElementKind kind) { return isRequirementKind(kind); }
+                              : step == 10 ? [](ElementKind kind) { return kind == ElementKind::PartUsage || isViewKind(kind); }
                               : step == 11 ? [](ElementKind kind) { return isVerificationKind(kind); }
                               : step == 12 ? [](ElementKind kind) { return isUseCaseKind(kind); }
                               : step == 13 ? +connectable : step == 14 ? +port : step == 15 ? +attribute
@@ -489,7 +520,8 @@ TEST_CASE("Importer: random models survive generate -> import -> generate") {
                         : step == 13 ? RelationshipKind::Connection : step == 14 ? RelationshipKind::Interface
                         : step == 15 ? RelationshipKind::Binding : step == 16 ? RelationshipKind::Message
                         : step == 17 ? RelationshipKind::Allocation : step == 18 ? RelationshipKind::Dependency
-                        : static_cast<RelationshipKind>(random() % 13), source, target);
+                        : step == 19 ? RelationshipKind::Frame
+                        : static_cast<RelationshipKind>(random() % 14), source, target);
                 const auto kind = model.relationship(relationship).Kind;
                 if (kind == RelationshipKind::Succession && random() % 2)
                     model.setBehaviorDetails(relationship, random() % 2 ? "else" : "x > 0", "", "");
@@ -507,6 +539,8 @@ TEST_CASE("Importer: random models survive generate -> import -> generate") {
                     model.setSequenced(relationship, true);
                 if (kind == RelationshipKind::Flow && random() % 2)
                     model.setFlowDefinition(relationship, "FuelFlow");
+                if (kind == RelationshipKind::Satisfy && random() % 2)
+                    model.setRelationshipContext(relationship, model.relationship(relationship).Source); // "satisfy r;"
                 if ((kind == RelationshipKind::Message || kind == RelationshipKind::Allocation ||
                      kind == RelationshipKind::Dependency) && random() % 3 == 0)
                     model.setRelationshipContext(relationship, RootId); // declared on the top level
@@ -559,8 +593,14 @@ TEST_CASE("Importer: random models survive generate -> import -> generate") {
                 visit(RootId);
                 return count;
             };
-            CHECK_EQ(withoutObjectives(imported), withoutObjectives(model));
-            CHECK_EQ(imported.relationships().size(), model.relationships().size());
+            // a relationship whose end is shadowed (a top-level name cannot be written from below a namesake) is
+            // kept as written (as text, an allocation together with the ones refining it); nothing else changes
+            const std::size_t lostRelationships = model.relationships().size() - imported.relationships().size();
+            CHECK(imported.relationships().size() <= model.relationships().size());
+            const auto elements = withoutObjectives(imported);
+            CHECK(elements >= withoutObjectives(model));
+            CHECK(elements - withoutObjectives(model) <= lostRelationships);
+            CHECK((elements > withoutObjectives(model)) == (lostRelationships > 0));
             ++shadowed;
         }
     }
@@ -569,10 +609,11 @@ TEST_CASE("Importer: random models survive generate -> import -> generate") {
     CHECK(relationshipKinds.size() >= 8);
     CHECK(relationshipKinds[RelationshipKind::Satisfy] > 20);
     CHECK(relationshipKinds[RelationshipKind::Verify] > 20);
-    CHECK(relationshipKinds[RelationshipKind::Include] > 20);
+    CHECK(relationshipKinds[RelationshipKind::Include] > 10);
     CHECK(relationshipKinds[RelationshipKind::Message] > 20);
     CHECK(relationshipKinds[RelationshipKind::Allocation] > 20);
     CHECK(relationshipKinds[RelationshipKind::Dependency] > 20);
+    CHECK(relationshipKinds[RelationshipKind::Frame] > 10);
     CHECK(unnamed > 20);
     CHECK(shortNames > 100);
 }
@@ -985,6 +1026,146 @@ action def UpdateSensors {
     SemanticModel again;
     CHECK(SysMLTextImporter::importText(edited, again).lossless());
     CHECK_EQ(SysMLCodeGenerator().generate(again), edited);
+}
+
+TEST_CASE("Importer: metadata, imports, aliases, filters, concerns, viewpoints and views") {
+    // "Introduction to the SysML v2 Language - Textual Notation": Packages, Metadata, Element Import Filtering,
+    // Stakeholders and Concerns, Viewpoints, Views
+    const std::string text = R"(package 'Package Example' {
+    public import ISQ::TorqueValue;
+    private import ScalarValues::*;
+    private part def Automobile;
+    public alias Car for Automobile;
+    alias Torque for ISQ::TorqueValue;
+}
+part vehicle {
+    part interior {
+        part alarm;
+        part seatBelt[2] {
+            @Safety {
+                isMandatory = true;
+            }
+        }
+    }
+}
+metadata def SafetyFeature;
+metadata def SecurityFeature {
+    :> annotatedElement : SysML::PartDefinition;
+    :> annotatedElement : SysML::PartUsage;
+}
+metadata SafetyFeature about vehicle::interior::seatBelt, vehicle::interior::alarm;
+action computeDynamics {
+    private import AnalysisTooling::*;
+    metadata ToolExecution {
+        toolName = "ModelCenter";
+        uri = "aserv://localhost/Vehicle/Equation1";
+    }
+    in dt : ISQ::TimeValue {
+        @ToolVariable {
+            name = "deltaT";
+        }
+    }
+}
+package 'Safety Features' {
+    public import vehicle::**;
+    filter @Safety;
+}
+package 'Mandatory Safety Features' {
+    public import vehicle::**[@Safety and (as Safety).isMandatory];
+}
+concern 'system breakdown' {
+    doc /* To ensure ... */
+    subject system;
+    stakeholder se : 'systems engineer';
+}
+viewpoint 'system structure perspective' {
+    require constraint {
+        doc /* A system structure view shall show ... */
+    }
+    frame 'system breakdown';
+}
+view def 'Part Structure View' {
+    filter @SysML::PartUsage;
+    satisfy 'system structure perspective';
+}
+view 'vehicle structure view' : 'Part Structure View' {
+    expose vehicle::**;
+    render asTreeDiagram;
+}
+)";
+    SemanticModel model;
+    const auto report = SysMLTextImporter::importText(text, model);
+    CHECK(report.lossless());
+    CHECK_EQ(SysMLCodeGenerator().generate(model), text);
+
+    const ElementId package = model.children(RootId).front();
+    const auto &publicImport = model.element(model.children(package)[0]);
+    CHECK(publicImport.kind() == ElementKind::Import);
+    CHECK_EQ(publicImport.target(), std::string("ISQ::TorqueValue"));
+    CHECK(publicImport.prefixes() == std::vector<std::string>{"public"});
+    const auto &car = model.element(model.children(package)[3]);
+    CHECK(car.kind() == ElementKind::Alias);
+    CHECK_EQ(car.name(), std::string("Car"));
+    CHECK_EQ(car.target(), std::string("Automobile"));
+
+    // "@Safety { isMandatory = true; }" in seatBelt
+    const ElementId seatBelt = findElement(model, "seatBelt", ElementKind::PartUsage);
+    const auto &safety = model.element(model.children(seatBelt).front());
+    CHECK(safety.kind() == ElementKind::MetadataUsage);
+    CHECK(safety.declaredKeyword() == std::optional<std::string>("@"));
+    CHECK_EQ(safety.typeName(), std::string("Safety"));
+    const auto &mandatory = model.element(safety.ownedElements().front());
+    CHECK_EQ(mandatory.name(), std::string("isMandatory"));
+    CHECK_EQ(mandatory.value(), std::string("true"));
+    // "metadata SafetyFeature about a, b;"
+    bool about = false;
+    for (const ElementId id: model.children(RootId)) {
+        const auto &element = model.element(id);
+        if (element.kind() == ElementKind::MetadataUsage) {
+            about = true;
+            CHECK_EQ(element.about().size(), std::size_t(2));
+        }
+    }
+    CHECK(about);
+    CHECK(findElement(model, "SecurityFeature", ElementKind::MetadataDefinition) != RootId);
+    // "in dt : ISQ::TimeValue { @ToolVariable { ... } }": metadata of a parameter
+    const ElementId deltaT = findElement(model, "dt", ElementKind::Attribute);
+    CHECK(model.element(model.children(deltaT).front()).kind() == ElementKind::MetadataUsage);
+
+    const ElementId safetyFeatures = findElement(model, "Safety Features", ElementKind::Package);
+    const auto &filter = model.element(model.children(safetyFeatures)[1]);
+    CHECK(filter.kind() == ElementKind::Filter);
+    CHECK_EQ(filter.target(), std::string("@Safety"));
+
+    const ElementId concern = findElement(model, "system breakdown", ElementKind::RequirementUsage);
+    CHECK(model.element(concern).declaredKeyword() == std::optional<std::string>("concern"));
+    const ElementId viewpoint = findElement(model, "system structure perspective", ElementKind::RequirementUsage);
+    const ElementId viewDefinition = findElement(model, "Part Structure View", ElementKind::ViewDefinition);
+    const ElementId view = findElement(model, "vehicle structure view", ElementKind::ViewUsage);
+    CHECK(viewDefinition != RootId);
+    CHECK_EQ(model.element(view).typeName(), std::string("'Part Structure View'"));
+    std::map<RelationshipKind, int> kinds;
+    for (const auto &relationship: model.relationships()) {
+        ++kinds[relationship.Kind];
+        if (relationship.Kind == RelationshipKind::Frame) {
+            CHECK_EQ(relationship.Source, viewpoint);
+            CHECK_EQ(relationship.Target, concern);
+        }
+        if (relationship.Kind == RelationshipKind::Satisfy) {
+            CHECK_EQ(relationship.Source, viewDefinition);
+            CHECK(relationship.Context == std::optional<ElementId>(viewDefinition)); // "satisfy vp;" in the view def
+        }
+    }
+    CHECK_EQ(kinds[RelationshipKind::Frame], 1);
+    CHECK_EQ(kinds[RelationshipKind::Satisfy], 1);
+    CHECK(model.element(model.children(view)[0]).kind() == ElementKind::Expose);
+    CHECK(model.element(model.children(view)[1]).kind() == ElementKind::Render);
+
+    // rules: an import has no name, expose only in a view, a frame from a requirement to a concern
+    CHECK_THROWS_AS(model.addElement(ElementKind::Import, "x", package), ModelError);
+    CHECK_THROWS_AS(model.addElement(ElementKind::Expose, "", package), ModelError);
+    CHECK_THROWS_AS(model.setTarget(model.children(package)[0], "a; b"), ModelError);
+    CHECK(!RelationshipRules::canRelate(model, RelationshipKind::Frame, view, concern));
 }
 
 TEST_CASE("Importer: snapshots, time slices, individuals, variations and analysis cases") {

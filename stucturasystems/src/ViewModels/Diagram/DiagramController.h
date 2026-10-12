@@ -162,6 +162,10 @@ namespace StructuraSystems::Client {
         void fillFeatureEntries(const Diagram::SysMLElement &element, QVariantList &parameters, QVariantList &result,
                                 QVariantList &attributes, QVariantList &compartments, bool withActions) const;
 
+        /// Metadata dropped onto the canvas (or a package): "metadata Name;" on package level.
+        QString addTopLevelMetadata(const QPointF &point);
+        /// Type of new metadata: the first metadata definition of the model ("Metadata" if there is none).
+        [[nodiscard]] std::string metadataTypeName() const;
         std::optional<Diagram::ElementId> addFeature(int tool, Diagram::ElementId owner);
         QString addStatement(const QPointF &point);
         /// Parameter and expression of a new constraint / calculation (inside a model change).

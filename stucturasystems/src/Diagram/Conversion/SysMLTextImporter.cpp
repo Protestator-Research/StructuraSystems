@@ -178,7 +178,8 @@ namespace StructuraSystems::Diagram {
                 Message,    ///< message [name] [of T] from First to Second;
                 MessageThen, ///< then message ...;
                 Allocation, ///< allocate First to Second (refining allocations: see AllocationParent)
-                Dependency  ///< dependency [name] from First to Second;
+                Dependency, ///< dependency [name] from First to Second;
+                Frame       ///< Source = requirement (= Scope), First = framed concern
             };
             Type Kind = Type::Specialization;
             ElementId Source = RootId;          ///< Specialization: the specializing element
@@ -828,12 +829,26 @@ namespace StructuraSystems::Diagram {
                                std::string());
                     return;
                 }
+                if (Dialect == SysMLTextImporter::Dialect::SysML && isSymbol("@") && isNameToken(1)) {
+                    take(); // "@Safety { isMandatory = true; }"
+                    parseMetadata(owner, prefixes, begin, line, true);
+                    return;
+                }
+                if ((ownerKind(owner) == ElementKind::MetadataUsage || ownerKind(owner) == ElementKind::MetadataDefinition) &&
+                    bareDeclaration && owner != RootId) {
+                    // "toolName = "ModelCenter";": the value of an attribute of the metadata
+                    parseUsage(owner, ElementKind::Attribute, prefixes, begin, line, PerformStyle::DeclareAction,
+                               std::string());
+                    return;
+                }
                 if (peek().Type != TokenType::Identifier) {
                     fallBackToText(owner, begin, line);
                     return;
                 }
 
                 const std::string keyword = peek().Text;
+                if (parseNamespaceMember(owner, keyword, prefixes, begin, line))
+                    return; // import, alias, expose, render, filter, metadata, view
                 const bool kerml = Dialect == SysMLTextImporter::Dialect::KerML;
                 if (keyword == "package") {
                     take();
@@ -878,7 +893,7 @@ namespace StructuraSystems::Diagram {
                 } else if (acceptsBareParameters(owner) && directed && isNameToken() && !isDeclarationKeyword() &&
                            (isSymbol(":", 1) || isSymbol(";", 1) || isSymbol("[", 1) || isSymbol("=", 1) ||
                             isSymbol(":=", 1) || isWord("default", 1) || isSymbol(":>", 1) || isSymbol(":>>", 1) ||
-                            isWord("redefines", 1))) {
+                            isWord("redefines", 1) || isSymbol("{", 1))) {
                     // in x : Real;   (parameter without keyword)
                     parseUsage(owner, ElementKind::Attribute, prefixes, begin, line, PerformStyle::DeclareAction,
                                std::string());
@@ -955,6 +970,132 @@ namespace StructuraSystems::Diagram {
                         fallBackToText(owner, begin, line);
                     }
                 }
+            }
+
+            /// import, alias, expose, render, filter; metadata (def), view (def); false if the statement is none of them.
+            bool parseNamespaceMember(ElementId owner, const std::string &keyword, const std::vector<std::string> &prefixes,
+                                      std::size_t begin, std::size_t line) {
+                const bool sysml = Dialect == SysMLTextImporter::Dialect::SysML;
+                if (keyword == "import" || (sysml && (keyword == "expose" || keyword == "render" || keyword == "filter"))) {
+                    take();
+                    std::optional<std::string> declared;
+                    if (keyword == "import" && isWord("all")) { // "import all Lib::*;"
+                        take();
+                        declared = std::string("import all");
+                    }
+                    const std::string target = spanUntil({});
+                    const ElementKind kind = keyword == "import" ? ElementKind::Import
+                                             : keyword == "expose" ? ElementKind::Expose
+                                             : keyword == "render" ? ElementKind::Render : ElementKind::Filter;
+                    addTargetElement(owner, kind, std::string(), std::string(), target, declared, prefixes, begin, line);
+                    return true;
+                }
+                if (keyword == "alias") {
+                    take();
+                    const std::string shortName = readShortName();
+                    const std::string name = readName();
+                    if (name.empty() || !isWord("for")) {
+                        fallBackToText(owner, begin, line);
+                        return true;
+                    }
+                    take();
+                    const std::string target = spanUntil({});
+                    addTargetElement(owner, ElementKind::Alias, name, shortName, target, std::nullopt, prefixes, begin, line);
+                    return true;
+                }
+                if (!sysml)
+                    return false;
+                if ((keyword == "metadata" || keyword == "view") && isWord("def", 1)) {
+                    take();
+                    take();
+                    parseDefinition(owner, prefixes, begin, line,
+                                    keyword == "metadata" ? ElementKind::MetadataDefinition : ElementKind::ViewDefinition);
+                    return true;
+                }
+                if (keyword == "metadata") {
+                    take();
+                    parseMetadata(owner, prefixes, begin, line, false);
+                    return true;
+                }
+                if (keyword == "view") {
+                    take();
+                    parseUsage(owner, ElementKind::ViewUsage, prefixes, begin, line);
+                    return true;
+                }
+                return false;
+            }
+
+            /// After "import", "alias name for", ...: the target up to ';' (or a body for an alias).
+            void addTargetElement(ElementId owner, ElementKind kind, const std::string &name, const std::string &shortName,
+                                  const std::string &target, const std::optional<std::string> &declared,
+                                  const std::vector<std::string> &prefixes, std::size_t begin, std::size_t line) {
+                if (target.empty() || !(isSymbol(";") || (kind == ElementKind::Alias && isSymbol("{")))) {
+                    fallBackToText(owner, begin, line);
+                    return;
+                }
+                const auto id = add(kind, name, owner);
+                if (!id) {
+                    fallBackToText(owner, begin, line);
+                    return;
+                }
+                try {
+                    Model.setTarget(*id, target);
+                    applyPrefixes(*id, prefixes);
+                    if (declared)
+                        Model.setDeclaredKeyword(*id, declared);
+                } catch (const std::exception &exception) {
+                    lost(std::string(exception.what()), line);
+                }
+                applyShortName(*id, shortName, line);
+                finishDeclaration(*id);
+            }
+
+            /// After "metadata" / "@": [name :] Type [about a, b] (';' or a body with the values of its attributes).
+            void parseMetadata(ElementId owner, const std::vector<std::string> &prefixes, std::size_t begin,
+                               std::size_t line, bool at) {
+                const std::string shortName = readShortName();
+                std::string name;
+                if (isNameToken() && isSymbol(":", 1) && !isSymbol(":", 2)) {
+                    name = readName();
+                    take(); // ':'
+                } else if (!shortName.empty()) {
+                    if (!isSymbol(":")) { // "metadata <m1> : Safety;"
+                        fallBackToText(owner, begin, line);
+                        return;
+                    }
+                    take();
+                }
+                const std::string typeName = readTypeText();
+                std::vector<std::string> about;
+                if (isWord("about")) {
+                    take();
+                    for (auto &reference: readReferenceList())
+                        about.push_back(std::move(reference.Text));
+                    if (about.empty()) {
+                        fallBackToText(owner, begin, line);
+                        return;
+                    }
+                }
+                if (typeName.empty() || (!isSymbol(";") && !isSymbol("{"))) {
+                    fallBackToText(owner, begin, line);
+                    return;
+                }
+                const auto id = add(ElementKind::MetadataUsage, name, owner);
+                if (!id) {
+                    fallBackToText(owner, begin, line);
+                    return;
+                }
+                try {
+                    Model.setTypeName(*id, typeName);
+                    Model.setAbout(*id, about);
+                    applyPrefixes(*id, prefixes);
+                    if (at && name.empty())
+                        Model.setDeclaredKeyword(*id, std::string("@"));
+                } catch (const std::exception &exception) {
+                    lost(std::string(exception.what()), line);
+                }
+                applyShortName(*id, shortName, line);
+                finishDeclaration(*id);
             }
 
             /// One prefix word or metadata reference (#name) in front of a declaration keyword; false if there is none.
@@ -1082,7 +1223,8 @@ namespace StructuraSystems::Diagram {
             }
 
             void parseDefinition(ElementId owner, const std::vector<std::string> &prefixes, std::size_t begin,
-                                 std::size_t line, ElementKind kind = ElementKind::PartDefinition) {
+                                 std::size_t line, ElementKind kind = ElementKind::PartDefinition,
+                                 const std::optional<std::string> &declaredKeyword = std::nullopt) {
                 const std::string shortName = Dialect == SysMLTextImporter::Dialect::SysML ? readShortName() : std::string();
                 const std::string name = readName();
                 std::vector<Reference> specializations;
@@ -1111,6 +1253,8 @@ namespace StructuraSystems::Diagram {
                     applyPrefixes(*id, prefixes);
                 if (parallel)
                     Model.setParallel(*id, true);
+                if (declaredKeyword)
+                    Model.setDeclaredKeyword(*id, declaredKeyword); // "concern def", "viewpoint def"
                 applyShortName(*id, shortName, line);
                 for (auto &reference: specializations)
                     Pendings.push_back({Pending::Type::Specialization, *id, owner, std::move(reference.Path), {}, line,
@@ -1277,12 +1421,8 @@ namespace StructuraSystems::Diagram {
                 }
 
                 const bool hasBody = isSymbol("{");
-                const bool bodyAllowed = kind == ElementKind::ActionUsage || kind == ElementKind::StateUsage ||
-                                         kind == ElementKind::ActionPerformance ||
-                                         kind == ElementKind::PartUsage || kind == ElementKind::PortUsage ||
-                                         kind == ElementKind::ItemUsage || kind == ElementKind::RequirementUsage ||
-                                         kind == ElementKind::UseCaseUsage || kind == ElementKind::VerificationUsage ||
-                                         kind == ElementKind::OccurrenceUsage || kind == ElementKind::AnalysisUsage;
+                // a body: what the element owns, at least comments and metadata ("in dt : Time { @ToolVariable; }")
+                const bool bodyAllowed = kind != ElementKind::ControlNode && kind != ElementKind::EnumerationLiteral;
                 const bool multiplicityAllowed = kind == ElementKind::PartUsage || kind == ElementKind::Attribute ||
                                                  kind == ElementKind::ItemUsage || kind == ElementKind::PortUsage ||
                                                  kind == ElementKind::Subject || kind == ElementKind::Actor ||
@@ -2163,6 +2303,31 @@ namespace StructuraSystems::Diagram {
                 };
                 if (keyword == "requirement")
                     return definitionOrUsage(1, ElementKind::RequirementDefinition, ElementKind::RequirementUsage);
+                if (keyword == "concern" || keyword == "viewpoint") {
+                    // requirements with a keyword of their own: "concern def", "viewpoint 'structure perspective' { ... }"
+                    take();
+                    if (isWord("def")) {
+                        take();
+                        parseDefinition(owner, prefixes, begin, line, ElementKind::RequirementDefinition, keyword + " def");
+                    } else {
+                        parseUsage(owner, ElementKind::RequirementUsage, prefixes, begin, line, PerformStyle::DeclareAction,
+                                   keyword);
+                    }
+                    return true;
+                }
+                if (keyword == "frame" && prefixes.empty() && inRequirement && !isWord("concern", 1)) {
+                    take();
+                    auto target = readPath();
+                    if (target.empty() || !isSymbol(";")) {
+                        fallBackToText(owner, begin, line);
+                        return true;
+                    }
+                    take();
+                    Pendings.push_back({Pending::Type::Frame, owner, owner, std::move(target), {}, line, std::string(),
+                                        begin, LastEnd, {}, {}, {}, {}, {}, std::nullopt, std::nullopt, {}});
+                    reserve();
+                    return true;
+                }
                 if (keyword == "use" && isWord("case", 1))
                     return definitionOrUsage(2, ElementKind::UseCaseDefinition, ElementKind::UseCaseUsage);
                 if (keyword == "verification")
@@ -2231,6 +2396,14 @@ namespace StructuraSystems::Diagram {
                 if (keyword == "satisfy" && prefixes.empty() && !isWord("requirement", 1)) {
                     take();
                     auto requirement = readPath();
+                    if (!requirement.empty() && isSymbol(";") && owner != RootId) {
+                        // "satisfy viewpoint;" in the body of the satisfying view (or part)
+                        take();
+                        Pendings.push_back({Pending::Type::Satisfy, owner, owner, std::move(requirement), {}, line,
+                                            std::string(), begin, LastEnd, {}, {}, {}, {}, {}, std::nullopt, std::nullopt, {}});
+                        reserve();
+                        return true;
+                    }
                     if (requirement.empty() || !isWord("by")) {
                         fallBackToText(owner, begin, line);
                         return true;
@@ -2436,7 +2609,7 @@ namespace StructuraSystems::Diagram {
                         continue;
                     }
                     if (pending.Kind == Pending::Type::Satisfy || pending.Kind == Pending::Type::Verify ||
-                        pending.Kind == Pending::Type::Include) {
+                        pending.Kind == Pending::Type::Include || pending.Kind == Pending::Type::Frame) {
                         resolveRequirementRelationship(pending);
                         continue;
                     }
@@ -2590,10 +2763,25 @@ namespace StructuraSystems::Diagram {
                 switch (pending.Kind) {
                     case Pending::Type::Satisfy:
                         target = resolve(pending.Scope, pending.First, false, ofKind({ElementKind::RequirementUsage}));
-                        source = resolve(pending.Scope, pending.Second, false,
-                                         ofKind({ElementKind::PartUsage, ElementKind::PortUsage}));
+                        if (pending.Second.empty()) // "satisfy r;" in its source
+                            source = Model.contains(pending.Source) ? std::optional<ElementId>(pending.Source) : std::nullopt;
+                        else
+                            source = resolve(pending.Scope, pending.Second, false,
+                                             ofKind({ElementKind::PartUsage, ElementKind::PortUsage, ElementKind::ViewUsage,
+                                                     ElementKind::ViewDefinition}));
                         label = "satisfy " + joinPath(pending.First) + " by " + joinPath(pending.Second);
                         break;
+                    case Pending::Type::Frame: {
+                        kind = RelationshipKind::Frame;
+                        source = Model.contains(pending.Source) ? std::optional<ElementId>(pending.Source) : std::nullopt;
+                        // never the framing requirement itself or one around it
+                        const auto concern = ofKind({ElementKind::RequirementUsage});
+                        target = resolve(pending.Scope, pending.First, false, [&](ElementId id) {
+                            return concern(id) && id != pending.Source && !Model.isAncestor(id, pending.Source);
+                        });
+                        label = "frame " + joinPath(pending.First);
+                        break;
+                    }
                     case Pending::Type::Verify:
                         kind = RelationshipKind::Verify;
                         source = Model.contains(pending.Source) ? std::optional<ElementId>(pending.Source) : std::nullopt;
@@ -2611,6 +2799,12 @@ namespace StructuraSystems::Diagram {
                     return; // kept as written (placeholder)
                 release(pending);
                 addRelationship(kind, *source, *target, label, pending.Line);
+                if (kind == RelationshipKind::Satisfy && pending.Second.empty()) {
+                    for (const auto &relationship: Model.relationships()) {
+                        if (relationship.Kind == kind && relationship.Source == *source && relationship.Target == *target)
+                            Model.setRelationshipContext(relationship.Id, *source);
+                    }
+                }
             }
 
             void addRelationship(RelationshipKind kind, ElementId source, ElementId target, const std::string &label,

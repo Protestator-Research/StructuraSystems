@@ -169,7 +169,7 @@ namespace StructuraSystems::Diagram {
             // body of the allocation they refine
             if (relationship.Kind == RelationshipKind::Specialization || isShorthand(model, relationship) ||
                 relationship.Kind == RelationshipKind::Verify || relationship.Kind == RelationshipKind::Include ||
-                relationship.Parent.has_value())
+                relationship.Kind == RelationshipKind::Frame || relationship.Parent.has_value())
                 return false;
             if (relationship.Context)
                 return *relationship.Context == context;
@@ -285,6 +285,7 @@ namespace StructuraSystems::Diagram {
                                            objectiveOf(model, element.owner()) == id &&
                                            hasRelationshipFrom(model, RelationshipKind::Verify, element.owner());
         const bool includes = isUseCaseKind(element.kind()) && hasRelationshipFrom(model, RelationshipKind::Include, id);
+        const bool frames = hasRelationshipFrom(model, RelationshipKind::Frame, id); // "frame concern;"
         // if / while / loop / for and the else branch always have a body; "until c;" / "else ..." follow it
         const bool control = element.kind() == ElementKind::ActionUsage &&
                              (isControlStructure(element.actionForm()) || element.isElseBranch());
@@ -310,7 +311,8 @@ namespace StructuraSystems::Diagram {
         const std::string &expression = element.expression();
         const bool empty = std::all_of(element.ownedElements().begin(), element.ownedElements().end(),
                                        [&](ElementId child) { return child == elseBranch; });
-        if (empty && !hasRelationships && expression.empty() && !verifies && !objectiveWithVerifies && !includes) {
+        if (empty && !hasRelationships && expression.empty() && !verifies && !objectiveWithVerifies && !includes &&
+            !frames) {
             if (control) {
                 out += " {\n" + indent(depth) + "}";
                 tail();
@@ -343,6 +345,8 @@ namespace StructuraSystems::Diagram {
         }
         if (includes)
             writeReferences(RelationshipKind::Include, id, id, "include", depth + 1);
+        if (frames)
+            writeReferences(RelationshipKind::Frame, id, id, "frame", depth + 1);
         generateOwnedRelationships(model, id, depth + 1, out);
         // Body expression of a constraint / calculation: last, without ';'.
         if (!expression.empty()) {
@@ -414,7 +418,10 @@ namespace StructuraSystems::Diagram {
                            " then " + target + ";\n";
                     break;
                 case RelationshipKind::Satisfy:
-                    out += indent(depth) + "satisfy " + target + " by " + source + ";\n";
+                    if (relationship.Context == std::optional<ElementId>(relationship.Source))
+                        out += indent(depth) + "satisfy " + target + ";\n"; // in the body of the satisfying element
+                    else
+                        out += indent(depth) + "satisfy " + target + " by " + source + ";\n";
                     break;
                 case RelationshipKind::Message:
                     if (!relationship.TypeName.empty())
@@ -445,6 +452,7 @@ namespace StructuraSystems::Diagram {
                 case RelationshipKind::Specialization:
                 case RelationshipKind::Verify:
                 case RelationshipKind::Include:
+                case RelationshipKind::Frame:
                     break;
             }
         }
@@ -533,6 +541,37 @@ namespace StructuraSystems::Diagram {
                 word("action");
                 nameAndShortName();
             }
+            return text;
+        }
+
+        if (isTargetKind(element.kind())) {
+            // "private import ISQ::*", "alias Car for Automobile", "expose vehicle::**", "filter @Safety"
+            word(element.declaredKeyword().value_or(defaultKeyword(element.kind())));
+            if (element.kind() == ElementKind::Alias) {
+                nameAndShortName();
+                word("for");
+            }
+            word(element.target());
+            return text;
+        }
+        if (element.kind() == ElementKind::MetadataUsage) {
+            // "metadata SafetyFeature about a, b", "@ToolVariable", "metadata m : T" (a named one with "metadata")
+            const bool named = !element.name().empty() || !element.shortName().empty();
+            if (element.declaredKeyword() == "@" && !named && !element.typeName().empty()) {
+                word("@" + element.typeName());
+            } else {
+                word(element.declaredKeyword().has_value() && *element.declaredKeyword() != "@" ? *element.declaredKeyword()
+                                                                                                : std::string("metadata"));
+                if (named) {
+                    nameAndShortName();
+                    text += " :";
+                }
+                word(element.typeName());
+            }
+            std::string about;
+            for (const auto &reference: element.about())
+                about += (about.empty() ? " about " : ", ") + reference;
+            text += about;
             return text;
         }
 

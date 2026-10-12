@@ -115,6 +115,24 @@ namespace StructuraSystems::Diagram {
                 return "ConnectionDefinition";
             case ElementKind::FlowDefinition:
                 return "FlowDefinition";
+            case ElementKind::MetadataDefinition:
+                return "MetadataDefinition";
+            case ElementKind::MetadataUsage:
+                return "MetadataUsage";
+            case ElementKind::ViewDefinition:
+                return "ViewDefinition";
+            case ElementKind::ViewUsage:
+                return "ViewUsage";
+            case ElementKind::Import:
+                return "Import";
+            case ElementKind::Alias:
+                return "Alias";
+            case ElementKind::Expose:
+                return "Expose";
+            case ElementKind::Render:
+                return "Render";
+            case ElementKind::Filter:
+                return "Filter";
             case ElementKind::Textual:
                 return "Textual";
         }
@@ -199,6 +217,24 @@ namespace StructuraSystems::Diagram {
                 return "connection def";
             case ElementKind::FlowDefinition:
                 return "flow def";
+            case ElementKind::MetadataDefinition:
+                return "metadata def";
+            case ElementKind::MetadataUsage:
+                return "metadata";
+            case ElementKind::ViewDefinition:
+                return "view def";
+            case ElementKind::ViewUsage:
+                return "view";
+            case ElementKind::Import:
+                return "import";
+            case ElementKind::Alias:
+                return "alias";
+            case ElementKind::Expose:
+                return "expose";
+            case ElementKind::Render:
+                return "render";
+            case ElementKind::Filter:
+                return "filter";
             case ElementKind::Textual:
                 break;
         }
@@ -257,6 +293,8 @@ namespace StructuraSystems::Diagram {
                 return "Allocation";
             case RelationshipKind::Dependency:
                 return "Dependency";
+            case RelationshipKind::Frame:
+                return "Frame";
         }
         return "Unknown";
     }

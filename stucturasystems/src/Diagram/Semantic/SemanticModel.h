@@ -87,6 +87,11 @@ namespace StructuraSystems::Diagram {
         void setNamedInBody(ElementId id, bool namedInBody);
         /// Action usage / control node: written as "then action b;" behind the source of its succession.
         void setDeclaredWithThen(ElementId id, bool declaredWithThen);
+        /// import / alias / expose / render / filter: what follows the keyword, as written (one line, no ';', '{', '}'
+        /// outside of strings, not empty).
+        void setTarget(ElementId id, const std::string &target);
+        /// Metadata usage: the annotated elements after "about" as written (empty: about its owner).
+        void setAbout(ElementId id, std::vector<std::string> references);
         /// State usage / definition: "parallel" (concurrent nested states).
         void setParallel(ElementId id, bool parallel);
         /// Textual only: statement text, its keywords and its name (may be empty).
@@ -125,6 +130,8 @@ namespace StructuraSystems::Diagram {
         void setParentRelationship(RelationshipId id, std::optional<RelationshipId> parent);
         /// Message, allocation, dependency: the body it is declared in (RootId = top level); std::nullopt = the
         /// innermost element owning both ends. Reset when that element is removed.
+        /// Satisfy: its source ("satisfy r;" in the body of the satisfying view or part) or std::nullopt
+        /// ("satisfy r by s;" in the innermost common owner).
         void setRelationshipContext(RelationshipId id, std::optional<ElementId> context);
         /// Moves the relationship to another place in the order of all relationships (the order of the text;
         /// 0 = first, larger values = last).

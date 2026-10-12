@@ -328,6 +328,7 @@ namespace StructuraSystems::Client {
                     case DiagramTypes::Satisfy:
                     case DiagramTypes::Verify:
                     case DiagramTypes::Include:
+                    case DiagramTypes::Frame:
                     case DiagramTypes::Dependency:
                         openArrow = true;
                         break;

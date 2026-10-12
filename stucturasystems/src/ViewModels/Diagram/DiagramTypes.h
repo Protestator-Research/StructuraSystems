@@ -79,7 +79,19 @@ namespace StructuraSystems::Client::DiagramTypes {
         ToolLoopAction,            ///< "loop { ... } until condition;"
         ToolForAction,             ///< "for x in values { ... }"
         ToolConnectionDefinition,  ///< "connection def" (its ends: "end part a; end part b;")
-        ToolFlowDefinition         ///< "flow def" (its ends: "end port out; end port in;")
+        ToolFlowDefinition,        ///< "flow def" (its ends: "end port out; end port in;")
+        // metadata, views and namespaces (phase 8)
+        ToolMetadataDefinition,    ///< "metadata def"
+        ToolMetadata,              ///< onto an element: "@Name;" in it; onto the canvas: "metadata Name about ...;"
+        ToolViewDefinition,        ///< "view def"
+        ToolView,                  ///< "view" (usage); onto a view: a sub-view
+        ToolViewpoint,             ///< "viewpoint" (a requirement framing concerns)
+        ToolConcern,               ///< "concern" (a requirement of stakeholders)
+        ToolExpose,                ///< "expose a::**;" onto a view
+        ToolRender,                ///< "render asTreeDiagram;" onto a view (definition)
+        ToolFilter,                ///< "filter @Metadata;" onto a package or view
+        ToolImport,                ///< "private import Lib::*;" in a package / onto the canvas
+        ToolAlias                  ///< "alias Name for Element;"
     };
     Q_ENUM_NS(Tool)
 
@@ -102,7 +114,8 @@ namespace StructuraSystems::Client::DiagramTypes {
         Message,    ///< sequence view: message from one event to another (open arrow)
         Allocation, ///< «allocate»: allocate a to b (open arrow)
         Dependency, ///< dependency from a to b (dashed, open arrow)
-        Temporal    ///< a snapshot / time slice of its owner: a line with a half disc at the owner
+        Temporal,   ///< a snapshot / time slice of its owner: a line with a half disc at the owner
+        Frame       ///< «frame»: requirement (viewpoint) -> concern (dashed)
     };
     Q_ENUM_NS(EdgeKind)
 

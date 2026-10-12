@@ -93,6 +93,24 @@ namespace StructuraSystems::Diagram {
         ConnectionDefinition,
         /// flow def Name { ref :>> payload : Fuel; end port out : OutPort; end port in : InPort; }
         FlowDefinition,
+        /// metadata def Name [:> ...] { attribute isMandatory : Boolean; }
+        MetadataDefinition,
+        /// metadata [name :] Type [about a, b] [{ attr = value; }]  /  @Type { ... }  (usually unnamed)
+        MetadataUsage,
+        /// view def Name { satisfy viewpoint; filter @SysML::PartUsage; render asTreeDiagram; }
+        ViewDefinition,
+        /// view name [: Type] { expose vehicle::**; render asTreeDiagram; view sub { ... } }
+        ViewUsage,
+        /// [public|private] import [all] Target;   Target as written: "ISQ::TorqueValue", "ISQ::*", "a::**[@Safety]"
+        Import,
+        /// [public|private] alias Name for Target [{ ... }]
+        Alias,
+        /// expose Target;  (in a view, as an import: "vehicle::**", "vehicle::**[@Safety]")
+        Expose,
+        /// render Target;  (in a view (definition): "asTreeDiagram")
+        Render,
+        /// filter Target;  (in a package or view; Target is the condition: "@Safety and (as Safety).isMandatory")
+        Filter,
         /// Any other statement kept word for word (assert constraint, function, constraint def, import,
         /// comment, ...). Shown in a compartment of its owner or as node; never interpreted.
         Textual
@@ -123,8 +141,26 @@ namespace StructuraSystems::Diagram {
         /// allocate a to b [{ allocate ... }];  allocation [name] [: Type] allocate a to b;  (nested ones: Parent)
         Allocation,
         /// dependency [name] from a to b;  between any two named elements
-        Dependency
+        Dependency,
+        /// frame target;  inside the source requirement (a viewpoint, ...); target: a concern (requirement usage)
+        Frame
     };
+
+    /// import, alias, expose, render, filter: a keyword and a target written as it is (no element of their own).
+    [[nodiscard]] inline bool isTargetKind(ElementKind kind) {
+        return kind == ElementKind::Import || kind == ElementKind::Alias || kind == ElementKind::Expose ||
+               kind == ElementKind::Render || kind == ElementKind::Filter;
+    }
+
+    /// import, expose, render, filter: never named.
+    [[nodiscard]] inline bool isAnonymousKind(ElementKind kind) {
+        return kind == ElementKind::Import || kind == ElementKind::Expose || kind == ElementKind::Render ||
+               kind == ElementKind::Filter;
+    }
+
+    [[nodiscard]] inline bool isViewKind(ElementKind kind) {
+        return kind == ElementKind::ViewDefinition || kind == ElementKind::ViewUsage;
+    }
 
     /// constraint def, calc def and their usages: own parameters (directed attributes) and a body expression.
     [[nodiscard]] inline bool isConstraintOrCalc(ElementKind kind) {
@@ -145,7 +181,8 @@ namespace StructuraSystems::Diagram {
                kind == ElementKind::RequirementDefinition || kind == ElementKind::UseCaseDefinition ||
                kind == ElementKind::VerificationDefinition || kind == ElementKind::OccurrenceDefinition ||
                kind == ElementKind::AllocationDefinition || kind == ElementKind::AnalysisDefinition ||
-               kind == ElementKind::ConnectionDefinition || kind == ElementKind::FlowDefinition;
+               kind == ElementKind::ConnectionDefinition || kind == ElementKind::FlowDefinition ||
+               kind == ElementKind::MetadataDefinition || kind == ElementKind::ViewDefinition;
     }
 
     /// connection def / flow def: part definitions whose usages connect their ends.
@@ -195,7 +232,8 @@ namespace StructuraSystems::Diagram {
     /// actions such as "then send s to t;", "assign x := 1;", "if c { ... }", control nodes such as "then fork;".
     [[nodiscard]] inline bool mayBeUnnamed(ElementKind kind) {
         return kind == ElementKind::ConstraintUsage || kind == ElementKind::RequirementUsage ||
-               kind == ElementKind::ActionUsage || kind == ElementKind::ControlNode;
+               kind == ElementKind::ActionUsage || kind == ElementKind::ControlNode ||
+               kind == ElementKind::MetadataUsage || isAnonymousKind(kind);
     }
 
     /// Ends of successions: actions, performed actions, control nodes, states and event occurrences.
@@ -231,7 +269,7 @@ namespace StructuraSystems::Diagram {
                kind == ElementKind::RequirementUsage || kind == ElementKind::Subject || kind == ElementKind::Actor ||
                kind == ElementKind::UseCaseUsage || kind == ElementKind::VerificationUsage ||
                kind == ElementKind::OccurrenceUsage || kind == ElementKind::EventOccurrence ||
-               kind == ElementKind::AnalysisUsage;
+               kind == ElementKind::AnalysisUsage || kind == ElementKind::MetadataUsage || kind == ElementKind::ViewUsage;
     }
 
     /// SysML multiplicity, e.g. [6], [0..1], [1..*].
@@ -335,6 +373,10 @@ namespace StructuraSystems::Diagram {
         /// Action / control node: declared as "then action b;" / "then fork f;" behind the source of its succession
         /// (written so again as long as that succession exists and nothing else is declared in between).
         [[nodiscard]] bool declaredWithThen() const { return DeclaredWithThen; }
+        /// import / alias / expose / render / filter: what follows the keyword (alias: after "for"), as written.
+        [[nodiscard]] const std::string &target() const { return Target; }
+        /// Metadata usage: the annotated elements after "about", as written (empty: its owner).
+        [[nodiscard]] const std::vector<std::string> &about() const { return About; }
         /// State usage / definition: its nested states are concurrent ("state s parallel { ... }").
         [[nodiscard]] bool isParallel() const { return Parallel; }
 
@@ -369,6 +411,8 @@ namespace StructuraSystems::Diagram {
         bool NamedInBody = false;
         bool Parallel = false;
         bool DeclaredWithThen = false;
+        std::string Target;
+        std::vector<std::string> About;
     };
 
     struct Relationship {

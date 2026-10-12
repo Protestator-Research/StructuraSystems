@@ -12,6 +12,7 @@
 #include <Diagram/Semantic/RelationshipRules.h>
 
 #include <algorithm>
+#include <functional>
 #include <exception>
 #include <iterator>
 #include <vector>
@@ -45,7 +46,8 @@ namespace StructuraSystems::Client {
                    kind == ElementKind::StateDefinition || kind == ElementKind::RequirementDefinition ||
                    kind == ElementKind::UseCaseDefinition || kind == ElementKind::VerificationDefinition ||
                    kind == ElementKind::OccurrenceDefinition || kind == ElementKind::AllocationDefinition ||
-                   kind == ElementKind::AnalysisDefinition || Diagram::isConnectionDefinitionKind(kind);
+                   kind == ElementKind::AnalysisDefinition || Diagram::isConnectionDefinitionKind(kind) ||
+                   kind == ElementKind::MetadataDefinition || kind == ElementKind::ViewDefinition;
         }
 
         /// "objective { ... }" of a use case / verification (shown in its compartment, not as node).
@@ -110,6 +112,14 @@ namespace StructuraSystems::Client {
                         default:
                             return ElementKind::PartUsage;
                     }
+                case DiagramTypes::ToolMetadata:
+                    return ElementKind::MetadataUsage;
+                case DiagramTypes::ToolExpose:
+                    return ElementKind::Expose;
+                case DiagramTypes::ToolRender:
+                    return ElementKind::Render;
+                case DiagramTypes::ToolFilter:
+                    return ElementKind::Filter;
                 default:
                     return owner == ElementKind::EnumerationDefinition ? ElementKind::EnumerationLiteral
                                                                        : ElementKind::Attribute;
@@ -157,6 +167,8 @@ namespace StructuraSystems::Client {
                     return RelationshipKind::Allocation;
                 case DiagramTypes::Dependency:
                     return RelationshipKind::Dependency;
+                case DiagramTypes::Frame:
+                    return RelationshipKind::Frame;
                 default:
                     return std::nullopt;
             }
@@ -190,6 +202,8 @@ namespace StructuraSystems::Client {
                     return DiagramTypes::Allocation;
                 case RelationshipKind::Dependency:
                     return DiagramTypes::Dependency;
+                case RelationshipKind::Frame:
+                    return DiagramTypes::Frame;
             }
             return DiagramTypes::Connection;
         }
@@ -304,6 +318,24 @@ namespace StructuraSystems::Client {
                     return QObject::tr("connection definition");
                 case ElementKind::FlowDefinition:
                     return QObject::tr("flow definition");
+                case ElementKind::MetadataDefinition:
+                    return QObject::tr("metadata definition");
+                case ElementKind::MetadataUsage:
+                    return QObject::tr("metadata");
+                case ElementKind::ViewDefinition:
+                    return QObject::tr("view definition");
+                case ElementKind::ViewUsage:
+                    return QObject::tr("view");
+                case ElementKind::Import:
+                    return QObject::tr("import");
+                case ElementKind::Alias:
+                    return QObject::tr("alias");
+                case ElementKind::Expose:
+                    return QObject::tr("expose");
+                case ElementKind::Render:
+                    return QObject::tr("rendering");
+                case ElementKind::Filter:
+                    return QObject::tr("filter");
                 case ElementKind::Textual:
                     return QObject::tr("statement");
             }
@@ -437,6 +469,12 @@ namespace StructuraSystems::Client {
             if ((element.kind() == ElementKind::ActionUsage || element.kind() == ElementKind::StateUsage) &&
                 (element.owner() == RootId || model.element(element.owner()).kind() == ElementKind::Package))
                 return true;
+            // views, metadata, imports, aliases and filters on package level: nodes; elsewhere entries of their owner
+            if ((element.kind() == ElementKind::ViewUsage || element.kind() == ElementKind::MetadataUsage ||
+                 element.kind() == ElementKind::Import || element.kind() == ElementKind::Alias ||
+                 element.kind() == ElementKind::Filter) &&
+                (element.owner() == RootId || model.element(element.owner()).kind() == ElementKind::Package))
+                return true;
             // requirements (not an objective, nor inside one), use cases and verifications on package level / in parts
             if (element.kind() == ElementKind::RequirementUsage) {
                 for (ElementId owner = id; owner != RootId; owner = model.element(owner).owner()) {
@@ -475,6 +513,45 @@ namespace StructuraSystems::Client {
                 text += QString::fromStdString(element.multiplicity()->toString());
             if (!element.nameFromRedefinition() && !redefinitions.isEmpty())
                 text += QLatin1Char(' ') + redefinitions;
+            return text;
+        }
+
+        /// "private ISQ::*", "Car for Automobile", "vehicle::**", "@Safety" (import / alias / expose / render / filter).
+        QString targetText(const Diagram::SysMLElement &element) {
+            QString text = QString::fromStdString(element.target());
+            if (element.kind() == ElementKind::Alias)
+                text = QString::fromStdString(element.name()) + QStringLiteral(" for ") + text;
+            if (element.declaredKeyword() == "import all")
+                text = QStringLiteral("all ") + text;
+            for (const auto &prefix: element.prefixes())
+                text = QString::fromStdString(prefix) + QLatin1Char(' ') + text;
+            return text;
+        }
+
+        /// "@Safety {isMandatory = true}", "SafetyFeature about seatBelt, alarm", "m : ToolExecution".
+        QString metadataText(const Diagram::SemanticModel &model, ElementId id) {
+            const auto &element = model.element(id);
+            QString text = QString::fromStdString(element.typeName());
+            if (!element.name().empty())
+                text = QString::fromStdString(element.name()) + QStringLiteral(" : ") + text;
+            else
+                text = QLatin1Char('@') + text;
+            QStringList values;
+            for (const ElementId child: element.ownedElements()) {
+                const auto &value = model.element(child);
+                if (value.kind() == ElementKind::Attribute)
+                    values.append(QString::fromStdString(value.nameFromRedefinition() ? value.redefinitions().front()
+                                                                                       : value.name()) +
+                                  (value.value().empty() ? QString()
+                                                         : QStringLiteral(" = ") + QString::fromStdString(value.value())));
+            }
+            if (!values.isEmpty())
+                text += QStringLiteral(" {") + values.join(QStringLiteral("; ")) + QLatin1Char('}');
+            QStringList about;
+            for (const auto &reference: element.about())
+                about.append(QString::fromStdString(reference));
+            if (!about.isEmpty())
+                text += QStringLiteral(" about ") + about.join(QStringLiteral(", "));
             return text;
         }
 
@@ -525,6 +602,8 @@ namespace StructuraSystems::Client {
                 label = QStringLiteral("«verify»");
             if (relationship.Kind == RelationshipKind::Include)
                 label = QStringLiteral("«include»");
+            if (relationship.Kind == RelationshipKind::Frame)
+                label = QStringLiteral("«frame»");
             if (relationship.Kind == RelationshipKind::Allocation)
                 label = (QStringLiteral("«allocate» ") + label).trimmed();
             if (relationship.Kind == RelationshipKind::Message) {
@@ -557,7 +636,9 @@ namespace StructuraSystems::Client {
                    tool == DiagramTypes::ToolPort || tool == DiagramTypes::ToolItem || tool == DiagramTypes::ToolState ||
                    tool == DiagramTypes::ToolActionUsage || tool == DiagramTypes::ToolSubject ||
                    tool == DiagramTypes::ToolActor || tool == DiagramTypes::ToolObjective || tool == DiagramTypes::ToolEvent ||
-                   tool == DiagramTypes::ToolVariant || tool == DiagramTypes::ToolSnapshot || tool == DiagramTypes::ToolTimeslice;
+                   tool == DiagramTypes::ToolVariant || tool == DiagramTypes::ToolSnapshot || tool == DiagramTypes::ToolTimeslice ||
+                   tool == DiagramTypes::ToolMetadata || tool == DiagramTypes::ToolExpose || tool == DiagramTypes::ToolRender ||
+                   tool == DiagramTypes::ToolFilter;
         }
 
         /// Keyword shown above the name: «constraint def», «function», «assert constraint», ...
@@ -610,7 +691,13 @@ namespace StructuraSystems::Client {
         AutoLayout = false;
         const QPointF point(x, y);
         if (isFeatureTool(tool)) {
-            const auto partId = toId(nodeIdAt(point, std::nullopt, false));
+            auto partId = toId(nodeIdAt(point, std::nullopt, false));
+            // a filter onto a package frame: "filter @Safety;" in the package
+            if (!partId && tool == DiagramTypes::ToolFilter)
+                partId = frameAt(point, std::nullopt);
+            // metadata onto the canvas: "metadata Name about ...;" on package level
+            if (!partId && tool == DiagramTypes::ToolMetadata)
+                return addTopLevelMetadata(point);
             if (!partId || !acceptsFeature(*partId, tool)) {
                 emit statusMessage(tool == DiagramTypes::ToolAction ? tr("Drop actions onto a part or part definition.")
                                    : tool == DiagramTypes::ToolPort ? tr("Drop ports onto a part, a port or a port / interface definition.")
@@ -622,6 +709,9 @@ namespace StructuraSystems::Client {
                                    : tool == DiagramTypes::ToolVariant ? tr("Drop the variant onto a variation (variation part def, ...).")
                                    : tool == DiagramTypes::ToolSnapshot || tool == DiagramTypes::ToolTimeslice
                                    ? tr("Drop it onto a part, an individual, an item or an occurrence.")
+                                   : tool == DiagramTypes::ToolExpose ? tr("Drop it onto a view.")
+                                   : tool == DiagramTypes::ToolRender ? tr("Drop it onto a view or view definition.")
+                                   : tool == DiagramTypes::ToolFilter ? tr("Drop it onto a package or a view.")
                                    : tr("Drop it onto a part or a definition that can own it."));
                 return {};
             }
@@ -654,6 +744,13 @@ namespace StructuraSystems::Client {
                 {DiagramTypes::ToolAllocationDefinition, ElementKind::AllocationDefinition},
                 {DiagramTypes::ToolConnectionDefinition, ElementKind::ConnectionDefinition},
                 {DiagramTypes::ToolFlowDefinition, ElementKind::FlowDefinition},
+                {DiagramTypes::ToolMetadataDefinition, ElementKind::MetadataDefinition},
+                {DiagramTypes::ToolViewDefinition, ElementKind::ViewDefinition},
+                {DiagramTypes::ToolView, ElementKind::ViewUsage},
+                {DiagramTypes::ToolViewpoint, ElementKind::RequirementUsage},
+                {DiagramTypes::ToolConcern, ElementKind::RequirementUsage},
+                {DiagramTypes::ToolImport, ElementKind::Import},
+                {DiagramTypes::ToolAlias, ElementKind::Alias},
                 {DiagramTypes::ToolAnalysisDefinition, ElementKind::AnalysisDefinition},
                 {DiagramTypes::ToolAnalysis, ElementKind::AnalysisUsage},
                 {DiagramTypes::ToolVariationDefinition, ElementKind::PartDefinition},
@@ -669,7 +766,13 @@ namespace StructuraSystems::Client {
         if (const auto frame = frameAt(point, std::nullopt); frame && RelationshipRules::canOwn(Model, *frame, kind))
             owner = *frame;
 
-        const std::string base = tool == DiagramTypes::ToolVariationDefinition ? "Choices"
+        const std::string base = tool == DiagramTypes::ToolViewpoint ? "viewpoint"
+                                 : tool == DiagramTypes::ToolConcern ? "concern"
+                                 : kind == ElementKind::MetadataDefinition ? "Metadata"
+                                 : kind == ElementKind::ViewDefinition ? "View"
+                                 : kind == ElementKind::ViewUsage ? "view"
+                                 : kind == ElementKind::Alias ? "Alias"
+                                 : tool == DiagramTypes::ToolVariationDefinition ? "Choices"
                                  : tool == DiagramTypes::ToolIndividualDefinition ? "Individual"
                                  : tool == DiagramTypes::ToolIndividual ? "individual"
                                  : kind == ElementKind::AnalysisDefinition ? "Analysis"
@@ -697,7 +800,7 @@ namespace StructuraSystems::Client {
                                  : kind == ElementKind::ConnectionDefinition ? "Connection"
                                  : kind == ElementKind::FlowDefinition ? "Flow"
                                  : "Package";
-        const std::string name = uniqueName(base, owner);
+        const std::string name = Diagram::isAnonymousKind(kind) ? std::string() : uniqueName(base, owner);
         std::optional<ElementId> id;
         const QPointF offset = kind == ElementKind::Package ? QPointF(20, 15) : QPointF(70, 25);
         if (!runModelChange([&] {
@@ -710,6 +813,14 @@ namespace StructuraSystems::Client {
                     const ElementId doc = Model.addElement(ElementKind::Textual, "", *id);
                     Model.setText(doc, SysMLTextImporter::docStatement("Describe the requirement."), "doc", "");
                 }
+                if (tool == DiagramTypes::ToolViewpoint || tool == DiagramTypes::ToolConcern)
+                    Model.setDeclaredKeyword(*id, std::string(tool == DiagramTypes::ToolViewpoint ? "viewpoint" : "concern"));
+                if (kind == ElementKind::Import) {
+                    Model.setTarget(*id, "ScalarValues::*");
+                    Model.setPrefixes(*id, {"private"});
+                }
+                if (kind == ElementKind::Alias)
+                    Model.setTarget(*id, "ScalarValues::Real");
                 if (tool == DiagramTypes::ToolVariationDefinition)
                     Model.setPrefixes(*id, {"variation"});
                 if (tool == DiagramTypes::ToolIndividualDefinition || tool == DiagramTypes::ToolIndividual)
@@ -737,8 +848,41 @@ namespace StructuraSystems::Client {
         SelectedNodes = {*id};
         SelectedEdges.clear();
         applySelection();
-        emit statusMessage(tr("Added %1 '%2' - double-click to edit.").arg(kindText(kind), QString::fromStdString(name)));
+        emit statusMessage(name.empty() ? tr("Added %1 - double-click to edit.").arg(kindText(kind))
+                                        : tr("Added %1 '%2' - double-click to edit.").arg(kindText(kind), QString::fromStdString(name)));
         return QString::number(*id);
+    }
+
+    QString DiagramController::addTopLevelMetadata(const QPointF &point) {
+        ElementId owner = RootId;
+        if (const auto frame = frameAt(point, std::nullopt); frame && RelationshipRules::canOwn(Model, *frame, ElementKind::MetadataUsage))
+            owner = *frame;
+        std::optional<ElementId> id;
+        if (!runModelChange([&] {
+                id = Model.addElement(ElementKind::MetadataUsage, std::string(), owner);
+                Model.setTypeName(*id, metadataTypeName());
+                PendingPositions[*id] = QPointF(std::max<qreal>(0, point.x() - 70), std::max<qreal>(0, point.y() - 25));
+            }))
+            return {};
+        SelectedNodes = {*id};
+        SelectedEdges.clear();
+        applySelection();
+        emit statusMessage(tr("Added metadata - double-click it to say what it is about."));
+        return QString::number(*id);
+    }
+
+    std::string DiagramController::metadataTypeName() const {
+        // the first metadata definition of the model, else a placeholder to be edited
+        std::function<std::optional<std::string>(ElementId)> visit = [&](ElementId owner) -> std::optional<std::string> {
+            for (const ElementId child: Model.children(owner)) {
+                if (Model.element(child).kind() == ElementKind::MetadataDefinition)
+                    return Diagram::SysMLCodeGenerator::formatName(Model.element(child).name());
+                if (const auto found = visit(child))
+                    return found;
+            }
+            return std::nullopt;
+        };
+        return visit(RootId).value_or("Metadata");
     }
 
     QString DiagramController::addStatement(const QPointF &point) {
@@ -837,7 +981,8 @@ namespace StructuraSystems::Client {
         // unnamed: "require constraint { ... }" in a requirement, "objective { ... }" in a case
         const bool requirement = kind == ElementKind::ConstraintUsage && isRequirementOwner(ownerKind);
         const bool objective = tool == DiagramTypes::ToolObjective;
-        const std::string name = requirement || objective ? std::string() : uniqueName(base, owner);
+        const std::string name = requirement || objective || kind == ElementKind::MetadataUsage || Diagram::isAnonymousKind(kind)
+                                 ? std::string() : uniqueName(base, owner);
         std::optional<ElementId> id;
         if (!runModelChange([&] {
                 if (objective) {
@@ -866,6 +1011,16 @@ namespace StructuraSystems::Client {
                 }
                 if (kind == ElementKind::Actor && isRequirementOwner(ownerKind)) {
                     Model.setDeclaredKeyword(*id, std::string("stakeholder"));
+                    return;
+                }
+                if (kind == ElementKind::MetadataUsage) { // "@Safety;"
+                    Model.setTypeName(*id, metadataTypeName());
+                    Model.setDeclaredKeyword(*id, std::string("@"));
+                    return;
+                }
+                if (Diagram::isTargetKind(kind)) {
+                    Model.setTarget(*id, kind == ElementKind::Expose ? "Model::**"
+                                         : kind == ElementKind::Render ? "asTreeDiagram" : "@SysML::PartUsage");
                     return;
                 }
                 if (tool == DiagramTypes::ToolSnapshot || tool == DiagramTypes::ToolTimeslice) {
@@ -1251,7 +1406,8 @@ namespace StructuraSystems::Client {
 
         for (const int kind: {int(DiagramTypes::Connection), int(DiagramTypes::Flow), int(DiagramTypes::Interface),
                               int(DiagramTypes::Specialization), int(DiagramTypes::Satisfy), int(DiagramTypes::Verify),
-                              int(DiagramTypes::Include), int(DiagramTypes::Allocation), int(DiagramTypes::Dependency)}) {
+                              int(DiagramTypes::Include), int(DiagramTypes::Allocation), int(DiagramTypes::Dependency),
+                              int(DiagramTypes::Frame)}) {
             if (RelationshipRules::canRelate(Model, *toRelationshipKind(kind), *sourceId, *targetId))
                 kinds.append(kind);
         }
@@ -1336,6 +1492,8 @@ namespace StructuraSystems::Client {
                 return tr("Allocate");
             case DiagramTypes::Dependency:
                 return tr("Dependency");
+            case DiagramTypes::Frame:
+                return tr("Frame (concern)");
             default:
                 return {};
         }
@@ -1376,7 +1534,8 @@ namespace StructuraSystems::Client {
                            kind == ElementKind::RequirementUsage || kind == ElementKind::Subject || kind == ElementKind::Actor ||
                            kind == ElementKind::UseCaseUsage || kind == ElementKind::VerificationUsage ||
                            kind == ElementKind::OccurrenceUsage || kind == ElementKind::EventOccurrence ||
-                           kind == ElementKind::AnalysisUsage;
+                           kind == ElementKind::AnalysisUsage || kind == ElementKind::MetadataUsage ||
+                           kind == ElementKind::ViewUsage;
         const ElementKind ownerKind = element.owner() == RootId ? ElementKind::Package : Model.element(element.owner()).kind();
         // doc text: requirements, use cases, verifications and their objective
         const bool hasDoc = Diagram::isRequirementKind(kind) || Diagram::isCaseKind(kind);
@@ -1393,6 +1552,10 @@ namespace StructuraSystems::Client {
         for (const auto &reference: element.redefinitions())
             redefinitions.append(QString::fromStdString(reference));
         const QString redefinitionList = redefinitions.join(QStringLiteral(", "));
+        QStringList annotated;
+        for (const auto &reference: element.about())
+            annotated.append(QString::fromStdString(reference));
+        const QString aboutList = annotated.join(QStringLiteral(", "));
         return {
             {QStringLiteral("stateAction"), stateAction},
             {QStringLiteral("hasRedefinitions"), Diagram::isUsageKind(kind) && kind != ElementKind::EnumerationLiteral &&
@@ -1408,6 +1571,18 @@ namespace StructuraSystems::Client {
             {QStringLiteral("until"), QString::fromStdString(element.untilCondition())},
             {QStringLiteral("isState"), kind == ElementKind::StateUsage || kind == ElementKind::StateDefinition},
             {QStringLiteral("parallel"), element.isParallel()},
+            {QStringLiteral("hasTarget"), Diagram::isTargetKind(kind)},
+            {QStringLiteral("target"), QString::fromStdString(element.target())},
+            {QStringLiteral("targetLabel"), kind == ElementKind::Filter ? tr("Condition")
+                                            : kind == ElementKind::Alias ? tr("For") : tr("What")},
+            {QStringLiteral("targetPlaceholder"), kind == ElementKind::Import ? QStringLiteral("ISQ::* or vehicle::**[@Safety]")
+                                                  : kind == ElementKind::Alias ? QStringLiteral("ISQ::TorqueValue")
+                                                  : kind == ElementKind::Expose ? QStringLiteral("vehicle::**")
+                                                  : kind == ElementKind::Render ? QStringLiteral("asTreeDiagram")
+                                                  : QStringLiteral("@Safety and (as Safety).isMandatory")},
+            {QStringLiteral("anonymous"), Diagram::isAnonymousKind(kind)},
+            {QStringLiteral("hasAbout"), kind == ElementKind::MetadataUsage},
+            {QStringLiteral("about"), aboutList},
             {QStringLiteral("role"), QString::fromStdString(declared.empty() ? std::string("action")
                                                                               : declared.substr(0, declared.find(' ')))},
             {QStringLiteral("isControl"), kind == ElementKind::ControlNode},
@@ -1423,13 +1598,13 @@ namespace StructuraSystems::Client {
             {QStringLiteral("doc"), doc ? QString::fromStdString(SysMLTextImporter::commentBody(Model.element(*doc).text()))
                                         : QString()},
             {QStringLiteral("shortName"), QString::fromStdString(element.shortName())},
-            {QStringLiteral("hasShortName"), kind != ElementKind::Textual},
+            {QStringLiteral("hasShortName"), kind != ElementKind::Textual && !Diagram::isAnonymousKind(kind)},
             {QStringLiteral("mayBeUnnamed"), (kind == ElementKind::ConstraintUsage &&
                                               (constraintRole == QLatin1String("require constraint") ||
                                                constraintRole == QLatin1String("assume constraint") ||
                                                constraintRole == QLatin1String("assert constraint"))) ||
                                              kind == ElementKind::RequirementUsage || kind == ElementKind::ActionUsage ||
-                                             kind == ElementKind::ControlNode},
+                                             kind == ElementKind::ControlNode || kind == ElementKind::MetadataUsage},
             {QStringLiteral("kindLabel"), kindText(element)},
             {QStringLiteral("name"), QString::fromStdString(element.name())},
             {QStringLiteral("typeName"), QString::fromStdString(element.typeName())},
@@ -1506,8 +1681,11 @@ namespace StructuraSystems::Client {
         const bool nameFromRedefinition = values.value(QStringLiteral("nameFromRedefinition")).toBool();
         if (name.empty() && !nameFromRedefinition &&
             !(requirementConstraint || kind == ElementKind::RequirementUsage || kind == ElementKind::ActionUsage ||
-              kind == ElementKind::ControlNode || (kind == ElementKind::ConstraintUsage && assertion)))
+              kind == ElementKind::ControlNode || kind == ElementKind::MetadataUsage || Diagram::isAnonymousKind(kind) ||
+              (kind == ElementKind::ConstraintUsage && assertion)))
             return tr("The name must not be empty.");
+        if (kind == ElementKind::MetadataUsage && values.value(QStringLiteral("typeName")).toString().trimmed().isEmpty())
+            return tr("Metadata needs its definition as type, e.g. Safety.");
         if (requirementConstraint && !isRequirementOwner(ownerKind))
             return tr("require / assume constraint only in a requirement.");
         const auto [multiplicityValid, multiplicity] = parseMultiplicity(values.value(QStringLiteral("multiplicity")).toString());
@@ -1578,8 +1756,20 @@ namespace StructuraSystems::Client {
             if (values.contains(QStringLiteral("redefines")) && Diagram::isUsageKind(kind) &&
                 kind != ElementKind::EnumerationLiteral && kind != ElementKind::ControlNode)
                 Model.setRedefinitions(*elementId, redefinitionKeyword, redefinitions, false);
-            if (ownName != Model.element(*elementId).name())
+            if (ownName != Model.element(*elementId).name() && !Diagram::isAnonymousKind(kind))
                 Model.rename(*elementId, ownName);
+            if (Diagram::isTargetKind(kind) && values.contains(QStringLiteral("target")))
+                Model.setTarget(*elementId, values.value(QStringLiteral("target")).toString().simplified().toStdString());
+            if (kind == ElementKind::MetadataUsage && values.contains(QStringLiteral("about"))) {
+                std::vector<std::string> about;
+                for (const QString &reference: values.value(QStringLiteral("about")).toString().split(QLatin1Char(','),
+                                                                                                       Qt::SkipEmptyParts))
+                    if (!reference.trimmed().isEmpty())
+                        about.push_back(reference.trimmed().toStdString());
+                Model.setAbout(*elementId, about);
+            }
+            if (kind == ElementKind::MetadataUsage || kind == ElementKind::ViewUsage)
+                Model.setTypeName(*elementId, typeName);
             if (nameFromRedefinition)
                 Model.setRedefinitions(*elementId, redefinitionKeyword, redefinitions, true);
             if (kind == ElementKind::ActionUsage && values.contains(QStringLiteral("actionForm"))) {
@@ -2098,9 +2288,23 @@ namespace StructuraSystems::Client {
             case ElementKind::OccurrenceDefinition:
             case ElementKind::AllocationDefinition:
             case ElementKind::ConnectionDefinition:
-            case ElementKind::FlowDefinition: {
+            case ElementKind::FlowDefinition:
+            case ElementKind::MetadataDefinition:
+            case ElementKind::ViewDefinition:
+            case ElementKind::ViewUsage: {
                 node.Kind = DiagramTypes::DefinitionNode;
                 node.Keyword = keywordOf(element);
+                if (element.kind() == ElementKind::ViewUsage) {
+                    node.Title = decorate(element, usageText(Model, id), true) + specializationText(element);
+                    QVariantList parameters;
+                    QVariantList result;
+                    QVariantList attributes;
+                    QVariantList rest;
+                    fillFeatureEntries(element, parameters, result, attributes, rest, false);
+                    addCompartment(node.Compartments, QStringLiteral("attributes"), parameters + result + attributes);
+                    node.Compartments += rest;
+                    return;
+                }
                 node.Title = decorate(element, name, true) + specializationText(element);
                 QVariantList parameters;
                 QVariantList result;
@@ -2112,6 +2316,36 @@ namespace StructuraSystems::Client {
                 node.Compartments += rest;
                 return;
             }
+            case ElementKind::MetadataUsage: {
+                // «metadata» SafetyFeature, its values and what it is about
+                node.Kind = DiagramTypes::DefinitionNode;
+                node.Keyword = QStringLiteral("«metadata»");
+                node.Title = decorate(element, element.name().empty() ? QString::fromStdString(element.typeName())
+                                                                      : usageText(Model, id));
+                QVariantList values;
+                for (const ElementId child: element.ownedElements()) {
+                    const auto &value = Model.element(child);
+                    if (value.kind() == ElementKind::Attribute)
+                        values.append(entry(child, usageText(Model, child) + valueText(value)));
+                }
+                addCompartment(node.Compartments, QStringLiteral("values"), values);
+                QVariantList about;
+                for (const auto &reference: element.about())
+                    about.append(entry(id, QString::fromStdString(reference)));
+                addCompartment(node.Compartments, QStringLiteral("about"), about);
+                return;
+            }
+            case ElementKind::Import:
+            case ElementKind::Alias:
+            case ElementKind::Filter:
+                // «import» private ISQ::*, «alias» Car for Automobile, «filter» @Safety
+                node.Kind = DiagramTypes::DefinitionNode;
+                node.Keyword = QStringLiteral("«") + QString::fromStdString(Diagram::defaultKeyword(element.kind())) +
+                               QStringLiteral("»");
+                node.Title = (element.shortName().empty() ? QString()
+                              : QStringLiteral("<") + QString::fromStdString(element.shortName()) + QStringLiteral("> ")) +
+                             targetText(element);
+                return;
             default:
                 node.Kind = DiagramTypes::PartNode;
                 // «snapshot», «timeslice part», «occurrence», «part»
@@ -2156,6 +2390,12 @@ namespace StructuraSystems::Client {
         QVariantList events;
         QVariantList occurrences;
         QVariantList messages;
+        QVariantList imports;
+        QVariantList metadata;
+        QVariantList views;
+        QVariantList exposes;
+        QVariantList renders;
+        QVariantList filters;
         const bool partLike = composes(element.kind());
         const bool requirementOwner = isRequirementOwner(element.kind());
         for (const ElementId child: element.ownedElements()) {
@@ -2289,6 +2529,27 @@ namespace StructuraSystems::Client {
                     calcs.append(entry(child, QString::fromStdString(SysMLTextImporter::summarize(Model, child).Display),
                                        QString::fromStdString(generator.generate(Model, child))));
                     break;
+                case ElementKind::Import:
+                case ElementKind::Alias:
+                    imports.append(entry(child, (childElement.kind() == ElementKind::Alias ? QStringLiteral("alias ")
+                                                                                           : QStringLiteral("import ")) +
+                                                targetText(childElement)));
+                    break;
+                case ElementKind::MetadataUsage:
+                    metadata.append(entry(child, metadataText(Model, child)));
+                    break;
+                case ElementKind::ViewUsage:
+                    views.append(entry(child, decorate(childElement, usageText(Model, child))));
+                    break;
+                case ElementKind::Expose:
+                    exposes.append(entry(child, targetText(childElement)));
+                    break;
+                case ElementKind::Render:
+                    renders.append(entry(child, targetText(childElement)));
+                    break;
+                case ElementKind::Filter:
+                    filters.append(entry(child, targetText(childElement)));
+                    break;
                 case ElementKind::Textual: {
                     if (isHiddenStatement(childElement))
                         break;
@@ -2352,6 +2613,12 @@ namespace StructuraSystems::Client {
         addCompartment(compartments, QStringLiteral("states"), states);
         addCompartment(compartments, QStringLiteral("constraints"), constraints);
         addCompartment(compartments, QStringLiteral("calcs"), calcs);
+        addCompartment(compartments, QStringLiteral("views"), views);
+        addCompartment(compartments, QStringLiteral("expose"), exposes);
+        addCompartment(compartments, QStringLiteral("render"), renders);
+        addCompartment(compartments, QStringLiteral("filter"), filters);
+        addCompartment(compartments, QStringLiteral("imports"), imports);
+        addCompartment(compartments, QStringLiteral("metadata"), metadata);
         addCompartment(compartments, QStringLiteral("other"), other);
     }
 

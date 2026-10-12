@@ -57,9 +57,14 @@ namespace StructuraSystems::Diagram {
         // requirements, use cases and verifications (usages) on the top level, in packages and parts
         const bool caseUsage = childKind == ElementKind::RequirementUsage || childKind == ElementKind::UseCaseUsage ||
                                childKind == ElementKind::VerificationUsage || childKind == ElementKind::AnalysisUsage;
+        // metadata ("@Safety;", "metadata m about a;"), imports and aliases: in any namespace
+        const bool annotation = childKind == ElementKind::MetadataUsage || childKind == ElementKind::Textual;
+        const bool namespaceMember = childKind == ElementKind::Import || childKind == ElementKind::Alias;
+        // filters and views on package level
+        const bool packageMember = childKind == ElementKind::Filter || childKind == ElementKind::ViewUsage;
         if (ownerId == RootId) {
             if (definition || behavior || caseUsage || isPartLike(childKind) || isConstraintOrCalc(childKind) ||
-                childKind == ElementKind::Textual)
+                annotation || namespaceMember || packageMember)
                 return RuleResult::ok();
             return RuleResult::denied(toString(childKind) + " needs a part or part definition as owner");
         }
@@ -70,8 +75,32 @@ namespace StructuraSystems::Diagram {
         const ElementKind ownerKind = model.element(ownerId).kind();
         const bool text = childKind == ElementKind::Textual;
         switch (ownerKind) {
+            case ElementKind::EnumerationLiteral:
+            case ElementKind::ControlNode:
+            case ElementKind::Textual:
+            case ElementKind::Import:
+            case ElementKind::Expose:
+            case ElementKind::Render:
+            case ElementKind::Filter:
+                return RuleResult::denied(toString(ownerKind) + " cannot own other elements");
+            case ElementKind::MetadataUsage:
+                // "@ToolVariable { name = "deltaT"; }": the values of its attributes
+                if (childKind == ElementKind::Attribute || text)
+                    return RuleResult::ok();
+                return RuleResult::denied("Metadata can only own the values of its attributes");
+            case ElementKind::Alias:
+                if (annotation)
+                    return RuleResult::ok();
+                return RuleResult::denied("An alias can only own comments and metadata");
+            default:
+                if (annotation || namespaceMember)
+                    return RuleResult::ok();
+                break;
+        }
+        switch (ownerKind) {
             case ElementKind::Package:
-                if (definition || behavior || caseUsage || isPartLike(childKind) || isConstraintOrCalc(childKind) || text)
+                if (definition || behavior || caseUsage || isPartLike(childKind) || isConstraintOrCalc(childKind) || text ||
+                    packageMember)
                     return RuleResult::ok();
                 return RuleResult::denied("A package can only own packages, definitions, parts, constraints and calculations");
             case ElementKind::PartDefinition:
@@ -188,14 +217,34 @@ namespace StructuraSystems::Diagram {
                     childKind == ElementKind::ConstraintUsage || text)
                     return RuleResult::ok();
                 return RuleResult::denied(toString(ownerKind) + " can only own its ends, items and attributes");
+            case ElementKind::MetadataDefinition:
+                if (childKind == ElementKind::Attribute || text)
+                    return RuleResult::ok();
+                return RuleResult::denied("A metadata definition can only own attributes");
+            case ElementKind::ViewDefinition:
+            case ElementKind::ViewUsage:
+                // "expose vehicle::**;" only in a view usage
+                if (childKind == ElementKind::ViewUsage || childKind == ElementKind::Render ||
+                    childKind == ElementKind::Filter || childKind == ElementKind::Attribute || text ||
+                    (childKind == ElementKind::Expose && ownerKind == ElementKind::ViewUsage))
+                    return RuleResult::ok();
+                return RuleResult::denied(ownerKind == ElementKind::ViewUsage
+                                          ? "A view can only own views, exposes, renderings, filters and attributes"
+                                          : "A view definition can only own views, renderings, filters and attributes");
             case ElementKind::Attribute:
             case ElementKind::EventOccurrence:
-            case ElementKind::EnumerationLiteral:
-            case ElementKind::ControlNode:
             case ElementKind::Subject:
             case ElementKind::Actor:
+            case ElementKind::EnumerationLiteral:
+            case ElementKind::ControlNode:
             case ElementKind::Textual:
-                return RuleResult::denied(toString(ownerKind) + " cannot own other elements");
+            case ElementKind::MetadataUsage:
+            case ElementKind::Import:
+            case ElementKind::Alias:
+            case ElementKind::Expose:
+            case ElementKind::Render:
+            case ElementKind::Filter:
+                return RuleResult::denied(toString(ownerKind) + " can only own comments, metadata, imports and aliases");
         }
         return RuleResult::denied("Unknown owner kind");
     }
@@ -237,7 +286,7 @@ namespace StructuraSystems::Diagram {
         const bool withinBody = kind == RelationshipKind::Succession &&
                                 model.element(source).owner() == model.element(target).owner();
         if (!withinBody && (!named(pathTarget) || (!named(pathSource) && kind != RelationshipKind::Verify &&
-                                                   kind != RelationshipKind::Include)))
+                                                   kind != RelationshipKind::Include && kind != RelationshipKind::Frame)))
             return RuleResult::denied("An element without a name cannot be referenced");
         // "then if c { ... }": an unnamed target is declared right behind its source (and only there)
         if (withinBody && model.element(target).name().empty() && previousSuccessionEnd(model, target) != source)
@@ -344,8 +393,8 @@ namespace StructuraSystems::Diagram {
                 if (targetKind != ElementKind::RequirementUsage)
                     return RuleResult::denied("Satisfy needs a requirement (usage) as target, e.g. "
                                               "'requirement vehicleMass : MassRequirement'");
-                if (sourceKind != ElementKind::PartUsage && sourceKind != ElementKind::PortUsage)
-                    return RuleResult::denied("A requirement is satisfied by a part or port (usage)");
+                if (sourceKind != ElementKind::PartUsage && sourceKind != ElementKind::PortUsage && !isViewKind(sourceKind))
+                    return RuleResult::denied("A requirement is satisfied by a part or port (usage), a viewpoint by a view");
                 if (model.isAncestor(target, source))
                     return RuleResult::denied("A requirement cannot be satisfied by an element it owns");
                 if (relationshipExists(model, kind, source, target, false))
@@ -362,6 +411,15 @@ namespace StructuraSystems::Diagram {
                     return RuleResult::denied("A verification cannot verify a requirement it owns");
                 if (relationshipExists(model, kind, source, target, false))
                     return RuleResult::denied("Verify already exists");
+                return RuleResult::ok();
+
+            case RelationshipKind::Frame:
+                if (!isRequirementKind(sourceKind) || targetKind != ElementKind::RequirementUsage)
+                    return RuleResult::denied("A requirement (a viewpoint, ...) frames a concern (requirement usage)");
+                if (model.isAncestor(source, target) || model.isAncestor(target, source))
+                    return RuleResult::denied("A requirement cannot frame its own owner or a concern it owns");
+                if (relationshipExists(model, kind, source, target, false))
+                    return RuleResult::denied("Frame already exists");
                 return RuleResult::ok();
 
             case RelationshipKind::Include:
@@ -410,7 +468,7 @@ namespace StructuraSystems::Diagram {
                                RelationshipKind::Binding, RelationshipKind::Interface, RelationshipKind::Succession,
                                RelationshipKind::Transition, RelationshipKind::Satisfy, RelationshipKind::Verify,
                                RelationshipKind::Include, RelationshipKind::Message, RelationshipKind::Allocation,
-                               RelationshipKind::Dependency}) {
+                               RelationshipKind::Dependency, RelationshipKind::Frame}) {
             if (canRelate(model, kind, source, target))
                 result.push_back(kind);
         }

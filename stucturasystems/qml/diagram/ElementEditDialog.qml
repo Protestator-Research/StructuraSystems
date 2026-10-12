@@ -41,6 +41,8 @@ Dialog {
         clauseField.text = details.actionClause !== undefined ? details.actionClause : ""
         untilField.text = details.until !== undefined ? details.until : ""
         parallelCheck.checked = details.parallel === true
+        targetField.text = details.target !== undefined ? details.target : ""
+        aboutField.text = details.about !== undefined ? details.about : ""
         errorLabel.text = ""
         open()
         if (details.isTextual) {
@@ -84,6 +86,10 @@ Dialog {
         }
         if (details.isState)
             values.parallel = parallelCheck.checked
+        if (details.hasTarget)
+            values.target = targetField.text
+        if (details.hasAbout)
+            values.about = aboutField.text
         const error = details.isTextual
                       ? controller.updateElement(elementId, { text: textArea.text })
                       : controller.updateElement(elementId, values)
@@ -136,13 +142,13 @@ Dialog {
         }
 
         Label {
-            visible: dialog.details.isTextual !== true
+            visible: dialog.details.isTextual !== true && dialog.details.anonymous !== true
             text: qsTr("Name")
             color: Theme.textSecondary
         }
         TextField {
             id: nameField
-            visible: dialog.details.isTextual !== true
+            visible: dialog.details.isTextual !== true && dialog.details.anonymous !== true
             enabled: !nameFromRedefinitionCheck.checked
             Layout.fillWidth: true
             placeholderText: dialog.details.mayBeUnnamed === true ? qsTr("optional") : ""
@@ -221,6 +227,38 @@ Dialog {
             placeholderText: "derived #measurable"
             onAccepted: dialog.apply()
             Accessible.name: qsTr("Prefixes and metadata")
+        }
+
+        // import / alias / expose / render / filter: what follows the keyword
+        Label {
+            visible: dialog.details.hasTarget === true
+            text: dialog.details.targetLabel !== undefined ? dialog.details.targetLabel : ""
+            color: Theme.textSecondary
+        }
+        TextField {
+            id: targetField
+            objectName: "targetField"
+            visible: dialog.details.hasTarget === true
+            Layout.fillWidth: true
+            font.family: Theme.monoFamily
+            placeholderText: dialog.details.targetPlaceholder !== undefined ? dialog.details.targetPlaceholder : ""
+            onAccepted: dialog.apply()
+            Accessible.name: qsTr("Target")
+        }
+        // metadata: the annotated elements
+        Label {
+            visible: dialog.details.hasAbout === true
+            text: qsTr("About")
+            color: Theme.textSecondary
+        }
+        TextField {
+            id: aboutField
+            objectName: "aboutField"
+            visible: dialog.details.hasAbout === true
+            Layout.fillWidth: true
+            placeholderText: qsTr("optional, e.g. vehicle::interior::seatBelt, vehicle::bodyAssy::bumper")
+            onAccepted: dialog.apply()
+            Accessible.name: qsTr("Annotated elements")
         }
 
         // redefinition of inherited features: "part smallEng : SmallEngine redefines eng;", ":>> mass = 2000.0;"

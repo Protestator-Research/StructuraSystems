@@ -63,6 +63,8 @@ namespace StructuraSystems::Diagram {
     ElementId SemanticModel::addElement(ElementKind kind, const std::string &name, ElementId owner) {
         if (name.empty() && kind != ElementKind::Textual && !mayBeUnnamed(kind))
             throw ModelError("Element name must not be empty");
+        if (!name.empty() && isAnonymousKind(kind))
+            throw ModelError(toString(kind) + " has no name");
         if (const auto rule = RelationshipRules::canOwn(*this, owner, kind); !rule)
             throw ModelError(rule.Reason);
         ensureUniqueSiblingName(owner, name, RootId, kind);
@@ -122,6 +124,8 @@ namespace StructuraSystems::Diagram {
         auto &target = mutableElement(id);
         if (name.empty() && target.Kind != ElementKind::Textual && !mayBeUnnamed(target.Kind))
             throw ModelError("Element name must not be empty");
+        if (!name.empty() && isAnonymousKind(target.Kind))
+            throw ModelError(toString(target.Kind) + " has no name");
         if (target.Name == name)
             return;
         if (name.empty()) {
@@ -129,7 +133,8 @@ namespace StructuraSystems::Diagram {
             for (const auto &relationship: Relationships) {
                 if (inside(relationship.Target) ||
                     (inside(relationship.Source) && !(relationship.Source == id && (relationship.Kind == RelationshipKind::Verify ||
-                                                                                    relationship.Kind == RelationshipKind::Include))))
+                                                                                    relationship.Kind == RelationshipKind::Include ||
+                                                                                    relationship.Kind == RelationshipKind::Frame))))
                     throw ModelError("The element is referenced by a relationship and needs a name");
             }
         }
@@ -143,7 +148,7 @@ namespace StructuraSystems::Diagram {
     void SemanticModel::setTypeName(ElementId id, const std::string &typeName) {
         auto &target = mutableElement(id);
         if (target.Kind == ElementKind::Package || isDefinitionKind(target.Kind) || target.Kind == ElementKind::Textual ||
-            target.Kind == ElementKind::EnumerationLiteral)
+            target.Kind == ElementKind::EnumerationLiteral || isTargetKind(target.Kind))
             throw ModelError(toString(target.Kind) + " cannot be typed");
         target.TypeName = typeName;
         notify(ModelChange::Type::ElementChanged, id);
@@ -225,7 +230,9 @@ namespace StructuraSystems::Diagram {
         auto &target = mutableElement(id);
         if (target.Kind == ElementKind::Textual)
             throw ModelError("Textual elements keep their keyword in their text");
-        if (keyword.has_value()) {
+        if (keyword == "@" && target.Kind == ElementKind::MetadataUsage) {
+            // "@Safety;" instead of "metadata Safety;"
+        } else if (keyword.has_value()) {
             bool space = true;
             for (const char c: *keyword) {
                 const bool letter = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
@@ -259,6 +266,8 @@ namespace StructuraSystems::Diagram {
         auto &target = mutableElement(id);
         if (target.Kind == ElementKind::Textual)
             throw ModelError("Textual elements keep their short name in their text");
+        if (!shortName.empty() && isAnonymousKind(target.Kind))
+            throw ModelError(toString(target.Kind) + " has no name");
         const bool quoted = shortName.size() > 1 && shortName.front() == '\'' && shortName.back() == '\'' &&
                             shortName.find('\n') == std::string::npos;
         bool basic = !shortName.empty() && !(shortName.front() >= '0' && shortName.front() <= '9');
@@ -292,7 +301,7 @@ namespace StructuraSystems::Diagram {
                                          bool nameFromRedefinition) {
         auto &target = mutableElement(id);
         if (!references.empty() && (!isUsageKind(target.Kind) || target.Kind == ElementKind::EnumerationLiteral ||
-                                    target.Kind == ElementKind::ControlNode))
+                                    target.Kind == ElementKind::ControlNode || target.Kind == ElementKind::MetadataUsage))
             throw ModelError(toString(target.Kind) + " cannot redefine");
         if (!references.empty() && keyword != ":>>" && keyword != "redefines")
             throw ModelError("Invalid redefinition keyword '" + keyword + "' (:>>, redefines)");
@@ -413,6 +422,32 @@ namespace StructuraSystems::Diagram {
         notify(ModelChange::Type::ElementChanged, id);
     }
 
+    void SemanticModel::setTarget(ElementId id, const std::string &text) {
+        auto &target = mutableElement(id);
+        if (!isTargetKind(target.Kind))
+            throw ModelError(toString(target.Kind) + " has no target");
+        if (text.find_first_not_of(" \t") == std::string::npos || breaksStatement(text))
+            throw ModelError("'" + text + "' must be one line without ; { } (and not empty)");
+        if (target.Target == text)
+            return;
+        target.Target = text;
+        notify(ModelChange::Type::ElementChanged, id);
+    }
+
+    void SemanticModel::setAbout(ElementId id, std::vector<std::string> references) {
+        auto &target = mutableElement(id);
+        if (target.Kind != ElementKind::MetadataUsage && !references.empty())
+            throw ModelError("Only metadata is about other elements");
+        for (const auto &reference: references) {
+            if (reference.empty() || breaksStatement(reference) || reference.find(',') != std::string::npos)
+                throw ModelError("Invalid annotated element '" + reference + "'");
+        }
+        if (target.About == references)
+            return;
+        target.About = std::move(references);
+        notify(ModelChange::Type::ElementChanged, id);
+    }
+
     void SemanticModel::setParallel(ElementId id, bool parallel) {
         auto &target = mutableElement(id);
         if (parallel && target.Kind != ElementKind::StateUsage && target.Kind != ElementKind::StateDefinition)
@@ -480,7 +515,8 @@ namespace StructuraSystems::Diagram {
                 return true;
             };
             if (!shorthand && (!named(pathTarget) || (!named(pathSource) && relationship.Kind != RelationshipKind::Verify &&
-                                                       relationship.Kind != RelationshipKind::Include))) {
+                                                       relationship.Kind != RelationshipKind::Include &&
+                                                       relationship.Kind != RelationshipKind::Frame))) {
                 invalid.push_back(relationship.Id);
                 continue;
             }
@@ -625,6 +661,16 @@ namespace StructuraSystems::Diagram {
                                [id](const Relationship &relationship) { return relationship.Id == id; });
         if (it == Relationships.end())
             throw ModelError("Unknown relationship id " + std::to_string(id));
+        if (it->Kind == RelationshipKind::Satisfy) {
+            // "satisfy r;" in the satisfying element, or "satisfy r by s;"
+            if (context && *context != it->Source)
+                throw ModelError("Satisfy is declared in its source or in the owner of its ends");
+            if (it->Context == context)
+                return;
+            it->Context = context;
+            notify(ModelChange::Type::RelationshipChanged, id);
+            return;
+        }
         if (it->Kind != RelationshipKind::Message && it->Kind != RelationshipKind::Allocation &&
             it->Kind != RelationshipKind::Dependency)
             throw ModelError(toString(it->Kind) + " is always declared in the owner of its ends");
@@ -683,7 +729,7 @@ namespace StructuraSystems::Diagram {
             throw ModelError("Unknown relationship id " + std::to_string(id));
         if (it->Kind == RelationshipKind::Specialization || it->Kind == RelationshipKind::Binding ||
             it->Kind == RelationshipKind::Satisfy || it->Kind == RelationshipKind::Verify ||
-            it->Kind == RelationshipKind::Include ||
+            it->Kind == RelationshipKind::Include || it->Kind == RelationshipKind::Frame ||
             ((it->Kind == RelationshipKind::Succession || it->Kind == RelationshipKind::Transition ||
               it->Kind == RelationshipKind::Dependency) && !typeName.empty())) {
             if (!name.empty() || !typeName.empty())
