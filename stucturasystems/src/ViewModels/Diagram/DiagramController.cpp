@@ -3,6 +3,8 @@
 //
 
 #include "DiagramController.h"
+#include "DiagramLayout.h"
+#include "EdgeRouting.h"
 #include "DiagramGeometry.h"
 
 #include <QMetaObject>
@@ -1151,8 +1153,7 @@ namespace StructuraSystems::Client {
             const auto *target = Nodes->find(it->Target);
             if (!source || !target)
                 continue;
-            const QLineF line = DiagramGeometry::edgeLine(source->Rect, target->Rect);
-            if (DiagramGeometry::distanceToSegment(point, line) <= EdgeHitDistance)
+            if (EdgeRouting::distanceToRoute(point, EdgeRouting::routeOf(*Nodes, edges, *it)) <= EdgeHitDistance)
                 return it->Key;
         }
         return {};
@@ -1209,6 +1210,7 @@ namespace StructuraSystems::Client {
     void DiagramController::finishMove(const QString &id) {
         if (const auto elementId = toId(id))
             updateContainment(*elementId);
+        emit layoutEdited();
     }
 
     void DiagramController::updateContainment(ElementId id) {
@@ -1276,6 +1278,46 @@ namespace StructuraSystems::Client {
         AutoLayout = false;
         Nodes->setRect(row, QRectF(old.topLeft(), QSizeF(std::max(width, MinimumFrameWidth),
                                                          std::max(height, MinimumFrameHeight))));
+        emit layoutEdited();
+    }
+
+    QJsonObject DiagramController::layoutState() const {
+        QJsonObject layout;
+        if (AutoLayout)
+            return layout;
+        for (const auto &node: Nodes->nodes()) {
+            if (!Model.contains(node.Id))
+                continue;
+            layout.insert(DiagramLayout::keyOf(Model, node.Id),
+                          node.Kind == DiagramTypes::PackageNode ? DiagramLayout::toJson(node.Rect)
+                                                                 : DiagramLayout::toJson(node.Rect.topLeft()));
+        }
+        return layout;
+    }
+
+    void DiagramController::restoreLayout(const QJsonObject &layout) {
+        if (layout.isEmpty())
+            return;
+        syncNow();
+        const auto byKey = DiagramLayout::elementsByKey(Model);
+        bool applied = false;
+        for (auto it = layout.begin(); it != layout.end(); ++it) {
+            const auto element = byKey.find(it.key());
+            const auto position = DiagramLayout::positionOf(it.value());
+            if (element == byKey.end() || !position)
+                continue;
+            const int row = Nodes->indexOf(element->second);
+            if (row < 0)
+                continue;
+            const auto &node = Nodes->nodes()[std::size_t(row)];
+            QSizeF size = node.Rect.size();
+            if (node.Kind == DiagramTypes::PackageNode)
+                size = DiagramLayout::sizeOf(it.value()).value_or(size);
+            Nodes->setRect(row, QRectF(*position, size));
+            applied = true;
+        }
+        if (applied)
+            AutoLayout = false;
     }
 
     void DiagramController::updateCanvasSize() {

@@ -18,6 +18,10 @@ namespace StructuraSystems::Diagram {
         };
 
         SysMLCodeGenerator() = default;
+
+        /// The indentation a text uses for one level: a tab, or the smallest indentation of its lines in
+        /// spaces ("  ", "    ", ...); four spaces if no line is indented.
+        [[nodiscard]] static std::string detectIndent(const std::string &text);
         explicit SysMLCodeGenerator(Options options);
 
         /// Generates the complete text for all top-level elements of the model.

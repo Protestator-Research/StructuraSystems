@@ -3,6 +3,8 @@
 //
 
 #include "BehaviorController.h"
+#include "DiagramLayout.h"
+#include "EdgeRouting.h"
 #include "DiagramGeometry.h"
 
 #include <QMetaObject>
@@ -110,11 +112,13 @@ namespace StructuraSystems::Client {
         const auto value = id.toULongLong(&ok);
         if (!ok || !Model.contains(value) || !Diagram::isBehaviorKind(Model.element(value).kind()) || ContextElement == value)
             return;
+        saveContextLayout();
         ContextElement = value;
         Positions.clear();
         SelectedNodes.clear();
         SelectedEdges.clear();
         AutoLayout = true;
+        applyContextLayout();
         emit contextChanged();
         syncNow();
     }
@@ -175,6 +179,7 @@ namespace StructuraSystems::Client {
             ContextElement = chosen;
             Positions.clear();
             AutoLayout = true;
+            applyContextLayout();
             emit contextChanged();
         }
     }
@@ -432,9 +437,68 @@ namespace StructuraSystems::Client {
         return bounds;
     }
 
+    QString BehaviorController::contextKey() const {
+        return context() ? DiagramLayout::keyOf(Model, *context()) : QString();
+    }
+
+    QJsonObject BehaviorController::currentLayout() const {
+        QJsonObject layout;
+        for (const auto &[id, position]: Positions) {
+            if (Model.contains(id))
+                layout.insert(DiagramLayout::keyOf(Model, id), DiagramLayout::toJson(position));
+        }
+        return layout;
+    }
+
+    void BehaviorController::saveContextLayout() {
+        const QString key = contextKey();
+        if (key.isEmpty())
+            return;
+        if (AutoLayout)
+            SavedLayouts.remove(key);
+        else
+            SavedLayouts.insert(key, currentLayout());
+    }
+
+    void BehaviorController::applyContextLayout() {
+        const QJsonObject layout = SavedLayouts.value(contextKey()).toObject();
+        if (layout.isEmpty())
+            return;
+        const auto byKey = DiagramLayout::elementsByKey(Model);
+        for (auto it = layout.begin(); it != layout.end(); ++it) {
+            const auto element = byKey.find(it.key());
+            const auto position = DiagramLayout::positionOf(it.value());
+            if (element != byKey.end() && position)
+                Positions[element->second] = *position;
+        }
+        if (!Positions.empty())
+            AutoLayout = false;
+    }
+
+    QJsonObject BehaviorController::layoutState() const {
+        QJsonObject layout = SavedLayouts;
+        const QString key = contextKey();
+        if (!key.isEmpty()) {
+            if (AutoLayout)
+                layout.remove(key);
+            else
+                layout.insert(key, currentLayout());
+        }
+        return layout;
+    }
+
+    void BehaviorController::restoreLayout(const QJsonObject &layout) {
+        SavedLayouts = layout;
+        Positions.clear();
+        AutoLayout = true;
+        applyContextLayout();
+        syncNow();
+    }
+
     void BehaviorController::layoutAll() {
         Positions.clear();
         AutoLayout = true;
+        SavedLayouts.remove(contextKey());
         syncNow();
     }
 
@@ -467,7 +531,9 @@ namespace StructuraSystems::Client {
             const auto *target = Nodes->find(it->Target);
             if (!source || !target)
                 continue;
-            if (DiagramGeometry::distanceToSegment(point, DiagramGeometry::edgeLine(source->Rect, target->Rect)) <= EdgeHitDistance)
+            const auto route = source == target ? std::vector<QPointF>{source->Rect.topRight(), source->Rect.topRight()}
+                                                : EdgeRouting::routeOf(*Nodes, edges, *it);
+            if (EdgeRouting::distanceToRoute(point, route) <= EdgeHitDistance)
                 return it->Key;
         }
         return {};
@@ -537,6 +603,7 @@ namespace StructuraSystems::Client {
         if (!id)
             return;
         AutoLayout = false;
+        emit layoutEdited();
         Positions[*id] = QPointF(std::max<qreal>(0, x), std::max<qreal>(0, y));
         const int row = Nodes->indexOf(*id);
         Nodes->setRect(row, QRectF(Positions[*id], Nodes->nodes()[std::size_t(row)].Rect.size()));

@@ -15,6 +15,7 @@
 #ifndef STRUCTURASYSTEMS_BEHAVIORCONTROLLER_H
 #define STRUCTURASYSTEMS_BEHAVIORCONTROLLER_H
 
+#include <QJsonObject>
 #include <QObject>
 #include <QPointF>
 #include <QPointer>
@@ -87,12 +88,19 @@ namespace StructuraSystems::Client {
         /// Entry / do / exit action of a state shown at a point of the state node (for editing), empty if none.
         Q_INVOKABLE QString entryAt(const QString &node, qreal x, qreal y) const;
         Q_INVOKABLE void layoutAll();
+        /// Positions of the nodes of every context shown so far, by context and element key (see DiagramLayout);
+        /// contexts with the automatic layout are left out.
+        [[nodiscard]] QJsonObject layoutState() const;
+        /// Positions stored by layoutState() (after loading): used whenever their context is shown.
+        void restoreLayout(const QJsonObject &layout);
         [[nodiscard]] Q_INVOKABLE QRectF contentBounds() const;
 
         void syncNow();
 
     signals:
         void statusMessage(const QString &message);
+        /// A node was moved by the user (only the layout changed, not the model).
+        void layoutEdited();
         void contextChanged();
         void contextsChanged();
         void selectionChanged();
@@ -118,6 +126,13 @@ namespace StructuraSystems::Client {
         std::optional<Diagram::ElementId> ContextElement;
         QVariantList Contexts;
         std::map<Diagram::ElementId, QPointF> Positions;
+        /// Stored positions of the contexts by context key (see layoutState).
+        QJsonObject SavedLayouts;
+        [[nodiscard]] QString contextKey() const;
+        [[nodiscard]] QJsonObject currentLayout() const;
+        /// The positions of the context shown are kept in SavedLayouts / taken from there.
+        void saveContextLayout();
+        void applyContextLayout();
         std::set<Diagram::ElementId> SelectedNodes;
         std::set<QString> SelectedEdges;
         QSizeF CanvasSize{1600, 1000};

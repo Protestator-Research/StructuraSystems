@@ -6,6 +6,7 @@
 #include "QtPrinting.h"
 
 #include <BehaviorController.h>
+#include <QJsonObject>
 #include <DiagramController.h>
 
 #include <Diagram/Conversion/SysMLCodeGenerator.h>
@@ -307,4 +308,29 @@ TEST_CASE("Behavior: parallel states, do and entry actions with a form") {
     details["parallel"] = false;
     CHECK(structure.updateElement(key(machine), details).isEmpty());
     CHECK(generated(model).rfind("state vehicleStates {\n", 0) == 0);
+}
+
+TEST_CASE("Behavior: positions are kept per action and restored") {
+    const std::string text = "action def A {\n    first start;\n    then action a;\n    then action b;\n}\n"
+                             "action def B {\n    action c;\n}\n";
+    SemanticModel model;
+    CHECK(SysMLTextImporter::importText(text, model).lossless());
+    BehaviorController behavior(model);
+    const ElementId a = model.children(RootId)[0];
+    const ElementId b = model.children(RootId)[1];
+    behavior.setContextId(key(a));
+    CHECK(behavior.layoutState().isEmpty()); // automatic layout: nothing to store
+    const ElementId actionA = *find(model, a, "a");
+    behavior.moveNode(key(actionA), 300, 250);
+    behavior.setContextId(key(b)); // the positions of A are kept while B is shown
+    const QJsonObject layout = behavior.layoutState();
+    CHECK(layout.contains("A"));
+    CHECK(layout.value("A").toObject().contains("A::a"));
+
+    SemanticModel again;
+    CHECK(SysMLTextImporter::importText(text, again).lossless());
+    BehaviorController restored(again);
+    restored.restoreLayout(layout);
+    restored.setContextId(key(again.children(RootId)[0]));
+    CHECK(restored.nodeRect(key(*find(again, again.children(RootId)[0], "a"))).topLeft() == QPointF(300, 250));
 }

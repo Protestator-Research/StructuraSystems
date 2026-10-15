@@ -6,6 +6,7 @@
 #include "QtPrinting.h"
 
 #include <DiagramController.h>
+#include <EdgeRouting.h>
 
 #include <Diagram/Conversion/SysMLCodeGenerator.h>
 #include <Diagram/Conversion/SysMLTextImporter.h>
@@ -956,4 +957,41 @@ TEST_CASE("Structure view: metadata, imports, aliases, views, viewpoints and con
     SemanticModel again;
     CHECK(SysMLTextImporter::importText(generated(model), again).lossless());
     CHECK_EQ(generated(again), generated(model));
+}
+
+TEST_CASE("Edges: straight where free, around the nodes in between, side by side") {
+    using namespace StructuraSystems::Client::EdgeRouting;
+    const QRectF a(0, 0, 100, 60);
+    const QRectF b(400, 0, 100, 60);
+    // nothing in between: one straight line from border to border
+    const auto free = route(a, b, {});
+    CHECK_EQ(free.size(), std::size_t(2));
+    CHECK(free.front() == QPointF(100, 30));
+    CHECK(free.back() == QPointF(400, 30));
+    // a node in the way: a route with bends that passes no node
+    const QRectF blocker(200, -20, 100, 100);
+    const auto around = route(a, b, {blocker});
+    CHECK(around.size() > 2);
+    CHECK_EQ(crossings(around, {blocker}), 0);
+    CHECK(around.front().x() >= 0 && around.back().x() >= 400 - 1e-6);
+    // horizontal and vertical segments only
+    for (std::size_t i = 1; i < around.size(); ++i)
+        CHECK(std::abs(around[i].x() - around[i - 1].x()) < 1e-6 || std::abs(around[i].y() - around[i - 1].y()) < 1e-6);
+    // two edges between the same nodes are drawn side by side
+    std::vector<DiagramEdge> edges(2);
+    edges[0].Key = "r:1";
+    edges[0].Source = 1;
+    edges[0].Target = 2;
+    edges[1].Key = "r:2";
+    edges[1].Source = 2;
+    edges[1].Target = 1;
+    CHECK(parallelOffset(edges, edges[0]) != 0);
+    // not on the same line, in both directions: around a node as well
+    const auto first = route(a, b, {blocker}, parallelOffset(edges, edges[0]));
+    const auto second = route(b, a, {blocker}, parallelOffset(edges, edges[1]));
+    std::vector<QPointF> reversed(second.rbegin(), second.rend());
+    CHECK(first != reversed);
+    const auto straightFirst = route(a, b, {}, parallelOffset(edges, edges[0]));
+    const auto straightSecond = route(b, a, {}, parallelOffset(edges, edges[1]));
+    CHECK(std::abs(straightFirst.front().y() - straightSecond.back().y()) > 5);
 }

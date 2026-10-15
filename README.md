@@ -15,6 +15,7 @@ The desktop app is a Qt Quick / Material Design application (light, dark or syst
 - **Digital twins**: wizard that creates a digital twin from selected elements of an online project.
 - **Card editor**: documents are lists of element cards (Markdown, YAML, SysMLv2, KerML) with syntax highlighting, inline editing, reordering, insertion and deletion.
 - **Problems**: F5 parses the current document; findings are listed in a resizable sheet, click one to jump to its card. Long messages are shown in a tooltip and can be copied via the context menu.
+- **Diagram editor** (Ctrl+Shift+D, or *Open in diagram editor* on a SysML card): structure, parametric, behavior, use case and sequence diagrams of a SysML v2 block. Every change is written back as SysML v2 text, text written by hand is read into the diagram; hand edits of the generated block pause the generation until you decide. See [docs/DiagramEditor.md](docs/DiagramEditor.md).
 - **Quit protection**: unsaved documents are listed before the application closes.
 - Window size, position, side panel and last destination are remembered between sessions.
 
@@ -23,6 +24,7 @@ The desktop app is a Qt Quick / Material Design application (light, dark or syst
 | Ctrl+O | Open folder |
 | Ctrl+Shift+O | Open files |
 | Ctrl+N | New project |
+| Ctrl+Shift+D | Diagram editor of the current document |
 | Ctrl+S | Save current document (local files) |
 | F5 | Parse and check current document |
 | Ctrl+W | Close current document |
@@ -75,6 +77,8 @@ stucturasystems/
     ProjectFilterModel             filter proxy for the project lists
     SettingsController             settings as QML properties
     SysMLHighlighter               syntax highlighting for the editors
+    Diagram/                       view models of the diagram editor (one per view, nodes, edges, drawing of lines)
+  src/Diagram/                     core of the diagram editor (C++20 without Qt): SysML v2 model, rules, text import and generation
   src/Models/                      data models, settings storage, parsers (Markdown, SysML)
   src/Services/                    backend communication, digital twin entities
   qml/Main.qml                     window, shortcuts, layout
@@ -82,6 +86,8 @@ stucturasystems/
   qml/components/                  reusable controls (navigation rail, lists, dialog footer, ...)
   qml/views/                       explorer, online and twin panes, editor, element cards, problems sheet
   qml/dialogs/                     settings, new project, commit, wizard, quit, about, ...
+  qml/diagram/                     diagram editor window, canvases, nodes, palette and dialogs
+  tests/                           unit tests of the diagram editor (RUN_TESTS=ON), see docs/DiagramEditor.md
   resources/                       icons (git submodule)
 ```
 

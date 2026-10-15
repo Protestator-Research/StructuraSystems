@@ -10,6 +10,7 @@
 #ifndef STRUCTURASYSTEMS_DIAGRAMCONTROLLER_H
 #define STRUCTURASYSTEMS_DIAGRAMCONTROLLER_H
 
+#include <QJsonObject>
 #include <QObject>
 #include <QPointF>
 #include <QRectF>
@@ -139,8 +140,16 @@ namespace StructuraSystems::Client {
         /// "6", "0..1", "1..*", "*", "[2]" or empty. first = valid input, second = parsed value.
         static std::pair<bool, std::optional<Diagram::Multiplicity>> parseMultiplicity(const QString &input);
 
+        /// Positions of the nodes (frames with their size) by element key (see DiagramLayout); empty while the
+        /// layout is the automatic one.
+        [[nodiscard]] QJsonObject layoutState() const;
+        /// Places the nodes stored in layoutState() (after loading; the others keep their place).
+        void restoreLayout(const QJsonObject &layout);
+
     signals:
         void statusMessage(const QString &message);
+        /// A node was moved or a frame resized by the user (only the layout changed, not the model).
+        void layoutEdited();
         void arrowModeChanged();
         void arrowDefaultChanged();
         void selectionChanged();

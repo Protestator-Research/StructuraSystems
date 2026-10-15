@@ -4,6 +4,9 @@
 
 #include "DiagramEditorModel.h"
 
+#include <QJsonDocument>
+#include <QJsonObject>
+
 #include <utility>
 
 namespace StructuraSystems::Client {
@@ -31,6 +34,16 @@ namespace StructuraSystems::Client {
         connect(UseCases, &UseCaseController::statusMessage, this, &DiagramEditorModel::statusMessage);
         Sequence = new SequenceController(Model, this);
         connect(Sequence, &SequenceController::statusMessage, this, &DiagramEditorModel::statusMessage);
+        // moved nodes: their positions are written with the block (layout line), a moment after the last move
+        LayoutTimer.setSingleShot(true);
+        LayoutTimer.setInterval(700);
+        connect(&LayoutTimer, &QTimer::timeout, this, [this] {
+            if (Mode == Live)
+                writeBlockIfAllowed();
+        });
+        connect(Controller, &DiagramController::layoutEdited, &LayoutTimer, qOverload<>(&QTimer::start));
+        connect(Behavior, &BehaviorController::layoutEdited, &LayoutTimer, qOverload<>(&QTimer::start));
+        connect(UseCases, &UseCaseController::layoutEdited, &LayoutTimer, qOverload<>(&QTimer::start));
 
         ListenerToken = Model.addListener([this](const Diagram::ModelChange &) {
             if (!Loading)
@@ -126,6 +139,9 @@ namespace StructuraSystems::Client {
             const std::string text = generated ? GeneratedBlockGuard::extractCode(*body).value_or(std::string()) : *body;
             LoadReport = SysMLTextImporter::importText(text, Model, Target->isKerML() ? SysMLTextImporter::Dialect::KerML
                                                                                       : SysMLTextImporter::Dialect::SysML);
+            // written back with the indentation of the block (two spaces, a tab, ...)
+            Generator = Diagram::SysMLCodeGenerator(Diagram::SysMLCodeGenerator::Options{
+                    Diagram::SysMLCodeGenerator::detectIndent(text)});
             // An unchanged generated block that was read completely: the diagram is the block.
             if (generated && Guard.check(body) == GeneratedBlockGuard::SyncState::InSync && LoadReport.lossless())
                 OwnsBlock = true;
@@ -136,6 +152,14 @@ namespace StructuraSystems::Client {
         Parametric->layoutAll();
         Behavior->layoutAll();
         UseCases->layoutAll();
+        // the positions stored with a generated block
+        if (body && GeneratedBlockGuard::isGeneratedBlock(*body)) {
+            const auto layout = QJsonDocument::fromJson(
+                    QByteArray::fromStdString(GeneratedBlockGuard::extractLayout(*body))).object();
+            Controller->restoreLayout(layout.value(QStringLiteral("s")).toObject());
+            Behavior->restoreLayout(layout.value(QStringLiteral("b")).toObject());
+            UseCases->restoreLayout(layout.value(QStringLiteral("u")).toObject());
+        }
         const std::string code = Generator.generate(Model);
         if (code != LastCode) {
             LastCode = code;
@@ -249,7 +273,7 @@ namespace StructuraSystems::Client {
     void DiagramEditorModel::writeBlock() {
         if (!Target || WriteLocked)
             return;
-        const std::string body = GeneratedBlockGuard::wrap(LastCode);
+        const std::string body = GeneratedBlockGuard::wrap(LastCode, layoutLine());
         // Set before writing: the document synchronously notifies recheckBlock().
         OwnsBlock = true;
         Guard.recordWrite();
@@ -258,6 +282,20 @@ namespace StructuraSystems::Client {
             Target->writeGeneratedBlock(body);
         setState(InSync);
         updatePendingChanges(body);
+    }
+
+    std::string DiagramEditorModel::layoutLine() const {
+        QJsonObject layout;
+        const auto add = [&](const char *view, const QJsonObject &positions) {
+            if (!positions.isEmpty())
+                layout.insert(QLatin1String(view), positions);
+        };
+        add("s", Controller->layoutState());
+        add("b", Behavior->layoutState());
+        add("u", UseCases->layoutState());
+        if (layout.isEmpty())
+            return {}; // the automatic layout: no layout line
+        return QJsonDocument(layout).toJson(QJsonDocument::Compact).toStdString();
     }
 
     DiagramEditorModel::BlockState DiagramEditorModel::evaluateBlock(const std::optional<std::string> &body) const {

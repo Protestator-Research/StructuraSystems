@@ -40,6 +40,8 @@ add_executable(StructuraDiagramViewModelTests
         ${DIAGRAM_VIEWMODEL_DIR}/DiagramEdgeModel.h
         ${DIAGRAM_VIEWMODEL_DIR}/DiagramEdgeModel.cpp
         ${DIAGRAM_VIEWMODEL_DIR}/DiagramController.h
+        ${DIAGRAM_VIEWMODEL_DIR}/DiagramLayout.h
+        ${DIAGRAM_VIEWMODEL_DIR}/EdgeRouting.h
         ${DIAGRAM_VIEWMODEL_DIR}/DiagramController.cpp
         ${DIAGRAM_VIEWMODEL_DIR}/DiagramEditorModel.h
         ${DIAGRAM_VIEWMODEL_DIR}/DiagramEditorModel.cpp

@@ -375,6 +375,8 @@ namespace StructuraSystems::Diagram {
         [[nodiscard]] bool declaredWithThen() const { return DeclaredWithThen; }
         /// import / alias / expose / render / filter: what follows the keyword (alias: after "for"), as written.
         [[nodiscard]] const std::string &target() const { return Target; }
+        /// Written after an empty line (as in the text it was read from).
+        [[nodiscard]] bool blankLineBefore() const { return BlankLineBefore; }
         /// Metadata usage: the annotated elements after "about", as written (empty: its owner).
         [[nodiscard]] const std::vector<std::string> &about() const { return About; }
         /// State usage / definition: its nested states are concurrent ("state s parallel { ... }").
@@ -413,6 +415,7 @@ namespace StructuraSystems::Diagram {
         bool DeclaredWithThen = false;
         std::string Target;
         std::vector<std::string> About;
+        bool BlankLineBefore = false;
     };
 
     struct Relationship {

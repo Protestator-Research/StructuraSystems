@@ -6,6 +6,7 @@
 #include "DiagramEdgeModel.h"
 #include "DiagramGeometry.h"
 #include "DiagramNodeModel.h"
+#include "EdgeRouting.h"
 
 #include <QFontMetrics>
 #include <QPainter>
@@ -205,6 +206,14 @@ namespace StructuraSystems::Client {
         }
     }
 
+    void EdgeLayerItem::setRouting(bool enabled) {
+        if (Routing == enabled)
+            return;
+        Routing = enabled;
+        emit routingChanged();
+        update();
+    }
+
     void EdgeLayerItem::setShowGrid(bool show) {
         if (ShowGrid == show)
             return;
@@ -253,6 +262,7 @@ namespace StructuraSystems::Client {
         if (Nodes && Edges && PinMode)
             paintPinEdges(painter);
         if (Nodes && Edges && !PinMode) {
+            std::vector<QRectF> placedLabels;
             for (const auto &edge: Edges->edges()) {
                 const auto *source = Nodes->find(edge.Source);
                 const auto *target = Nodes->find(edge.Target);
@@ -285,20 +295,30 @@ namespace StructuraSystems::Client {
                     return node.Kind == DiagramTypes::UseCaseNode ? DiagramGeometry::ellipsePointTowards(node.Rect, towards)
                                                                   : DiagramGeometry::borderPointTowards(shape(node), towards);
                 };
-                QLineF line(outline(*source, shape(*target).center()), outline(*target, shape(*source).center()));
-                // two arrows between the same nodes (a -> b and b -> a): side by side instead of on top of each other
-                const bool parallel = std::any_of(Edges->edges().begin(), Edges->edges().end(), [&](const DiagramEdge &other) {
-                    return &other != &edge && ((other.Source == edge.Source && other.Target == edge.Target) ||
-                                               (other.Source == edge.Target && other.Target == edge.Source));
-                });
-                if (parallel && line.length() > 1e-6) {
-                    QPointF normal(-(line.dy()), line.dx());
-                    normal /= line.length();
-                    const qreal side = edge.Source < edge.Target ? 1.0 : -1.0;
-                    line.translate(normal * 9.0 * side);
+                // tidy lines (structure and behavior views): around the nodes in between, side by side between
+                // the same two nodes; otherwise straight (use cases: from outline to outline)
+                std::vector<QPointF> path;
+                const bool roundShapes = source->Kind == DiagramTypes::UseCaseNode || source->Kind == DiagramTypes::ActorNode ||
+                                         target->Kind == DiagramTypes::UseCaseNode || target->Kind == DiagramTypes::ActorNode;
+                if (Routing && !roundShapes) {
+                    path = EdgeRouting::routeOf(*Nodes, Edges->edges(), edge);
+                } else {
+                    QLineF line(outline(*source, shape(*target).center()), outline(*target, shape(*source).center()));
+                    const qreal offset = EdgeRouting::parallelOffset(Edges->edges(), edge);
+                    if (std::abs(offset) > 0 && line.length() > 1e-6) {
+                        QPointF normal(-(line.dy()), line.dx());
+                        normal /= line.length();
+                        line.translate(normal * offset);
+                    }
+                    path = {line.p1(), line.p2()};
                 }
-                const QPointF start = line.p1();
-                const QPointF end = line.p2();
+                if (path.size() < 2)
+                    continue;
+                const bool parallel = std::abs(EdgeRouting::parallelOffset(Edges->edges(), edge)) > 0;
+                const QPointF start = path.front();
+                const QPointF end = path.back();
+                const QPointF afterStart = path[1];
+                const QPointF beforeEnd = path[path.size() - 2];
                 const QColor color = edge.Selected ? SelectionColor : LineColor;
                 painter->setPen(QPen(color, edge.Selected ? 2.2 : 1.4));
 
@@ -310,17 +330,17 @@ namespace StructuraSystems::Client {
                 bool openHead = false;  // message, «allocate»: a solid line with an open arrow head
                 switch (edge.Kind) {
                     case DiagramTypes::Composition:
-                        marker = diamond(start, end); // the diamond sits at the owner
+                        marker = diamond(start, afterStart); // the diamond sits at the owner
                         if (!marker.isEmpty())
                             lineStart = marker[2];
                         break;
                     case DiagramTypes::Flow:
                     case DiagramTypes::Succession:
                     case DiagramTypes::Transition:
-                        marker = arrowHead(end, start);
+                        marker = arrowHead(end, beforeEnd);
                         break;
                     case DiagramTypes::Specialization:
-                        marker = arrowHead(end, start);
+                        marker = arrowHead(end, beforeEnd);
                         filled = false;
                         if (!marker.isEmpty())
                             lineEnd = (marker[1] + marker[2]) / 2.0;
@@ -347,41 +367,53 @@ namespace StructuraSystems::Client {
                         break;
                 }
 
+                std::vector<QPointF> drawn = path;
+                drawn.front() = lineStart;
+                drawn.back() = lineEnd;
                 if (openArrow) {
                     QPen dashed(color, edge.Selected ? 2.2 : 1.4, Qt::DashLine);
                     painter->setPen(dashed);
-                    painter->drawLine(lineStart, lineEnd);
+                    painter->drawPolyline(drawn.data(), int(drawn.size()));
                     painter->setPen(QPen(color, edge.Selected ? 2.2 : 1.4));
-                    const QPolygonF head = arrowHead(end, start);
+                    const QPolygonF head = arrowHead(end, beforeEnd);
                     if (!head.isEmpty()) {
                         painter->drawLine(head[0], head[1]);
                         painter->drawLine(head[0], head[2]);
                     }
                 } else {
-                    painter->drawLine(lineStart, lineEnd);
-                    const QPolygonF head = openHead ? arrowHead(end, start) : QPolygonF();
+                    painter->drawPolyline(drawn.data(), int(drawn.size()));
+                    const QPolygonF head = openHead ? arrowHead(end, beforeEnd) : QPolygonF();
                     if (!head.isEmpty()) {
                         painter->drawLine(head[0], head[1]);
                         painter->drawLine(head[0], head[2]);
                     }
                 }
+                // the longest segment carries the label (and the ball and socket of an interface)
+                std::size_t longest = 1;
+                for (std::size_t i = 1; i < drawn.size(); ++i) {
+                    if (QLineF(drawn[i - 1], drawn[i]).length() > QLineF(drawn[longest - 1], drawn[longest]).length())
+                        longest = i;
+                }
+                const QPointF segmentStart = drawn[longest - 1];
+                const QPointF segmentEnd = drawn[longest];
                 if (edge.Kind == DiagramTypes::Temporal) {
                     // temporal decomposition: a filled half disc on the owner, its flat side towards the slice
-                    const QLineF line(start, end);
+                    const QLineF line(start, afterStart);
                     const qreal angle = line.angle();
                     const QRectF disc(start.x() - 7, start.y() - 7, 14, 14);
-                    QPainterPath path;
-                    path.moveTo(start);
-                    path.arcTo(disc, angle + 90, 180);
-                    path.closeSubpath();
+                    QPainterPath halfDisc;
+                    halfDisc.moveTo(start);
+                    halfDisc.arcTo(disc, angle + 90, 180);
+                    halfDisc.closeSubpath();
                     painter->setBrush(QBrush(color));
-                    painter->drawPath(path.translated(QPointF(std::cos(qDegreesToRadians(angle)), -std::sin(qDegreesToRadians(angle))) * 7));
+                    painter->drawPath(halfDisc.translated(QPointF(std::cos(qDegreesToRadians(angle)),
+                                                                  -std::sin(qDegreesToRadians(angle))) * 7));
                     painter->setBrush(Qt::NoBrush);
                 }
                 if (edge.Kind == DiagramTypes::Interface) {
                     // ball and socket in the middle
-                    const QPointF middle = (lineStart + lineEnd) / 2.0;
-                    const QLineF line(lineStart, lineEnd);
+                    const QPointF middle = (segmentStart + segmentEnd) / 2.0;
+                    const QLineF line(segmentStart, segmentEnd);
                     const qreal angle = line.angle();
                     painter->setBrush(QBrush(BackgroundColor));
                     painter->drawEllipse(middle, 4.5, 4.5);
@@ -393,16 +425,26 @@ namespace StructuraSystems::Client {
                     QFont font = painter->font();
                     font.setPixelSize(11);
                     painter->setFont(font);
-                    const QPointF middle = (lineStart + lineEnd) / 2.0;
+                    const QPointF middle = (segmentStart + segmentEnd) / 2.0;
                     const QRectF box = painter->fontMetrics().boundingRect(edge.Label).adjusted(-4, -2, 4, 2);
                     // beside a steep line, above a flat one; on the side the line was moved to
-                    const bool steep = std::abs(lineEnd.y() - lineStart.y()) > std::abs(lineEnd.x() - lineStart.x());
+                    const bool steep = std::abs(segmentEnd.y() - segmentStart.y()) > std::abs(segmentEnd.x() - segmentStart.x());
                     const qreal side = (parallel && edge.Source > edge.Target) ? -1.0 : 1.0;
                     QRectF placed = steep ? QRectF(side > 0 ? middle.x() + 8 : middle.x() - 8 - box.width(),
                                                    middle.y() - box.height() / 2, box.width(), box.height())
                                           : QRectF(middle.x() - box.width() / 2,
                                                    side > 0 ? middle.y() - box.height() - 8 : middle.y() + 8,
                                                    box.width(), box.height());
+                    // not on top of another label: moved along the line until it is free
+                    for (int attempt = 1; attempt < 8; ++attempt) {
+                        const bool taken = std::any_of(placedLabels.begin(), placedLabels.end(),
+                                                       [&](const QRectF &other) { return other.intersects(placed); });
+                        if (!taken)
+                            break;
+                        const qreal step = (attempt % 2 ? 1.0 : -1.0) * ((attempt + 1) / 2) * (steep ? box.height() + 2 : box.width() / 2 + 6);
+                        placed.translate(steep ? QPointF(0, step) : QPointF(step, 0));
+                    }
+                    placedLabels.push_back(placed);
                     painter->setPen(Qt::NoPen);
                     painter->setBrush(QBrush(BackgroundColor));
                     painter->drawRect(placed);

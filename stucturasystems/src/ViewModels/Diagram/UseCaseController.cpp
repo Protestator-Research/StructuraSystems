@@ -3,6 +3,7 @@
 //
 
 #include "UseCaseController.h"
+#include "DiagramLayout.h"
 #include "DiagramController.h"
 #include "DiagramGeometry.h"
 
@@ -91,11 +92,13 @@ namespace StructuraSystems::Client {
         const auto value = id.toULongLong(&ok);
         if (!ok || (value != RootId && !Model.contains(value)) || (ContextElement && *ContextElement == value))
             return;
+        saveContextLayout();
         ContextElement = value;
         Positions.clear();
         SelectedNodes.clear();
         SelectedEdges.clear();
         AutoLayout = true;
+        applyContextLayout();
         emit contextChanged();
         syncNow();
     }
@@ -149,6 +152,7 @@ namespace StructuraSystems::Client {
         };
         if (const auto found = find(RootId)) {
             ContextElement = *found;
+            applyContextLayout();
             emit contextChanged();
         }
     }
@@ -480,9 +484,68 @@ namespace StructuraSystems::Client {
         return bounds;
     }
 
+    QString UseCaseController::contextKey() const {
+        return context() == RootId ? QStringLiteral(".") : DiagramLayout::keyOf(Model, context());
+    }
+
+    QJsonObject UseCaseController::currentLayout() const {
+        QJsonObject layout;
+        for (const auto &[id, position]: Positions) {
+            if (Model.contains(id))
+                layout.insert(DiagramLayout::keyOf(Model, id), DiagramLayout::toJson(position));
+        }
+        return layout;
+    }
+
+    void UseCaseController::saveContextLayout() {
+        const QString key = contextKey();
+        if (key.isEmpty())
+            return;
+        if (AutoLayout)
+            SavedLayouts.remove(key);
+        else
+            SavedLayouts.insert(key, currentLayout());
+    }
+
+    void UseCaseController::applyContextLayout() {
+        const QJsonObject layout = SavedLayouts.value(contextKey()).toObject();
+        if (layout.isEmpty())
+            return;
+        const auto byKey = DiagramLayout::elementsByKey(Model);
+        for (auto it = layout.begin(); it != layout.end(); ++it) {
+            const auto element = byKey.find(it.key());
+            const auto position = DiagramLayout::positionOf(it.value());
+            if (element != byKey.end() && position)
+                Positions[element->second] = *position;
+        }
+        if (!Positions.empty())
+            AutoLayout = false;
+    }
+
+    QJsonObject UseCaseController::layoutState() const {
+        QJsonObject layout = SavedLayouts;
+        const QString key = contextKey();
+        if (!key.isEmpty()) {
+            if (AutoLayout)
+                layout.remove(key);
+            else
+                layout.insert(key, currentLayout());
+        }
+        return layout;
+    }
+
+    void UseCaseController::restoreLayout(const QJsonObject &layout) {
+        SavedLayouts = layout;
+        Positions.clear();
+        AutoLayout = true;
+        applyContextLayout();
+        syncNow();
+    }
+
     void UseCaseController::layoutAll() {
         Positions.clear();
         AutoLayout = true;
+        SavedLayouts.remove(contextKey());
         syncNow();
     }
 
@@ -592,6 +655,7 @@ namespace StructuraSystems::Client {
         if (!id)
             return;
         AutoLayout = false;
+        emit layoutEdited();
         const auto *found = Nodes->find(*id);
         if (found->Kind == DiagramTypes::BoundaryNode) {
             // the use cases inside move along

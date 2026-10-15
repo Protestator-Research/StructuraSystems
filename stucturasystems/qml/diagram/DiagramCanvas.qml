@@ -233,6 +233,7 @@ FocusScope {
     // Edges on top of the nodes (they end at the node borders)
     EdgeLayerItem {
         id: edgeLayer
+        routing: true // around the nodes in between
 
         anchors.fill: flick
         nodes: canvas.controller.nodes

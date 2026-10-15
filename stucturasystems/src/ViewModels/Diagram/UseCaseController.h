@@ -20,6 +20,7 @@
 #ifndef STRUCTURASYSTEMS_USECASECONTROLLER_H
 #define STRUCTURASYSTEMS_USECASECONTROLLER_H
 
+#include <QJsonObject>
 #include <QObject>
 #include <QPointF>
 #include <QRectF>
@@ -95,12 +96,19 @@ namespace StructuraSystems::Client {
         /// Renames / retypes every declaration of an actor figure or boundary. Returns an error text.
         Q_INVOKABLE QString updateGroup(const QString &node, const QVariantMap &values);
         Q_INVOKABLE void layoutAll();
+        /// Positions of the nodes of every context shown so far, by context and element key (see DiagramLayout);
+        /// contexts with the automatic layout are left out.
+        [[nodiscard]] QJsonObject layoutState() const;
+        /// Positions stored by layoutState() (after loading): used whenever their context is shown.
+        void restoreLayout(const QJsonObject &layout);
         [[nodiscard]] Q_INVOKABLE QRectF contentBounds() const;
 
         void syncNow();
 
     signals:
         void statusMessage(const QString &message);
+        /// A node was moved by the user (only the layout changed, not the model).
+        void layoutEdited();
         void contextChanged();
         void contextsChanged();
         void selectionChanged();
@@ -144,6 +152,13 @@ namespace StructuraSystems::Client {
         std::optional<Diagram::ElementId> ContextElement;
         QVariantList Contexts;
         std::map<Diagram::ElementId, QPointF> Positions;
+        /// Stored positions of the contexts by context key (see layoutState).
+        QJsonObject SavedLayouts;
+        [[nodiscard]] QString contextKey() const;
+        [[nodiscard]] QJsonObject currentLayout() const;
+        /// The positions of the context shown are kept in SavedLayouts / taken from there.
+        void saveContextLayout();
+        void applyContextLayout();
         std::vector<Group> Actors;
         std::vector<Group> Subjects;
         std::set<Diagram::ElementId> SelectedNodes;

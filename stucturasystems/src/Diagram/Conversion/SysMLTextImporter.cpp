@@ -538,13 +538,15 @@ namespace StructuraSystems::Diagram {
             }
 
             /// Comments standing on their own between statements are kept (as Textual "comment" elements).
-            void keepComments(ElementId owner) {
+            void keepComments(ElementId owner, bool one = false) {
                 while (Position < Tokens.size() && Tokens[Position].Type == TokenType::Comment) {
                     const Token &comment = Tokens[Position];
                     const std::size_t index = Position;
                     ++Position;
                     keepText(owner, comment.Begin, comment.End, comment.Line, true);
                     Covered[index] = true;
+                    if (one)
+                        break;
                 }
             }
 
@@ -735,9 +737,35 @@ namespace StructuraSystems::Diagram {
 
             // --- statements ---------------------------------------------------------------------
 
+            /// An empty line right in front of offset (only whitespace in between).
+            bool blankLineBefore(std::size_t offset) const {
+                int lineBreaks = 0;
+                while (offset > 0) {
+                    const char c = Source[offset - 1];
+                    if (c == '\n')
+                        ++lineBreaks;
+                    else if (c != ' ' && c != '\t' && c != '\r')
+                        break;
+                    --offset;
+                }
+                return lineBreaks >= 2 && offset > 0;
+            }
+
+            /// The first element added to owner since 'count' children: written after an empty line, as read.
+            void markBlankLine(ElementId owner, std::size_t count, std::size_t begin) {
+                const auto &children = Model.children(owner);
+                if (children.size() > count && blankLineBefore(begin))
+                    Model.setBlankLineBefore(children[count], true);
+            }
+
             void parseBody(ElementId owner, bool inBraces) {
                 while (true) {
-                    keepComments(owner);
+                    while (Position < Tokens.size() && Tokens[Position].Type == TokenType::Comment) {
+                        const std::size_t count = Model.children(owner).size();
+                        const std::size_t begin = Tokens[Position].Begin;
+                        keepComments(owner, true);
+                        markBlankLine(owner, count, begin);
+                    }
                     if (atEnd())
                         return;
                     if (isSymbol("}")) {
@@ -749,7 +777,10 @@ namespace StructuraSystems::Diagram {
                         continue;
                     }
                     const std::size_t before = Position;
+                    const std::size_t count = Model.children(owner).size();
+                    const std::size_t begin = peek().Begin;
                     parseStatement(owner);
+                    markBlankLine(owner, count, begin);
                     if (Position == before) // safety net: never stall
                         take();
                 }

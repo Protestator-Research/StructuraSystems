@@ -448,6 +448,14 @@ namespace StructuraSystems::Diagram {
         notify(ModelChange::Type::ElementChanged, id);
     }
 
+    void SemanticModel::setBlankLineBefore(ElementId id, bool blankLine) {
+        auto &target = mutableElement(id);
+        if (target.BlankLineBefore == blankLine)
+            return;
+        target.BlankLineBefore = blankLine;
+        notify(ModelChange::Type::ElementChanged, id);
+    }
+
     void SemanticModel::setParallel(ElementId id, bool parallel) {
         auto &target = mutableElement(id);
         if (parallel && target.Kind != ElementKind::StateUsage && target.Kind != ElementKind::StateDefinition)

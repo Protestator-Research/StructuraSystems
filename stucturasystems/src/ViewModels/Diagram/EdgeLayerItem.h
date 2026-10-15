@@ -40,6 +40,8 @@ namespace StructuraSystems::Client {
         Q_PROPERTY(bool showGrid READ showGrid WRITE setShowGrid NOTIFY gridChanged)
         /// Parametric view: lines run from output pins (right) to input pins (left) as curves.
         Q_PROPERTY(bool pinMode READ pinMode WRITE setPinMode NOTIFY pinModeChanged)
+        /// Lines around the nodes in between (orthogonal where a straight line would pass a node).
+        Q_PROPERTY(bool routing READ routing WRITE setRouting NOTIFY routingChanged)
         Q_PROPERTY(qreal gridSize READ gridSize WRITE setGridSize NOTIFY gridChanged)
         Q_PROPERTY(QColor gridColor READ gridColor WRITE setGridColor NOTIFY gridChanged)
 
@@ -72,6 +74,8 @@ namespace StructuraSystems::Client {
         void setRubberEnd(const QPointF &point);
         [[nodiscard]] bool pinMode() const { return PinMode; }
         void setPinMode(bool enabled);
+        [[nodiscard]] bool routing() const { return Routing; }
+        void setRouting(bool enabled);
         [[nodiscard]] bool showGrid() const { return ShowGrid; }
         void setShowGrid(bool show);
         [[nodiscard]] qreal gridSize() const { return GridSize; }
@@ -87,6 +91,7 @@ namespace StructuraSystems::Client {
         void rubberBandChanged();
         void gridChanged();
         void pinModeChanged();
+        void routingChanged();
 
     private:
         void connectModel(QObject *model);
@@ -106,6 +111,7 @@ namespace StructuraSystems::Client {
         QPointF RubberEnd;
         bool ShowGrid = false;
         bool PinMode = false;
+        bool Routing = false;
         qreal GridSize = 20;
         QColor GridColor{0x9a, 0xa7, 0xb3};
     };

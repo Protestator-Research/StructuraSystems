@@ -206,6 +206,8 @@ namespace StructuraSystems::Diagram {
     std::string SysMLCodeGenerator::generate(const SemanticModel &model) const {
         std::string out;
         for (const ElementId id: model.children(RootId)) {
+            if (model.element(id).blankLineBefore() && !out.empty())
+                out += "\n";
             generateElement(model, id, 0, out);
             generateSuccessionsFrom(model, id, 0, out);
         }
@@ -220,6 +222,33 @@ namespace StructuraSystems::Diagram {
         while (!out.empty() && out.back() == '\n')
             out.pop_back();
         return out;
+    }
+
+    std::string SysMLCodeGenerator::detectIndent(const std::string &text) {
+        std::size_t smallest = 0;
+        std::size_t lineStart = 0;
+        bool inComment = false; // the lines of a block comment ("/*  * ...") are not counted
+        while (lineStart < text.size()) {
+            std::size_t lineEnd = text.find('\n', lineStart);
+            if (lineEnd == std::string::npos)
+                lineEnd = text.size();
+            const std::string_view line(text.data() + lineStart, lineEnd - lineStart);
+            const std::size_t first = line.find_first_not_of(" \t\r");
+            if (first != std::string_view::npos && !inComment) {
+                if (line[0] == '\t')
+                    return "\t";
+                if (first > 0 && (smallest == 0 || first < smallest))
+                    smallest = first;
+            }
+            const auto open = line.rfind("/*");
+            const auto close = line.rfind("*/");
+            if (open != std::string_view::npos && (close == std::string_view::npos || close < open))
+                inComment = true;
+            else if (close != std::string_view::npos)
+                inComment = false;
+            lineStart = lineEnd + 1;
+        }
+        return smallest == 0 ? std::string("    ") : std::string(std::min<std::size_t>(smallest, 8), ' ');
     }
 
     std::string SysMLCodeGenerator::formatName(const std::string &name) {
@@ -326,6 +355,8 @@ namespace StructuraSystems::Diagram {
         for (const ElementId child: element.ownedElements()) {
             if (child == elseBranch)
                 continue;
+            if (model.element(child).blankLineBefore())
+                out += "\n";
             generateElement(model, child, depth + 1, out);
             generateSuccessionsFrom(model, child, depth + 1, out);
         }

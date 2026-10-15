@@ -221,4 +221,34 @@ TEST_CASE("Editor: closing the document is reported") {
     CHECK(waitFor([&] { return !editor.currentCode().isEmpty(); }));
 }
 
+TEST_CASE("Editor: moved nodes are written into the layout line and placed there again") {
+    FakeDocument document;
+    {
+        DiagramEditorModel editor;
+        editor.setDocument(&document);
+        addPart(editor, 200, 200);
+        addPart(editor, 600, 200);
+        CHECK(waitFor([&] { return document.Block.has_value(); }));
+        auto *controller = editor.controller();
+        const QString first = QString::number(editor.semanticModel().children(RootId).front());
+        controller->moveNode(first, 420, 380);
+        controller->finishMove(first);
+        CHECK(waitFor([&] { return GeneratedBlockGuard::extractLayout(*document.Block).find("\"part1\":[420,380]") != std::string::npos; }));
+        // the code (and its fingerprint) did not change, the block is still the editor's
+        CHECK_EQ(*GeneratedBlockGuard::extractCode(*document.Block), editor.currentCode().toStdString());
+        CHECK(editor.blockState() == DiagramEditorModel::InSync);
+    }
+    // opened again: part1 where it was moved to, part2 where it was dropped
+    DiagramEditorModel again;
+    again.setDocument(&document);
+    const auto &model = again.semanticModel();
+    const QRectF first = again.controller()->nodeRect(QString::number(model.children(RootId).front()));
+    CHECK(first.topLeft() == QPointF(420, 380));
+    CHECK(again.blockState() == DiagramEditorModel::InSync);
+    // "arrange": back to the automatic layout, the layout line goes with the next write
+    again.controller()->layoutAll();
+    again.generateNow();
+    CHECK(GeneratedBlockGuard::extractLayout(*document.Block).empty());
+}
+
 #include "DiagramEditorModelTest.moc"

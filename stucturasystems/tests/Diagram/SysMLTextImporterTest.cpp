@@ -382,6 +382,8 @@ TEST_CASE("Importer: random models survive generate -> import -> generate") {
                     if (keyword > 0)
                         model.setDeclaredKeyword(id, keyword == 1 ? std::string() : std::string("feature"));
                 }
+                if (random() % 8 == 0)
+                    model.setBlankLineBefore(id, true); // an empty line in front of it
                 // phase 8: metadata, imports, aliases, filters, views, concerns and viewpoints
                 if (kind == ElementKind::MetadataUsage) {
                     model.setTypeName(id, random() % 2 ? "Safety" : "SysML::PartUsage");
@@ -1774,4 +1776,32 @@ TEST_CASE("Importer: statement descriptions") {
     CHECK(SysMLTextImporter::describeStatement("// note").first == "comment");
     CHECK(SysMLTextImporter::describeStatement("calc def Power { in t : Real; t * 2 }") ==
           std::make_pair(std::string("calc def"), std::string("Power")));
+}
+
+TEST_CASE("Importer: empty lines and the indentation of the text are kept") {
+    const std::string text = "package P {\n"
+                             "  part def A;\n"
+                             "\n"
+                             "  // the vehicle\n"
+                             "  part vehicle {\n"
+                             "\n"
+                             "    part engine;\n"
+                             "    attribute mass : Real;\n"
+                             "\n"
+                             "    action drive;\n"
+                             "  }\n"
+                             "}\n"
+                             "\n"
+                             "part def B;\n";
+    CHECK_EQ(SysMLCodeGenerator::detectIndent(text), std::string("  "));
+    CHECK_EQ(SysMLCodeGenerator::detectIndent("part a {\n\tpart b;\n}\n"), std::string("\t"));
+    CHECK_EQ(SysMLCodeGenerator::detectIndent("part a;\n"), std::string("    "));
+    CHECK_EQ(SysMLCodeGenerator::detectIndent("part a {\n    doc /*\n     * text\n     */\n}\n"), std::string("    "));
+    SemanticModel model;
+    CHECK(SysMLTextImporter::importText(text, model).lossless());
+    const SysMLCodeGenerator generator(SysMLCodeGenerator::Options{SysMLCodeGenerator::detectIndent(text)});
+    CHECK_EQ(generator.generate(model), text);
+    // elements added in the diagram: no empty line
+    model.addElement(ElementKind::PartDefinition, "C", RootId);
+    CHECK(generator.generate(model).find("part def B;\npart def C;\n") != std::string::npos);
 }

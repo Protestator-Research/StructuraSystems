@@ -92,6 +92,8 @@ namespace StructuraSystems::Diagram {
         void setTarget(ElementId id, const std::string &target);
         /// Metadata usage: the annotated elements after "about" as written (empty: about its owner).
         void setAbout(ElementId id, std::vector<std::string> references);
+        /// An empty line in front of the element (kept from the text it was read from).
+        void setBlankLineBefore(ElementId id, bool blankLine);
         /// State usage / definition: "parallel" (concurrent nested states).
         void setParallel(ElementId id, bool parallel);
         /// Textual only: statement text, its keywords and its name (may be empty).

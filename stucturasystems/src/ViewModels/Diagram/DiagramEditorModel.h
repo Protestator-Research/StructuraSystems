@@ -150,6 +150,8 @@ namespace StructuraSystems::Client {
         [[nodiscard]] BlockState evaluateBlock(const std::optional<std::string> &body) const;
         void setState(BlockState state);
         void updatePendingChanges(const std::optional<std::string> &body);
+        /// Positions of the nodes for the layout line of the block (empty: automatic layout everywhere).
+        [[nodiscard]] std::string layoutLine() const;
 
         Diagram::SemanticModel Model;
         Diagram::SysMLCodeGenerator Generator;
@@ -176,6 +178,7 @@ namespace StructuraSystems::Client {
         bool OwnsBlock = false;
         std::string LastCode;
         QTimer RegenerateTimer;
+        QTimer LayoutTimer;
     };
 }
 

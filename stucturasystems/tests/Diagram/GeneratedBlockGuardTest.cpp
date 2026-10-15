@@ -75,3 +75,26 @@ TEST_CASE("Guard: fingerprint is stable") {
     CHECK_EQ(GeneratedBlockGuard::fingerprint(""), std::uint64_t{14695981039346656037ULL});
     CHECK(GeneratedBlockGuard::fingerprint("a") != GeneratedBlockGuard::fingerprint("b"));
 }
+
+TEST_CASE("Guard: the layout line is kept apart from the code") {
+    const std::string code = "part vehicle;\n";
+    const std::string block = GeneratedBlockGuard::wrap(code, "{\"s\":{\"vehicle\":[40,60]}}");
+    CHECK(GeneratedBlockGuard::isGeneratedBlock(block));
+    CHECK_EQ(GeneratedBlockGuard::extractCode(block).value_or(""), code);
+    CHECK_EQ(GeneratedBlockGuard::extractLayout(block), std::string("{\"s\":{\"vehicle\":[40,60]}}"));
+    GeneratedBlockGuard guard;
+    CHECK(guard.check(block) == GeneratedBlockGuard::SyncState::InSync);
+    // moving a node changes only the layout line: still in sync, same fingerprint
+    const std::string moved = GeneratedBlockGuard::wrap(code, "{\"s\":{\"vehicle\":[80,60]}}");
+    CHECK(guard.check(moved) == GeneratedBlockGuard::SyncState::InSync);
+    CHECK_EQ(block.substr(0, block.find('\n')), moved.substr(0, moved.find('\n')));
+    // without a layout: as before; a line break in the layout never splits it
+    CHECK_EQ(GeneratedBlockGuard::extractLayout(GeneratedBlockGuard::wrap(code)), std::string());
+    CHECK_EQ(GeneratedBlockGuard::extractCode(GeneratedBlockGuard::wrap(code, "a\nb")).value_or(""), code);
+    // CRLF
+    std::string crlf = block;
+    for (std::size_t i = 0; (i = crlf.find('\n', i)) != std::string::npos; i += 2)
+        crlf.insert(i, "\r");
+    CHECK_EQ(GeneratedBlockGuard::extractLayout(crlf), std::string("{\"s\":{\"vehicle\":[40,60]}}"));
+    CHECK(guard.check(crlf) == GeneratedBlockGuard::SyncState::InSync);
+}

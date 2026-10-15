@@ -4,6 +4,7 @@
 
 #include "GeneratedBlockGuard.h"
 
+#include <algorithm>
 #include <cstdio>
 
 namespace StructuraSystems::Diagram {
@@ -35,6 +36,7 @@ namespace StructuraSystems::Diagram {
         struct ParsedBlock {
             std::uint64_t StoredFingerprint;
             std::string Code;
+            std::string Layout;
         };
 
         std::optional<ParsedBlock> parse(const std::string &blockText) {
@@ -75,13 +77,33 @@ namespace StructuraSystems::Diagram {
             else if (codeStart != blockText.size())
                 return std::nullopt; // something was appended to the marker line
 
-            return ParsedBlock{value, blockText.substr(codeStart)};
+            // "// Layout: ..." right below the marker: positions of the diagram, not part of the code
+            std::string layout;
+            const std::string_view layoutPrefix = GeneratedBlockGuard::LayoutPrefix;
+            if (blockText.compare(codeStart, layoutPrefix.size(), layoutPrefix) == 0) {
+                std::size_t lineEnd = blockText.find('\n', codeStart);
+                if (lineEnd == std::string::npos)
+                    lineEnd = blockText.size();
+                layout = blockText.substr(codeStart + layoutPrefix.size(), lineEnd - codeStart - layoutPrefix.size());
+                if (!layout.empty() && layout.back() == '\r')
+                    layout.pop_back();
+                codeStart = std::min(blockText.size(), lineEnd + 1);
+            }
+            return ParsedBlock{value, blockText.substr(codeStart), layout};
         }
     }
 
-    std::string GeneratedBlockGuard::wrap(const std::string &generatedCode) {
+    std::string GeneratedBlockGuard::wrap(const std::string &generatedCode, const std::string &layout) {
+        std::string line = layout;
+        line.erase(std::remove(line.begin(), line.end(), '\n'), line.end());
+        line.erase(std::remove(line.begin(), line.end(), '\r'), line.end());
         return std::string(MarkerPrefix) + toHex(fingerprint(generatedCode)) + std::string(MarkerSuffix) + "\n" +
-               generatedCode;
+               (line.empty() ? std::string() : std::string(LayoutPrefix) + line + "\n") + generatedCode;
+    }
+
+    std::string GeneratedBlockGuard::extractLayout(const std::string &blockText) {
+        const auto parsed = parse(blockText);
+        return parsed ? parsed->Layout : std::string();
     }
 
     bool GeneratedBlockGuard::isGeneratedBlock(const std::string &blockText) {
