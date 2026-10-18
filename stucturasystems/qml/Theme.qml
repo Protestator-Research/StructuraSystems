@@ -38,6 +38,7 @@ QtObject {
     // ---------------------------------------------------------------- metrics
     readonly property int railWidth: 72
     readonly property int panelWidth: 280
+    readonly property int historyWidth: 340
     readonly property int cardMaxWidth: 960
     readonly property int iconSize: 22
     readonly property int smallIcon: 18
@@ -107,6 +108,16 @@ QtObject {
     readonly property url iconDocument: _cloud + "032-document.png"
     readonly property url iconUser: _ui + "3032829-user-interface/png/045-user.png"
     readonly property url iconPanelCollapse: "qrc:/icons/arrows/StepBack"
+    readonly property url iconBranch: _arrows + "018-direction arrow.png"
+    readonly property url iconHistory: _ui + "3032829-user-interface/png/033-clock.png"
+    readonly property url iconChevronDown: "qrc:/icons/arrows/UpGreen"
+
+    /** Date of a commit as shown in the history, e.g. "18 Oct 2026, 14:03". Empty for unknown dates. */
+    function formatCommitDate(date) {
+        if (!date || isNaN(date.getTime()) || date.getFullYear() < 1980)
+            return ""
+        return Qt.formatDateTime(date, "d MMM yyyy, HH:mm")
+    }
 
     function severityIcon(severity) {
         return severity >= 3 ? iconError : severity === 2 ? iconWarning : iconInfo

@@ -238,6 +238,54 @@ namespace StructuraSystems::Client {
         return Commit ? QString::fromStdString(boost::uuids::to_string(Commit->getId())) : QString();
     }
 
+    QString DocumentModel::branchId() const {
+        return BranchId;
+    }
+
+    QString DocumentModel::branchName() const {
+        return BranchName;
+    }
+
+    bool DocumentModel::detached() const {
+        return Detached;
+    }
+
+    void DocumentModel::setBranch(const QString &branchId, const QString &branchName) {
+        if (!IsOnline || (BranchId == branchId && BranchName == branchName))
+            return;
+        BranchId = branchId;
+        BranchName = branchName;
+        emit branchChanged();
+    }
+
+    void DocumentModel::setDetached(bool detached) {
+        if (!IsOnline || Detached == detached)
+            return;
+        Detached = detached;
+        emit detachedChanged();
+    }
+
+    bool DocumentModel::replaceContent(std::shared_ptr<SysMLv2::REST::Commit> commit,
+                                       std::vector<std::shared_ptr<KerML::Entities::Element>> elements) {
+        if (!IsOnline)
+            return false;
+
+        beginResetModel();
+        Commit = std::move(commit);
+        Elements = std::move(elements);
+        Rows.clear();
+        loadRows();
+        InstanceElements.clear();
+        ParserProblems.clear();
+        endResetModel();
+
+        setModified(false);
+        emit countChanged();
+        emit identityChanged();
+        emit problemsChanged();
+        return true;
+    }
+
     void DocumentModel::setModified(bool modified) {
         if (Modified == modified)
             return;
@@ -253,7 +301,7 @@ namespace StructuraSystems::Client {
     }
 
     void DocumentModel::setBody(int row, const QString &body) {
-        if (!validRow(row))
+        if (Detached || !validRow(row))
             return;
         auto &entry = Rows[row];
         const auto newBody = body.toStdString();
@@ -265,7 +313,7 @@ namespace StructuraSystems::Client {
     }
 
     void DocumentModel::setLanguage(int row, const QString &language) {
-        if (!validRow(row))
+        if (Detached || !validRow(row))
             return;
         auto &entry = Rows[row];
         const auto normalized = normalizeLanguage(language);
@@ -291,7 +339,7 @@ namespace StructuraSystems::Client {
     }
 
     void DocumentModel::moveRow(int from, int to) {
-        if (!validRow(from) || !validRow(to) || from == to)
+        if (Detached || !validRow(from) || !validRow(to) || from == to)
             return;
 
         beginMoveRows(QModelIndex(), from, from, QModelIndex(), to > from ? to + 1 : to);
@@ -306,6 +354,8 @@ namespace StructuraSystems::Client {
     }
 
     void DocumentModel::insertElement(int row, const QString &language) {
+        if (Detached)
+            return;
         row = std::clamp(row, 0, int(Rows.size()));
 
         const auto normalized = normalizeLanguage(language);
@@ -334,7 +384,7 @@ namespace StructuraSystems::Client {
     }
 
     void DocumentModel::removeElement(int row) {
-        if (!validRow(row))
+        if (Detached || !validRow(row))
             return;
 
         const auto element = std::static_pointer_cast<KerML::Entities::Element>(Rows[row].Element);

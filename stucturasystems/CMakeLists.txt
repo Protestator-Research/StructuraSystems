@@ -71,6 +71,7 @@ qt_add_qml_module(StructuraSystems
         QML_FILES
             qml/Main.qml
             qml/Theme.qml
+            qml/components/BranchChip.qml
             qml/components/DialogFooter.qml
             qml/components/Icon.qml
             qml/components/IconToolButton.qml
@@ -84,7 +85,9 @@ qt_add_qml_module(StructuraSystems
             qml/components/ProjectList.qml
             qml/components/SegmentedControl.qml
             qml/components/Snackbar.qml
+            qml/views/DetachedBanner.qml
             qml/views/DigitalTwinPane.qml
+            qml/views/HistoryPanel.qml
             qml/views/EditorView.qml
             qml/views/ElementCard.qml
             qml/views/ExplorerPane.qml
@@ -95,6 +98,7 @@ qt_add_qml_module(StructuraSystems
             qml/dialogs/CloseDocumentDialog.qml
             qml/dialogs/CommitDialog.qml
             qml/dialogs/DetailsDialog.qml
+            qml/dialogs/DiscardChangesDialog.qml
             qml/dialogs/DigitalTwinWizard.qml
             qml/dialogs/NewProjectDialog.qml
             qml/dialogs/QuitDialog.qml
@@ -104,6 +108,10 @@ qt_add_qml_module(StructuraSystems
             src/ViewModels/SysMLHighlighter.h
             src/ViewModels/AppController.cpp
             src/ViewModels/AppController.h
+            src/ViewModels/BranchListModel.cpp
+            src/ViewModels/BranchListModel.h
+            src/ViewModels/CommitHistoryModel.cpp
+            src/ViewModels/CommitHistoryModel.h
             src/ViewModels/DigitalTwinProjectModel.cpp
             src/ViewModels/DigitalTwinProjectModel.h
             src/ViewModels/DocumentModel.cpp

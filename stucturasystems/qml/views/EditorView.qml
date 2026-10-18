@@ -10,8 +10,8 @@ Item {
     id: view
 
     property DocumentModel document
-    /** No editing while a background job (commit, upload, parse) works on the same elements. */
-    readonly property bool locked: AppController.busy
+    /** No editing while a background job (commit, upload, parse) works on the same elements or an older commit is shown. */
+    readonly property bool locked: AppController.busy || (document !== null && document.detached)
     readonly property int sideMargin: 24
 
     property int _pendingEditRow: -1

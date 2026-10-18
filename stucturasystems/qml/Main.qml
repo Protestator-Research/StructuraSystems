@@ -15,12 +15,16 @@ ApplicationWindow {
     readonly property bool busy: AppController.busy
     readonly property bool canSave: doc !== null && doc.isLocalFile && !busy
     readonly property bool canParse: doc !== null && !busy
-    readonly property bool canCommit: doc !== null && doc.isOnline && AppController.connected && !busy
+    readonly property bool canCommit: doc !== null && doc.isOnline && AppController.connected && !busy && !doc.detached
+    readonly property bool isOnlineDoc: doc !== null && doc.isOnline
     readonly property bool canUpload: doc !== null && !doc.isOnline && AppController.connected && !busy
 
     /** 0 explorer, 1 online, 2 digital twins */
     property int destination: 0
     property bool panelOpen: true
+    /** Whether the user wants the history panel; it is only shown for online documents. */
+    property bool historyOpen: false
+    readonly property bool historyVisible: historyOpen && isOnlineDoc
     /** Narrow windows start without side panel; it can still be opened by hand. */
     readonly property bool compact: width < 1100
     property bool _restored: false
@@ -33,6 +37,27 @@ ApplicationWindow {
             closeDialog.openFor(index, title)
         else
             AppController.closeDocument(index)
+    }
+
+    // The content of the document is replaced by branch switch and checkout, so unsaved changes need a confirmation.
+    function requestSwitchBranch(branchId, branchName) {
+        if (doc && doc.modified)
+            discardDialog.openFor(qsTr("Discard changes and switch?"),
+                                  qsTr("\"%1\" has uncommitted changes. They will be lost if you switch to branch %2.")
+                                      .arg(doc.title).arg(branchName),
+                                  qsTr("Discard and switch"), () => AppController.switchBranch(branchId))
+        else
+            AppController.switchBranch(branchId)
+    }
+
+    function requestCheckout(commitId) {
+        if (doc && doc.modified)
+            discardDialog.openFor(qsTr("Discard changes and open commit?"),
+                                  qsTr("\"%1\" has uncommitted changes. They will be lost if you open the commit %2.")
+                                      .arg(doc.title).arg(commitId.substring(0, 8)),
+                                  qsTr("Discard and open"), () => AppController.checkoutCommit(commitId))
+        else
+            AppController.checkoutCommit(commitId)
     }
 
     function openFolder() {
@@ -91,6 +116,7 @@ ApplicationWindow {
         problemsSheet.bodyHeight = Math.max(problemsSheet.minBodyHeight,
                                             Math.min(problemsSheet.maxBodyHeight, windowState.problemsHeight))
         panelOpen = windowState.panelOpen && !compact
+        historyOpen = windowState.historyOpen
         if (windowState.maximized)
             visibility = Window.Maximized
         _restored = true
@@ -120,6 +146,7 @@ ApplicationWindow {
             panelOpen = !compact
     }
     onPanelOpenChanged: if (_restored) windowState.panelOpen = panelOpen
+    onHistoryOpenChanged: if (_restored) windowState.historyOpen = historyOpen
     onDestinationChanged: if (_restored) windowState.destination = destination
 
     onClosing: close => {
@@ -154,6 +181,7 @@ ApplicationWindow {
         property bool hasPosition: false
         property bool maximized: false
         property bool panelOpen: true
+        property bool historyOpen: false
         property int destination: 0
         property int problemsHeight: 190
     }
@@ -346,6 +374,28 @@ ApplicationWindow {
                         }
                     }
 
+                    BranchChip {
+                        visible: root.isOnlineDoc
+                        enabled: !root.busy && AppController.connected
+                        branchName: root.doc ? root.doc.branchName : ""
+                        detached: root.doc !== null && root.doc.detached
+                        onBranchSelected: (branchId, name) => root.requestSwitchBranch(branchId, name)
+                    }
+                    IconToolButton {
+                        visible: root.isOnlineDoc
+                        iconSource: Theme.iconHistory
+                        checked: root.historyOpen
+                        tip: root.historyOpen ? qsTr("Hide history") : qsTr("Show history")
+                        onClicked: root.historyOpen = !root.historyOpen
+                    }
+                    Rectangle {
+                        visible: root.isOnlineDoc
+                        Layout.preferredWidth: 1
+                        Layout.preferredHeight: 24
+                        Layout.leftMargin: 4
+                        Layout.rightMargin: 4
+                        color: Theme.outline
+                    }
                     IconToolButton {
                         iconSource: Theme.iconSave
                         tip: qsTr("Save (Ctrl+S)")
@@ -360,7 +410,8 @@ ApplicationWindow {
                     }
                     IconToolButton {
                         iconSource: Theme.iconCommit
-                        tip: qsTr("Commit to server")
+                        tip: root.doc !== null && root.doc.detached ? qsTr("Return to the branch head to commit")
+                                                                     : qsTr("Commit to server")
                         enabled: root.canCommit
                         onClicked: commitDialog.open()
                     }
@@ -393,40 +444,87 @@ ApplicationWindow {
                 }
             }
 
-            // Editor or empty state
-            Item {
+            // Editor or empty state, history panel on the right
+            RowLayout {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
+                spacing: 0
 
-                EditorView {
-                    id: editor
-                    anchors.fill: parent
-                    visible: root.doc !== null
-                    document: root.doc
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    spacing: 0
+
+                    DetachedBanner {
+                        Layout.fillWidth: true
+                        shown: root.doc !== null && root.doc.detached
+                        commitId: root.doc ? root.doc.commitId : ""
+                        branchName: root.doc ? root.doc.branchName : ""
+                        busy: root.busy
+                        onReturnRequested: AppController.returnToBranchHead()
+                    }
+
+                    Item {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+
+                        EditorView {
+                            id: editor
+                            anchors.fill: parent
+                            visible: root.doc !== null
+                            document: root.doc
+                        }
+
+                        EmptyState {
+                            anchors.fill: parent
+                            visible: root.doc === null
+                            iconSource: Theme.iconProject
+                            iconSize: 72
+                            title: qsTr("No project open")
+                            text: qsTr("Open a folder or file to start modeling, or create a new project. "
+                                       + "Double-click a project in the explorer to open it.")
+
+                            Button {
+                                text: qsTr("Open folder")
+                                highlighted: true
+                                icon.source: Theme.iconFolder
+                                icon.color: "transparent"
+                                onClicked: root.openFolder()
+                            }
+                            Button {
+                                text: qsTr("New project")
+                                flat: true
+                                icon.source: Theme.iconNewProject
+                                icon.color: "transparent"
+                                onClicked: root.newProject(false)
+                            }
+                        }
+                    }
                 }
 
-                EmptyState {
-                    anchors.fill: parent
-                    visible: root.doc === null
-                    iconSource: Theme.iconProject
-                    iconSize: 72
-                    title: qsTr("No project open")
-                    text: qsTr("Open a folder or file to start modeling, or create a new project. "
-                               + "Double-click a project in the explorer to open it.")
-
-                    Button {
-                        text: qsTr("Open folder")
-                        highlighted: true
-                        icon.source: Theme.iconFolder
-                        icon.color: "transparent"
-                        onClicked: root.openFolder()
+                // Collapsible history panel. The content keeps its width while the container animates.
+                Item {
+                    Layout.fillHeight: true
+                    Layout.preferredWidth: root.historyVisible ? Theme.historyWidth : 0
+                    clip: true
+                    Behavior on Layout.preferredWidth {
+                        NumberAnimation { duration: Theme.animationDuration; easing.type: Easing.OutCubic }
                     }
-                    Button {
-                        text: qsTr("New project")
-                        flat: true
-                        icon.source: Theme.iconNewProject
-                        icon.color: "transparent"
-                        onClicked: root.newProject(false)
+
+                    HistoryPanel {
+                        width: Theme.historyWidth
+                        height: parent.height
+                        branchName: root.doc ? root.doc.branchName : ""
+                        onCheckoutRequested: commitId => root.requestCheckout(commitId)
+                        onCloseRequested: root.historyOpen = false
+                    }
+
+                    Rectangle {
+                        anchors.left: parent.left
+                        anchors.top: parent.top
+                        anchors.bottom: parent.bottom
+                        width: 1
+                        color: Theme.outline
                     }
                 }
             }
@@ -477,6 +575,7 @@ ApplicationWindow {
     NewProjectDialog { id: newProjectDialog }
     CommitDialog { id: commitDialog }
     CloseDocumentDialog { id: closeDialog }
+    DiscardChangesDialog { id: discardDialog }
     QuitDialog {
         id: quitDialog
         onQuitAccepted: {

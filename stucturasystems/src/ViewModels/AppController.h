@@ -21,6 +21,8 @@ namespace SysMLv2::REST {
 }
 
 namespace StructuraSystems::Client {
+    class BranchListModel;
+    class CommitHistoryModel;
     class CommunicationService;
     class DigitalTwinProjectModel;
     class DocumentModel;
@@ -38,6 +40,8 @@ namespace StructuraSystems::Client {
         Q_OBJECT
         QML_ELEMENT
         QML_SINGLETON
+        Q_MOC_INCLUDE("BranchListModel.h")
+        Q_MOC_INCLUDE("CommitHistoryModel.h")
         Q_MOC_INCLUDE("DigitalTwinProjectModel.h")
         Q_MOC_INCLUDE("DocumentModel.h")
         Q_MOC_INCLUDE("OpenDocumentsModel.h")
@@ -55,6 +59,9 @@ namespace StructuraSystems::Client {
         Q_PROPERTY(int currentIndex READ currentIndex WRITE setCurrentIndex NOTIFY currentIndexChanged)
         Q_PROPERTY(StructuraSystems::Client::DocumentModel *currentDocument READ currentDocument NOTIFY currentDocumentChanged)
         Q_PROPERTY(StructuraSystems::Client::ProblemListModel *problems READ problems CONSTANT)
+        Q_PROPERTY(StructuraSystems::Client::BranchListModel *branches READ branches CONSTANT)
+        Q_PROPERTY(StructuraSystems::Client::CommitHistoryModel *commitHistory READ commitHistory CONSTANT)
+        Q_PROPERTY(bool historyLoading READ historyLoading NOTIFY historyLoadingChanged)
         Q_PROPERTY(StructuraSystems::Client::SettingsController *settings READ settings CONSTANT)
     public:
         explicit AppController(QObject *parent = nullptr);
@@ -73,6 +80,12 @@ namespace StructuraSystems::Client {
         void setCurrentIndex(int index);
         [[nodiscard]] DocumentModel *currentDocument() const;
         [[nodiscard]] ProblemListModel *problems() const;
+        /** Branches of the project of the current online document, empty for local documents. */
+        [[nodiscard]] BranchListModel *branches() const;
+        /** Commits of the project of the current online document, empty for local documents. */
+        [[nodiscard]] CommitHistoryModel *commitHistory() const;
+        /** True while branches and commits are loaded. Independent of busy, the history is loaded in the background. */
+        [[nodiscard]] bool historyLoading() const;
         [[nodiscard]] SettingsController *settings() const;
 
         /** Loads the projects of a folder into the local project list. Also becomes the working directory. */
@@ -103,6 +116,21 @@ namespace StructuraSystems::Client {
         Q_INVOKABLE void commitCurrent(const QString &message);
         Q_INVOKABLE void uploadCurrent();
 
+        /** Reloads the branches and the commits of the current online document in the background, without blocking other operations. */
+        Q_INVOKABLE void refreshHistory();
+        /**
+         * Replaces the content of the current online document by the head commit of the given branch and makes it the
+         * branch of the document. Unsaved changes are discarded, the QML side has to ask first.
+         */
+        Q_INVOKABLE void switchBranch(const QString &branchId);
+        /**
+         * Replaces the content of the current online document by the elements of the given commit. If it is not the
+         * head of the branch of the document, the document becomes detached (read-only). Unsaved changes are discarded.
+         */
+        Q_INVOKABLE void checkoutCommit(const QString &commitId);
+        /** Loads the head of the branch of the current document again and ends the detached state. */
+        Q_INVOKABLE void returnToBranchHead();
+
         Q_INVOKABLE void createLocalProject(const QString &name, const QString &description);
         /** @param visibility "Private", "Internal" or "Public" */
         Q_INVOKABLE void createOnlineProject(const QString &name, const QString &description, const QString &visibility);
@@ -113,6 +141,7 @@ namespace StructuraSystems::Client {
         void connectedChanged();
         void busyChanged();
         void twinsLoadingChanged();
+        void historyLoadingChanged();
         void statusTextChanged();
         void currentIndexChanged();
         void currentDocumentChanged();
@@ -130,6 +159,7 @@ namespace StructuraSystems::Client {
         void setBusy(bool busy);
         void setConnected(bool connected);
         void setTwinsLoading(bool loading);
+        void setHistoryLoading(bool loading);
         void setStatusText(const QString &text);
         void emitNotify(int level, const QString &message, const QString &details = QString());
 
@@ -142,6 +172,9 @@ namespace StructuraSystems::Client {
         void populateOnlineProjects(const std::vector<std::shared_ptr<SysMLv2::REST::Project>> &projects);
         void loadDigitalTwins(const std::vector<std::shared_ptr<SysMLv2::REST::Project>> &projects);
         void cancelDigitalTwinLoading();
+        void loadHistory();
+        void clearHistory();
+        void updateHistoryContext();
         void openWorkingDirectoryIfPresent();
         void onSettingsSaved();
         bool requireConnection();
@@ -153,6 +186,8 @@ namespace StructuraSystems::Client {
         DigitalTwinProjectModel *DigitalTwinProjects;
         OpenDocumentsModel *Documents;
         ProblemListModel *Problems;
+        BranchListModel *Branches;
+        CommitHistoryModel *CommitHistory;
 
         int CurrentIndex = -1;
         QPointer<DocumentModel> CurrentDocument;
@@ -161,6 +196,11 @@ namespace StructuraSystems::Client {
         bool TwinsLoading = false;
         /** Incremented for every twin load; results of an outdated load are dropped. */
         quint64 TwinLoadGeneration = 0;
+        bool HistoryLoading = false;
+        /** Incremented for every history load; results of an outdated load are dropped. */
+        quint64 HistoryGeneration = 0;
+        /** Project whose history is shown in the models. */
+        QString HistoryProjectId;
         QString StatusText;
         QString LoadedFolder;
         QHash<QString, QString> LocalFolders;

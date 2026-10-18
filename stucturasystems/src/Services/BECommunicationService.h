@@ -8,6 +8,8 @@
 //---------------------------------------------------------
 // External Classes
 //---------------------------------------------------------
+#include <chrono>
+#include <map>
 #include <memory>
 #include <vector>
 #include <string>
@@ -114,6 +116,28 @@ namespace StructuraSystems::Client {
          */
         std::shared_ptr<SysMLv2::REST::Commit> postCommitWithId(boost::uuids::uuid projectId, std::shared_ptr<SysMLv2::REST::CommitRequest> commit);
 
+
+        /**
+         * Downloads all commits of a project (GET projects/{projectId}/commits).
+         * The commits are returned in the order of the server, use Commit::getPreviusCommits to build the history.
+         * @param projectId UUID ("@id") of the project.
+         * @param timestamps Optional. Receives the creation time of every commit by its id. The time is read from the
+         *                   ISO 8601 text of the answer ("timestamp" or "created"), because Commit::getCreated does not
+         *                   interpret ISO 8601 on every platform.
+         * @return The commits of the project, empty if the project has none.
+         * @throws std::runtime_error If the server answers with an empty or invalid body (e.g. unknown project).
+         */
+        std::vector<std::shared_ptr<SysMLv2::REST::Commit>> getAllCommitsForProject(boost::uuids::uuid projectId, std::map<boost::uuids::uuid, std::chrono::system_clock::time_point> *timestamps = nullptr);
+
+        /**
+         * Posts a new commit to a specific branch (POST projects/{projectId}/commits?branchId={branchId}).
+         * @param projectId UUID ("@id") of the project.
+         * @param branchId UUID ("@id") of the branch that receives the commit.
+         * @param commit The changes and the description of the commit.
+         * @return The commit created by the server.
+         * @throws std::runtime_error If the server answers with an empty or invalid body (e.g. unknown project or branch).
+         */
+        std::shared_ptr<SysMLv2::REST::Commit> postCommitToBranch(boost::uuids::uuid projectId, boost::uuids::uuid branchId, std::shared_ptr<SysMLv2::REST::CommitRequest> commit);
 
         /**
          * Downloads all the elements of a specific commit.
