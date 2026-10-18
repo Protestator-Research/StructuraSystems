@@ -228,6 +228,34 @@ namespace StructuraSystems::Client {
         }
     }
 
+    std::shared_ptr<SysMLv2::REST::Branch> CommunicationService::postBranch(
+        boost::uuids::uuid projectId, const std::string &name, boost::uuids::uuid headCommitId) {
+        // BranchRequest::serializeToJson of the sysmllib overwrites "@type", so the request is built here.
+        nlohmann::json request;
+        request["@type"] = "Branch";
+        request["name"] = name;
+        request["head"] = {{"@id", boost::uuids::to_string(headCommitId)}};
+
+        const auto endpoint = "projects/"+boost::lexical_cast<std::string>(projectId)+"/branches";
+        const auto branchJSON = APIImplementation->postCustomRequest(endpoint,request.dump(),BarrierString);
+        // The server answers errors (400, 404, 409) without body or with a JSON message.
+        if (branchJSON.empty() || !nlohmann::json::accept(branchJSON))
+            throw std::runtime_error("The server rejected the branch " + name + ". Check that the project and the commit exist on the server and that the name is not used yet.");
+
+        auto parsedJson = nlohmann::json::parse(branchJSON);
+        if (!parsedJson.is_object() || !parsedJson.contains("@id") || !parsedJson["@id"].is_string()) {
+            const auto message = serverMessage(parsedJson);
+            throw std::runtime_error("The server rejected the branch " + name + "." + (message.empty() ? std::string() : " " + message));
+        }
+
+        // Some servers answer without name or head; the values that were sent are then the ones of the new branch.
+        if (!parsedJson.contains("name") || !parsedJson["name"].is_string())
+            parsedJson["name"] = name;
+        if (!parsedJson.contains("head") || !parsedJson["head"].is_object())
+            parsedJson["head"] = request["head"];
+        return std::make_shared<SysMLv2::REST::Branch>(parsedJson.dump());
+    }
+
     std::vector<std::shared_ptr<SysMLv2::REST::DigitalTwin>> CommunicationService::getAllDigitalTwinsForProject(boost::uuids::uuid projectId) {
         const auto twinsJSON = APIImplementation->getCustomRequest("/projects/"+boost::lexical_cast<std::string>(projectId)+"/twins",BarrierString);
         std::vector<std::shared_ptr<SysMLv2::REST::DigitalTwin>> returnValue;

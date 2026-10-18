@@ -140,6 +140,16 @@ namespace StructuraSystems::Client {
         std::shared_ptr<SysMLv2::REST::Commit> postCommitToBranch(boost::uuids::uuid projectId, boost::uuids::uuid branchId, std::shared_ptr<SysMLv2::REST::CommitRequest> commit);
 
         /**
+         * Creates a new branch whose head is the given commit (POST projects/{projectId}/branches).
+         * @param projectId UUID ("@id") of the project.
+         * @param name Name of the new branch. The server rejects names that are already used in the project.
+         * @param headCommitId UUID ("@id") of the commit, that becomes the head of the new branch.
+         * @return The branch created by the server.
+         * @throws std::runtime_error If the server rejects the branch (e.g. duplicate name, unknown commit or project).
+         */
+        std::shared_ptr<SysMLv2::REST::Branch> postBranch(boost::uuids::uuid projectId, const std::string &name, boost::uuids::uuid headCommitId);
+
+        /**
          * Downloads all the elements of a specific commit.
          * @param projectId UUID ("@id") of the project.Í
          * @param commitId UUID ("@id") of the commit.

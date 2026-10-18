@@ -71,6 +71,24 @@ namespace StructuraSystems::Client {
             QString BranchHeadCommitId;
         };
 
+        /** The branch created on the server and, if the document switches to a commit other than the loaded one, its content. */
+        struct BranchCreation {
+            QString BranchId;
+            QString BranchName;
+            bool HasContent = false;
+            CommitContent Content;
+        };
+
+        /** @return why the name cannot be used for a branch, empty if it is fine. Expects a trimmed name. */
+        QString branchNameProblem(const QString &name) {
+            if (name.isEmpty())
+                return QObject::tr("The name must not be empty.");
+            for (const auto character : name)
+                if (character.category() == QChar::Other_Control)
+                    return QObject::tr("The name must not contain control characters.");
+            return {};
+        }
+
         struct HistoryLoadResult {
             QString ProjectId;
             QList<BranchInfo> Branches;
@@ -1074,5 +1092,79 @@ namespace StructuraSystems::Client {
             return;
         }
         switchBranch(branchId);
+    }
+
+    bool AppController::branchNameAvailable(const QString &name) const {
+        const auto trimmed = name.trimmed();
+        if (!branchNameProblem(trimmed).isEmpty())
+            return false;
+        for (const auto &branch : Branches->branches())
+            if (branch.Name.compare(trimmed, Qt::CaseInsensitive) == 0)
+                return false;
+        return true;
+    }
+
+    void AppController::createBranch(const QString &name, const QString &fromCommitId, bool switchToBranch) {
+        const auto document = CurrentDocument;
+        if (!document || !requireConnection())
+            return;
+        if (!document->isOnline() || document->getProject() == nullptr) {
+            emitNotify(2, tr("Branches are only available for online projects."));
+            return;
+        }
+
+        const auto branchName = name.trimmed();
+        if (const auto problem = branchNameProblem(branchName); !problem.isEmpty()) {
+            emitNotify(2, tr("The branch could not be created."), problem);
+            return;
+        }
+        if (!branchNameAvailable(branchName)) {
+            emitNotify(2, tr("The branch could not be created."), tr("A branch named %1 already exists.").arg(branchName));
+            return;
+        }
+
+        const auto loadedCommitId = document->commitId();
+        const auto headCommitId = fromCommitId.isEmpty() ? loadedCommitId : fromCommitId;
+        if (headCommitId.isEmpty()) {
+            emitNotify(2, tr("The branch could not be created."), tr("The project has no commit to start the branch from."));
+            return;
+        }
+        // Switching to a branch that starts at another commit shows that commit, like checkoutCommit.
+        const bool loadContent = switchToBranch && headCommitId != loadedCommitId;
+
+        const auto service = BackendConnection;
+        const auto projectId = document->getProject()->getId();
+        const auto branchNameText = branchName.toStdString();
+        const auto headCommitIdText = headCommitId.toStdString();
+        QPointer<DocumentModel> guard(document);
+        runAsync<BranchCreation>(tr("Creating branch %1").arg(branchName),
+            [service, projectId, branchNameText, headCommitIdText, loadContent]() {
+                const auto headId = boost::uuids::string_generator()(headCommitIdText);
+                const auto branch = service->postBranch(projectId, branchNameText, headId);
+                if (branch == nullptr)
+                    throw std::runtime_error("The server did not return the new branch.");
+                BranchCreation creation;
+                creation.BranchId = uuidText(branch->getId());
+                creation.BranchName = QString::fromStdString(branch->getName());
+                if (loadContent) {
+                    creation.Content = downloadCommit(service, projectId, headId);
+                    creation.HasContent = true;
+                }
+                return creation;
+            },
+            [this, guard, switchToBranch](BranchCreation creation) {
+                if (guard && switchToBranch) {
+                    // The unsaved changes stay, the new head is the loaded commit (like git checkout -b).
+                    guard->setBranch(creation.BranchId, creation.BranchName);
+                    guard->setDetached(false);
+                    if (creation.HasContent)
+                        guard->replaceContent(creation.Content.Commit, std::move(creation.Content.Elements));
+                }
+                loadHistory();
+                if (guard && switchToBranch)
+                    emitNotify(1, tr("Created branch %1 and switched to it.").arg(creation.BranchName));
+                else
+                    emitNotify(1, tr("Created branch %1.").arg(creation.BranchName));
+            });
     }
 }

@@ -128,6 +128,16 @@ namespace StructuraSystems::Client {
          * head of the branch of the document, the document becomes detached (read-only). Unsaved changes are discarded.
          */
         Q_INVOKABLE void checkoutCommit(const QString &commitId);
+        /**
+         * Creates a branch on the server, whose head is the given commit.
+         * @param name Name of the branch, surrounding whitespace is removed. Must be unique in the project (case-insensitive).
+         * @param fromCommitId Commit that becomes the head of the branch, empty for the commit loaded in the current document.
+         * @param switchToBranch Makes the new branch the branch of the current document, which ends the detached state.
+         *        Unsaved changes are kept if the commit is the loaded one, they are discarded if another commit is loaded.
+         */
+        Q_INVOKABLE void createBranch(const QString &name, const QString &fromCommitId, bool switchToBranch);
+        /** @return true if the name (trimmed) can be used for a new branch: not empty, no control characters, not used yet. */
+        [[nodiscard]] Q_INVOKABLE bool branchNameAvailable(const QString &name) const;
         /** Loads the head of the branch of the current document again and ends the detached state. */
         Q_INVOKABLE void returnToBranchHead();
 

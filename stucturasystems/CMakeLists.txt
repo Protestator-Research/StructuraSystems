@@ -100,6 +100,7 @@ qt_add_qml_module(StructuraSystems
             qml/dialogs/DetailsDialog.qml
             qml/dialogs/DiscardChangesDialog.qml
             qml/dialogs/DigitalTwinWizard.qml
+            qml/dialogs/NewBranchDialog.qml
             qml/dialogs/NewProjectDialog.qml
             qml/dialogs/QuitDialog.qml
             qml/dialogs/SettingsDialog.qml

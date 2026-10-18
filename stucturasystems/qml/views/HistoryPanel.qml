@@ -15,6 +15,8 @@ Pane {
     readonly property int count: AppController.commitHistory.count
 
     signal checkoutRequested(string commitId)
+    /** The user wants a new branch that starts at the given commit. */
+    signal newBranchRequested(string commitId)
     signal closeRequested()
 
     padding: 0
@@ -273,16 +275,31 @@ Pane {
                                     font.family: Theme.monoFamily
                                     color: Theme.textSecondary
                                 }
-                                Button {
-                                    text: entry.isCurrent ? qsTr("Currently open") : qsTr("Open this commit")
-                                    enabled: !entry.isCurrent && !AppController.busy
-                                    highlighted: !entry.isCurrent
-                                    flat: entry.isCurrent
-                                    icon.source: Theme.iconHistory
-                                    icon.color: "transparent"
-                                    icon.width: 18
-                                    icon.height: 18
-                                    onClicked: panel.checkoutRequested(entry.commitId)
+                                Flow {
+                                    Layout.fillWidth: true
+                                    spacing: 8
+
+                                    Button {
+                                        text: entry.isCurrent ? qsTr("Currently open") : qsTr("Open this commit")
+                                        enabled: !entry.isCurrent && !AppController.busy
+                                        highlighted: !entry.isCurrent
+                                        flat: entry.isCurrent
+                                        icon.source: Theme.iconHistory
+                                        icon.color: "transparent"
+                                        icon.width: 18
+                                        icon.height: 18
+                                        onClicked: panel.checkoutRequested(entry.commitId)
+                                    }
+                                    Button {
+                                        text: qsTr("Create branch here")
+                                        flat: true
+                                        enabled: !AppController.busy && AppController.connected
+                                        icon.source: Theme.iconBranch
+                                        icon.color: "transparent"
+                                        icon.width: 18
+                                        icon.height: 18
+                                        onClicked: panel.newBranchRequested(entry.commitId)
+                                    }
                                 }
                             }
                         }

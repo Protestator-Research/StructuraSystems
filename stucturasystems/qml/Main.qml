@@ -137,7 +137,7 @@ ApplicationWindow {
     onYChanged: _storeGeometry()
     onWidthChanged: _storeGeometry()
     onHeightChanged: _storeGeometry()
-    onVisibilityChanged: {
+    onVisibilityChanged: visibility => {
         if (_restored && (visibility === Window.Windowed || visibility === Window.Maximized))
             windowState.maximized = visibility === Window.Maximized
     }
@@ -380,6 +380,7 @@ ApplicationWindow {
                         branchName: root.doc ? root.doc.branchName : ""
                         detached: root.doc !== null && root.doc.detached
                         onBranchSelected: (branchId, name) => root.requestSwitchBranch(branchId, name)
+                        onNewBranchRequested: newBranchDialog.openFor("")
                     }
                     IconToolButton {
                         visible: root.isOnlineDoc
@@ -462,6 +463,7 @@ ApplicationWindow {
                         branchName: root.doc ? root.doc.branchName : ""
                         busy: root.busy
                         onReturnRequested: AppController.returnToBranchHead()
+                        onNewBranchRequested: newBranchDialog.openFor(root.doc ? root.doc.commitId : "")
                     }
 
                     Item {
@@ -516,6 +518,7 @@ ApplicationWindow {
                         height: parent.height
                         branchName: root.doc ? root.doc.branchName : ""
                         onCheckoutRequested: commitId => root.requestCheckout(commitId)
+                        onNewBranchRequested: commitId => newBranchDialog.openFor(commitId)
                         onCloseRequested: root.historyOpen = false
                     }
 
@@ -574,6 +577,7 @@ ApplicationWindow {
     SettingsDialog { id: settingsDialog }
     NewProjectDialog { id: newProjectDialog }
     CommitDialog { id: commitDialog }
+    NewBranchDialog { id: newBranchDialog }
     CloseDocumentDialog { id: closeDialog }
     DiscardChangesDialog { id: discardDialog }
     QuitDialog {

@@ -75,6 +75,13 @@ namespace StructuraSystems::Client {
         return {};
     }
 
+    QString CommitHistoryModel::descriptionOf(const QString &commitId) const {
+        for (const auto &commit : Commits)
+            if (commit.Id == commitId)
+                return commit.Description;
+        return {};
+    }
+
     void CommitHistoryModel::setHistory(QList<CommitInfo> commits, QList<BranchInfo> branches) {
         Commits = std::move(commits);
         Branches = std::move(branches);

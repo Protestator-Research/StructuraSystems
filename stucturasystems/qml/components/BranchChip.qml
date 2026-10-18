@@ -15,6 +15,8 @@ Button {
     property bool detached: false
 
     signal branchSelected(string branchId, string branchName)
+    /** The user wants a new branch that starts at the commit loaded in the document. */
+    signal newBranchRequested()
 
     implicitHeight: 32
     topPadding: 0
@@ -90,6 +92,18 @@ Button {
                         chip.branchSelected(entry.branchId, entry.name)
                 }
             }
+        }
+
+        MenuSeparator { }
+
+        MenuItem {
+            text: qsTr("New branch…")
+            enabled: chip.enabled && !AppController.busy && AppController.connected
+            icon.source: Theme.iconAdd
+            icon.color: "transparent"
+            icon.width: 18
+            icon.height: 18
+            onTriggered: chip.newBranchRequested()
         }
     }
 }

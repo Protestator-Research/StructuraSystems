@@ -15,6 +15,7 @@ Pane {
     property date commitDate
 
     signal returnRequested()
+    signal newBranchRequested()
 
     function _refreshDate() {
         commitDate = AppController.commitHistory.createdOf(commitId)
@@ -31,6 +32,8 @@ Pane {
         }
     }
 
+    /** Narrow banner (history panel open): the buttons get shorter texts, so that the message stays readable. */
+    readonly property bool narrow: width < 760
     readonly property string dateText: Theme.formatCommitDate(commitDate)
 
     implicitHeight: shown ? 56 : 0
@@ -73,7 +76,18 @@ Pane {
                   : qsTr("Viewing commit %1 — read-only").arg(banner.commitId.substring(0, 8))
         }
         Button {
-            text: banner.branchName.length > 0 ? qsTr("Back to %1 head").arg(banner.branchName) : qsTr("Back to branch head")
+            text: banner.narrow ? qsTr("New branch") : qsTr("New branch from here")
+            flat: true
+            enabled: !banner.busy && AppController.connected
+            icon.source: Theme.iconBranch
+            icon.color: "transparent"
+            icon.width: 18
+            icon.height: 18
+            onClicked: banner.newBranchRequested()
+        }
+        Button {
+            text: banner.narrow ? qsTr("Back to head")
+                                : banner.branchName.length > 0 ? qsTr("Back to %1 head").arg(banner.branchName) : qsTr("Back to branch head")
             highlighted: true
             enabled: !banner.busy
             icon.source: Theme.iconBack

@@ -67,6 +67,8 @@ namespace StructuraSystems::Client {
         /** @return the creation time of the commit, an invalid date for unknown commits and commits without a time. */
         Q_INVOKABLE QDateTime createdOf(const QString &commitId) const;
 
+        /** @return the description of the commit, empty for unknown commits and commits without a description. */
+        Q_INVOKABLE QString descriptionOf(const QString &commitId) const;
         /** Replaces the commits and branches and sorts the commits. Previous ids that are unknown are ignored. */
         void setHistory(QList<CommitInfo> commits, QList<BranchInfo> branches);
         /** Sets the commit that is loaded in the document and the branch it belongs to, and sorts again. */
