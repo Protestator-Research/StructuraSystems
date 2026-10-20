@@ -59,6 +59,11 @@ namespace StructuraSystems::Client {
         Q_PROPERTY(int count READ count NOTIFY countChanged)
         Q_PROPERTY(QString projectId READ projectId NOTIFY identityChanged)
         Q_PROPERTY(QString commitId READ commitId NOTIFY identityChanged)
+        /** Branch of an online document that the content belongs to. Empty for local documents. */
+        Q_PROPERTY(QString branchId READ branchId NOTIFY branchChanged)
+        Q_PROPERTY(QString branchName READ branchName NOTIFY branchChanged)
+        /** True while an older commit, not the head of the branch, is loaded. The content is read-only then. */
+        Q_PROPERTY(bool detached READ detached NOTIFY detachedChanged)
     public:
         enum Roles {
             BodyRole = Qt::UserRole + 1,
@@ -96,6 +101,9 @@ namespace StructuraSystems::Client {
         [[nodiscard]] int count() const;
         [[nodiscard]] QString projectId() const;
         [[nodiscard]] QString commitId() const;
+        [[nodiscard]] QString branchId() const;
+        [[nodiscard]] QString branchName() const;
+        [[nodiscard]] bool detached() const;
 
         Q_INVOKABLE void setBody(int row, const QString &body);
         /** @param language one of "Markdown", "YAML", "SysMLv2", "KerML" */
@@ -138,6 +146,20 @@ namespace StructuraSystems::Client {
         /** Second half of a commit (GUI thread): takes over the commit the backend returned. */
         void applyCommit(std::shared_ptr<SysMLv2::REST::Commit> commit);
 
+        /** Sets the branch of an online document. Has no effect on local documents. */
+        void setBranch(const QString &branchId, const QString &branchName);
+
+        /** Marks the document as showing an older commit (read-only). Has no effect on local documents. */
+        void setDetached(bool detached);
+
+        /**
+         * Replaces the content of an online document by the elements of another commit (branch switch, checkout of a
+         * commit). The title stays, the problems, the selection and the modified flag are reset. The branch and the
+         * detached state are not touched, see setBranch and setDetached.
+         * @return false (and nothing is changed) for documents that are not online.
+         */
+        bool replaceContent(std::shared_ptr<SysMLv2::REST::Commit> commit, std::vector<std::shared_ptr<KerML::Entities::Element>> elements);
+
         /** Takes over project and commit created on the backend by an upload of this local document. */
         void applyUpload(std::shared_ptr<SysMLv2::REST::Project> project, std::shared_ptr<SysMLv2::REST::Commit> commit);
 
@@ -148,6 +170,8 @@ namespace StructuraSystems::Client {
         void modifiedChanged();
         void countChanged();
         void identityChanged();
+        void branchChanged();
+        void detachedChanged();
         /** Emitted whenever the content of a row was changed by the user. */
         void edited();
         /** Emitted after a parse result was applied. */
@@ -178,6 +202,9 @@ namespace StructuraSystems::Client {
         bool Modified = false;
         bool IsOnline = false;
         bool IsLocalFile = false;
+        QString BranchId;
+        QString BranchName;
+        bool Detached = false;
     };
 }
 

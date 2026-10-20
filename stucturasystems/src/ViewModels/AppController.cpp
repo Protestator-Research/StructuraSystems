@@ -6,6 +6,8 @@
 
 #include <exception>
 #include <stdexcept>
+#include <chrono>
+#include <map>
 #include <utility>
 
 #include <QDir>
@@ -26,7 +28,11 @@
 #include <sysmlv2/rest/entities/CommitRequest.h>
 #include <sysmlv2/rest/entities/DataVersion.h>
 #include <sysmlv2/rest/entities/Project.h>
+#include <sysmlv2/rest/entities/Tag.h>
 
+#include "BranchListModel.h"
+#include "CommitHistoryModel.h"
+#include "DigitalTwinProjectModel.h"
 #include "DocumentModel.h"
 #include "OpenDocumentsModel.h"
 #include "ProblemListModel.h"
@@ -35,6 +41,7 @@
 #include "../Models/Parser/StructuraSystemsParser.h"
 #include "../Services/BECommunicationService.h"
 #include "../Services/entities/DigitalTwin.h"
+#include "../Services/entities/DigitalTwinRequest.h"
 
 namespace StructuraSystems::Client {
     namespace {
@@ -50,6 +57,42 @@ namespace StructuraSystems::Client {
             std::shared_ptr<SysMLv2::REST::Project> Project;
             std::shared_ptr<SysMLv2::REST::Commit> Commit;
             std::vector<std::shared_ptr<KerML::Entities::Element>> Elements;
+            QString BranchId;
+            QString BranchName;
+        };
+
+        /** The elements of a commit, that are loaded into an already opened document. */
+        struct CommitContent {
+            std::shared_ptr<SysMLv2::REST::Commit> Commit;
+            std::vector<std::shared_ptr<KerML::Entities::Element>> Elements;
+            /** Branch the content is shown for. Empty id if the branch does not exist on the server. */
+            QString BranchId;
+            QString BranchName;
+            QString BranchHeadCommitId;
+        };
+
+        /** The branch created on the server and, if the document switches to a commit other than the loaded one, its content. */
+        struct BranchCreation {
+            QString BranchId;
+            QString BranchName;
+            bool HasContent = false;
+            CommitContent Content;
+        };
+
+        /** @return why the name cannot be used for a branch, empty if it is fine. Expects a trimmed name. */
+        QString branchNameProblem(const QString &name) {
+            if (name.isEmpty())
+                return QObject::tr("The name must not be empty.");
+            for (const auto character : name)
+                if (character.category() == QChar::Other_Control)
+                    return QObject::tr("The name must not contain control characters.");
+            return {};
+        }
+
+        struct HistoryLoadResult {
+            QString ProjectId;
+            QList<BranchInfo> Branches;
+            QList<CommitInfo> Commits;
         };
 
         struct UploadResult {
@@ -58,11 +101,32 @@ namespace StructuraSystems::Client {
             ProjectList Projects;
         };
 
+        struct TwinLoadResult {
+            QList<DigitalTwinProject> Projects;
+            int FailedProjects = 0;
+            QString FirstError;
+        };
+
         template<typename T>
         struct Outcome {
             T Value{};
             QString Error;
         };
+
+        QString uuidText(const boost::uuids::uuid &id) {
+            return QString::fromStdString(boost::uuids::to_string(id));
+        }
+
+        /** Downloads a commit and its elements. */
+        CommitContent downloadCommit(const std::shared_ptr<CommunicationService> &service, const boost::uuids::uuid &projectId,
+                                     const boost::uuids::uuid &commitId) {
+            CommitContent content;
+            content.Commit = service->getCommitWithId(projectId, commitId);
+            if (content.Commit == nullptr)
+                throw std::runtime_error("The commit does not exist on the server.");
+            content.Elements = service->getAllElements(content.Commit->getId(), projectId);
+            return content;
+        }
 
         const QStringList PROJECT_FILE_FILTERS = {"*.md", "*.kerml", "*.sysml", "*.xml", "*.json"};
     }
@@ -72,8 +136,11 @@ namespace StructuraSystems::Client {
         Settings(new SettingsController(this)),
         LocalProjects(new ProjectItemModel(this)),
         OnlineProjects(new ProjectItemModel(this)),
+        DigitalTwinProjects(new DigitalTwinProjectModel(this)),
         Documents(new OpenDocumentsModel(this)),
         Problems(new ProblemListModel(this)),
+        Branches(new BranchListModel(this)),
+        CommitHistory(new CommitHistoryModel(this)),
         StatusText(tr("Ready")) {
         Settings->initWithDefaultsIfEmpty();
         connect(Settings, &SettingsController::saved, this, &AppController::onSettingsSaved);
@@ -89,11 +156,16 @@ namespace StructuraSystems::Client {
     QString AppController::statusText() const { return StatusText; }
     ProjectItemModel *AppController::localProjects() const { return LocalProjects; }
     ProjectItemModel *AppController::onlineProjects() const { return OnlineProjects; }
+    DigitalTwinProjectModel *AppController::digitalTwinProjects() const { return DigitalTwinProjects; }
+    bool AppController::twinsLoading() const { return TwinsLoading; }
     OpenDocumentsModel *AppController::documents() const { return Documents; }
     int AppController::currentIndex() const { return CurrentIndex; }
     DocumentModel *AppController::currentDocument() const { return CurrentDocument; }
     ProblemListModel *AppController::problems() const { return Problems; }
     SettingsController *AppController::settings() const { return Settings; }
+    BranchListModel *AppController::branches() const { return Branches; }
+    CommitHistoryModel *AppController::commitHistory() const { return CommitHistory; }
+    bool AppController::historyLoading() const { return HistoryLoading; }
 
     void AppController::setBusy(bool busy) {
         if (Busy == busy)
@@ -107,6 +179,20 @@ namespace StructuraSystems::Client {
             return;
         Connected = connected;
         emit connectedChanged();
+    }
+
+    void AppController::setTwinsLoading(bool loading) {
+        if (TwinsLoading == loading)
+            return;
+        TwinsLoading = loading;
+        emit twinsLoadingChanged();
+    }
+
+    void AppController::setHistoryLoading(bool loading) {
+        if (HistoryLoading == loading)
+            return;
+        HistoryLoading = loading;
+        emit historyLoadingChanged();
     }
 
     void AppController::setStatusText(const QString &text) {
@@ -135,7 +221,7 @@ namespace StructuraSystems::Client {
             try {
                 outcome.Value = work();
             } catch (const std::exception &ex) {
-                outcome.Error = QString::fromUtf8(ex.what());
+                outcome.Error = QString::fromStdString(CommunicationService::describeBackendError(ex));
                 if (outcome.Error.isEmpty())
                     outcome.Error = QStringLiteral("Unknown error");
             } catch (...) {
@@ -256,6 +342,13 @@ namespace StructuraSystems::Client {
             if (document == CurrentDocument)
                 refreshProblems();
         });
+        // Commit, branch switch and checkout change the context of the history.
+        const auto contextChanged = [this, document]() {
+            if (document == CurrentDocument)
+                updateHistoryContext();
+        };
+        connect(document, &DocumentModel::identityChanged, this, contextChanged);
+        connect(document, &DocumentModel::branchChanged, this, contextChanged);
         const int index = Documents->append(key, document);
         updateCurrentDocument(index);
     }
@@ -324,6 +417,30 @@ namespace StructuraSystems::Client {
         openLocalProjectByName(fileName);
     }
 
+    void AppController::deleteLocalProject(int row, const QString &expectedName) {
+        const auto projects = LocalProjects->getProjects();
+        if (row < 0 || row >= int(projects.size()) || projects[row] == nullptr
+            || QString::fromStdString(projects[row]->getName()) != expectedName) {
+            emitNotify(2, tr("The project list has changed. Please try again."));
+            return;
+        }
+
+        const auto name = expectedName;
+        const auto filePath = QDir(LocalFolders.value(name, Settings->workingDirectory())).filePath(name);
+
+        if (!QFile::moveToTrash(filePath)) {
+            emitNotify(3, tr("Could not move %1 to the recycle bin.").arg(name), filePath);
+            return;
+        }
+
+        const int openIndex = Documents->indexOfKey(QStringLiteral("local:") + name);
+        if (openIndex >= 0)
+            closeDocument(openIndex);
+        LocalProjects->removeProjectAt(row);
+        LocalFolders.remove(name);
+        emitNotify(1, tr("Project %1 moved to the recycle bin.").arg(name));
+    }
+
     // ------------------------------------------------------------------ documents
 
     void AppController::setCurrentIndex(int index) {
@@ -343,6 +460,8 @@ namespace StructuraSystems::Client {
         if (documentChanged) {
             emit currentDocumentChanged();
             refreshProblems();
+            updateHistoryContext();
+            loadHistory();
         }
     }
 
@@ -365,6 +484,20 @@ namespace StructuraSystems::Client {
 
         Documents->remove(index);
         updateCurrentDocument(newIndex);
+    }
+
+    bool AppController::isLocalProjectOpen(int row) const {
+        const auto projects = LocalProjects->getProjects();
+        if (row < 0 || row >= int(projects.size()) || projects[row] == nullptr)
+            return false;
+        return Documents->indexOfKey(QStringLiteral("local:") + QString::fromStdString(projects[row]->getName())) >= 0;
+    }
+
+    bool AppController::isOnlineProjectOpen(int row) const {
+        const auto projects = OnlineProjects->getProjects();
+        if (row < 0 || row >= int(projects.size()) || projects[row] == nullptr)
+            return false;
+        return Documents->indexOfKey(QStringLiteral("online:") + uuidText(projects[row]->getId())) >= 0;
     }
 
     void AppController::saveCurrent() {
@@ -453,6 +586,86 @@ namespace StructuraSystems::Client {
         OnlineProjects->clear();
         for (const auto &project : projects)
             OnlineProjects->appendProject(project);
+        // The project list is shown immediately, the digital twins follow in the background.
+        loadDigitalTwins(projects);
+    }
+
+    void AppController::loadDigitalTwins(const ProjectList &projects) {
+        if (!Connected || BackendConnection == nullptr)
+            return;
+
+        const auto generation = ++TwinLoadGeneration;
+        setTwinsLoading(true);
+
+        // Own connection: the API implementation is not thread safe and runAsync may use BackendConnection meanwhile.
+        const auto connection = BackendConnection->createIndependentConnection();
+        auto work = [connection, projects]() {
+            TwinLoadResult result;
+            for (const auto &project : projects) {
+                if (project == nullptr)
+                    continue;
+                try {
+                    DigitalTwinProject entry;
+                    entry.ProjectId = QString::fromStdString(boost::uuids::to_string(project->getId()));
+                    entry.Name = QString::fromStdString(project->getName());
+                    entry.Description = QString::fromStdString(project->getDescription());
+                    for (const auto &twin : connection->getAllDigitalTwinsForProject(project->getId())) {
+                        if (twin == nullptr)
+                            continue;
+                        DigitalTwinInfo info;
+                        info.Id = QString::fromStdString(boost::uuids::to_string(twin->getId()));
+                        info.Name = QString::fromStdString(twin->getName());
+                        if (const auto commit = twin->referencedCommit(); commit != nullptr)
+                            info.CommitId = QString::fromStdString(boost::uuids::to_string(commit->getId()));
+                        const auto created = std::chrono::duration_cast<std::chrono::milliseconds>(twin->created().time_since_epoch());
+                        info.Created = QDateTime::fromMSecsSinceEpoch(created.count());
+                        entry.Twins.append(info);
+                    }
+                    result.Projects.append(entry);
+                } catch (const std::exception &ex) {
+                    if (result.FailedProjects++ == 0)
+                        result.FirstError = QString::fromStdString(CommunicationService::describeBackendError(ex));
+                } catch (...) {
+                    if (result.FailedProjects++ == 0)
+                        result.FirstError = QStringLiteral("Unknown error");
+                }
+            }
+            return result;
+        };
+
+        QtConcurrent::run(std::move(work)).then(this, [this, generation](TwinLoadResult result) {
+            if (generation != TwinLoadGeneration)
+                return;
+            setTwinsLoading(false);
+            DigitalTwinProjects->setProjects(result.Projects);
+            if (result.FailedProjects > 0)
+                emitNotify(2, tr("The digital twins of %n project(s) could not be loaded.", nullptr, result.FailedProjects),
+                           result.FirstError);
+        });
+    }
+
+    void AppController::cancelDigitalTwinLoading() {
+        ++TwinLoadGeneration;
+        setTwinsLoading(false);
+        DigitalTwinProjects->clear();
+    }
+
+    void AppController::refreshDigitalTwins() {
+        if (!requireConnection())
+            return;
+        loadDigitalTwins(OnlineProjects->getProjects());
+    }
+
+    void AppController::openDigitalTwinProject(int row) {
+        const auto projectId = DigitalTwinProjects->projectIdAt(row).toStdString();
+        const auto projects = OnlineProjects->getProjects();
+        for (size_t i = 0; i < projects.size(); i++) {
+            if (projects[i] != nullptr && boost::uuids::to_string(projects[i]->getId()) == projectId) {
+                openOnlineProject(int(i));
+                return;
+            }
+        }
+        emitNotify(2, tr("The project is no longer in the list of online projects. Please refresh."));
     }
 
     void AppController::connectToBackend() {
@@ -481,6 +694,8 @@ namespace StructuraSystems::Client {
                 BackendConnection = std::move(result.Service);
                 setConnected(true);
                 populateOnlineProjects(result.Projects);
+                // Documents that stayed open while offline get their history back.
+                loadHistory();
                 setStatusText(tr("Connected to %1").arg(Settings->serverPath()));
                 emitNotify(1, tr("Connected to the backend."));
             });
@@ -492,6 +707,8 @@ namespace StructuraSystems::Client {
             return;
         }
         BackendConnection.reset();
+        cancelDigitalTwinLoading();
+        clearHistory();
         OnlineProjects->clear();
         setConnected(false);
         setStatusText(tr("Disconnected"));
@@ -504,6 +721,36 @@ namespace StructuraSystems::Client {
         runAsync<ProjectList>(tr("Refreshing online projects"),
             [service]() { return service->getAllProjects(); },
             [this](ProjectList projects) { populateOnlineProjects(projects); });
+    }
+
+    void AppController::deleteOnlineProject(int row, const QString &expectedName) {
+        if (!requireConnection())
+            return;
+        const auto projects = OnlineProjects->getProjects();
+        if (row < 0 || row >= int(projects.size()) || projects[row] == nullptr
+            || QString::fromStdString(projects[row]->getName()) != expectedName) {
+            emitNotify(2, tr("The project list has changed. Please try again."));
+            return;
+        }
+
+        const auto service = BackendConnection;
+        const auto projectId = projects[row]->getId();
+        const auto idText = uuidText(projectId);
+        const auto name = QString::fromStdString(projects[row]->getName());
+        runAsync<ProjectList>(tr("Deleting %1").arg(name),
+            [service, projectId]() {
+                service->deleteProject(projectId);
+                return service->getAllProjects();
+            },
+            [this, idText, name](ProjectList remaining) {
+                const int openIndex = Documents->indexOfKey(QStringLiteral("online:") + idText);
+                if (openIndex >= 0)
+                    closeDocument(openIndex);
+                if (HistoryProjectId == idText)
+                    clearHistory();
+                populateOnlineProjects(remaining);
+                emitNotify(1, tr("Online project %1 deleted.").arg(name));
+            });
     }
 
     void AppController::openOnlineProject(int row) {
@@ -536,6 +783,8 @@ namespace StructuraSystems::Client {
                 if (mainBranch == nullptr || mainBranch->getHead() == nullptr)
                     throw std::runtime_error("The project has no default branch with a commit.");
 
+                content.BranchId = uuidText(mainBranch->getId());
+                content.BranchName = QString::fromStdString(mainBranch->getName());
                 content.Commit = service->getCommitWithId(project->getId(), mainBranch->getHead()->getId());
                 content.Elements = service->getAllElements(content.Commit->getId(), project->getId());
                 return content;
@@ -548,7 +797,9 @@ namespace StructuraSystems::Client {
                         updateCurrentDocument(existing);
                         return;
                     }
-                    openDocument(key, new DocumentModel(content.Project, content.Commit, std::move(content.Elements)));
+                    auto *document = new DocumentModel(content.Project, content.Commit, std::move(content.Elements));
+                    document->setBranch(content.BranchId, content.BranchName);
+                    openDocument(key, document);
                 } catch (const std::exception &ex) {
                     emitNotify(3, tr("Could not open the project."), QString::fromUtf8(ex.what()));
                 }
@@ -563,17 +814,31 @@ namespace StructuraSystems::Client {
             emitNotify(2, tr("This project is not online yet. Upload it first."));
             return;
         }
+        if (document->detached()) {
+            emitNotify(2, tr("You are viewing an older commit. Return to the branch head to commit."));
+            return;
+        }
 
         const auto service = BackendConnection;
         const auto project = document->getProject();
         const auto request = document->buildCommitRequest(message);
+        // The commit goes to the branch of the document, the default branch of the project is the fallback.
+        auto branchId = document->branchId();
+        if (branchId.isEmpty() && project->getDefaultBranch() != nullptr)
+            branchId = uuidText(project->getDefaultBranch()->getId());
+        const auto branchIdText = branchId.toStdString();
         QPointer<DocumentModel> guard(document);
         runAsync<std::shared_ptr<SysMLv2::REST::Commit>>(tr("Committing %1").arg(document->title()),
-            [service, project, request]() { return service->postCommitWithId(project->getId(), request); },
+            [service, project, request, branchIdText]() {
+                if (branchIdText.empty())
+                    return service->postCommitWithId(project->getId(), request);
+                return service->postCommitToBranch(project->getId(), boost::uuids::string_generator()(branchIdText), request);
+            },
             [this, guard](std::shared_ptr<SysMLv2::REST::Commit> commit) {
                 if (guard)
                     guard->applyCommit(std::move(commit));
                 emitNotify(1, tr("Commit created."));
+                loadHistory();
             });
     }
 
@@ -599,9 +864,13 @@ namespace StructuraSystems::Client {
                 return result;
             },
             [this, guard](UploadResult result) {
-                if (guard)
+                if (guard) {
                     guard->applyUpload(result.Project, result.Commit);
+                    if (const auto defaultBranch = result.Project->getDefaultBranch(); defaultBranch != nullptr)
+                        guard->setBranch(uuidText(defaultBranch->getId()), QString::fromStdString(defaultBranch->getName()));
+                }
                 populateOnlineProjects(result.Projects);
+                loadHistory();
                 emitNotify(1, tr("Project uploaded."));
             });
     }
@@ -617,18 +886,13 @@ namespace StructuraSystems::Client {
         const auto service = BackendConnection;
         const auto projectName = name.trimmed().toStdString();
         const auto projectDescription = description.toStdString();
-        const auto owner = Settings->username().toStdString();
         const auto visibilityText = visibility.toStdString();
         runAsync<ProjectList>(tr("Creating online project"),
-            [service, projectName, projectDescription, owner, visibilityText]() {
-                if (visibilityText == "Private")
-                    service->postProject(projectName, projectDescription, "Main", owner);
-                else if (visibilityText == "Internal")
-                    service->postProject(projectName, projectDescription, "Main", owner); //TODO fix for group required
-                else if (visibilityText == "Public")
-                    service->postProject(projectName, projectDescription, "Main");
-                else
+            [service, projectName, projectDescription, visibilityText]() {
+                if (visibilityText != "Private" && visibilityText != "Internal" && visibilityText != "Public")
                     throw std::invalid_argument("Unknown visibility: " + visibilityText);
+                // The server uses the logged in user as owner. No group is selectable in the UI yet.
+                service->postProject(projectName, projectDescription, "Main");
                 return service->getAllProjects();
             },
             [this](ProjectList projects) {
@@ -637,11 +901,11 @@ namespace StructuraSystems::Client {
             });
     }
 
-    void AppController::createDigitalTwin(const QString &name, const QStringList &elementIds) {
+    void AppController::createDigitalTwin(const QString &name) {
         const auto document = CurrentDocument;
         if (!document || !requireConnection())
             return;
-        if (!document->isOnline()) {
+        if (!document->isOnline() || document->getCommit() == nullptr) {
             emitNotify(2, tr("A digital twin can only be created for an online project."));
             return;
         }
@@ -650,25 +914,320 @@ namespace StructuraSystems::Client {
             return;
         }
 
-        std::shared_ptr<SysMLv2::REST::DigitalTwin> digitalTwin;
-        try {
-            std::vector<boost::uuids::uuid> connectedElements;
-            for (const auto &id : elementIds)
-                connectedElements.push_back(boost::uuids::string_generator()(id.toStdString()));
-            digitalTwin = std::make_shared<SysMLv2::REST::DigitalTwin>(name.trimmed().toStdString(), connectedElements,
-                                                                       document->getCommit()->getId());
-        } catch (const std::exception &ex) {
-            emitNotify(3, tr("Invalid element selection."), QString::fromUtf8(ex.what()));
+        const auto twinRequest = std::make_shared<SysMLv2::REST::DigitalTwinRequest>(name.trimmed().toStdString(),
+                                                                                      document->getCommit()->getId());
+        const auto service = BackendConnection;
+        const auto projectId = document->getProject()->getId();
+        runAsync<std::shared_ptr<SysMLv2::REST::DigitalTwin>>(tr("Creating digital twin"),
+            [service, projectId, twinRequest]() { return service->postDigitalTwinToProject(projectId, twinRequest); },
+            [this](std::shared_ptr<SysMLv2::REST::DigitalTwin> digitalTwin) {
+                emitNotify(1, tr("Digital twin %1 created.").arg(QString::fromStdString(digitalTwin->getName())));
+                refreshDigitalTwins();
+            });
+    }
+
+    // ------------------------------------------------------------------ branches and history
+
+    void AppController::updateHistoryContext() {
+        const auto document = CurrentDocument;
+        if (document && document->isOnline()) {
+            Branches->setCurrentBranch(document->branchId());
+            CommitHistory->setContext(document->commitId(), document->branchId());
+        } else {
+            Branches->setCurrentBranch(QString());
+            CommitHistory->setContext(QString(), QString());
+        }
+    }
+
+    void AppController::clearHistory() {
+        ++HistoryGeneration;
+        setHistoryLoading(false);
+        HistoryProjectId.clear();
+        Branches->clear();
+        CommitHistory->clear();
+    }
+
+    void AppController::loadHistory() {
+        const auto document = CurrentDocument;
+        if (!document || !document->isOnline() || !Connected || BackendConnection == nullptr || document->getProject() == nullptr) {
+            clearHistory();
+            return;
+        }
+
+        // The history of another project must not stay visible while the new one loads.
+        const auto projectIdText = document->projectId();
+        if (projectIdText != HistoryProjectId) {
+            Branches->clear();
+            CommitHistory->clear();
+        }
+        HistoryProjectId = projectIdText;
+
+        const auto generation = ++HistoryGeneration;
+        setHistoryLoading(true);
+
+        // Own connection, like the digital twins: it does not wait for runAsync and does not share the not thread safe API implementation.
+        const auto connection = BackendConnection->createIndependentConnection();
+        const auto projectId = document->getProject()->getId();
+        QString defaultBranchId;
+        if (const auto defaultBranch = document->getProject()->getDefaultBranch(); defaultBranch != nullptr)
+            defaultBranchId = uuidText(defaultBranch->getId());
+
+        auto work = [connection, projectId, projectIdText, defaultBranchId]() {
+            Outcome<HistoryLoadResult> outcome;
+            try {
+                outcome.Value.ProjectId = projectIdText;
+                for (const auto &branch : connection->getAllBranchesForProjectWithID(projectId)) {
+                    if (branch == nullptr)
+                        continue;
+                    BranchInfo info;
+                    info.Id = uuidText(branch->getId());
+                    info.Name = QString::fromStdString(branch->getName());
+                    if (const auto head = branch->getHead(); head != nullptr)
+                        info.HeadCommitId = uuidText(head->getId());
+                    info.IsDefault = info.Id == defaultBranchId;
+                    outcome.Value.Branches.append(info);
+                }
+
+                std::map<boost::uuids::uuid, std::chrono::system_clock::time_point> timestamps;
+                for (const auto &commit : connection->getAllCommitsForProject(projectId, &timestamps)) {
+                    if (commit == nullptr)
+                        continue;
+                    CommitInfo info;
+                    info.Id = uuidText(commit->getId());
+                    info.Description = QString::fromStdString(commit->getDescription());
+                    if (const auto created = timestamps.find(commit->getId()); created != timestamps.end()) {
+                        const auto milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(created->second.time_since_epoch());
+                        info.Created = QDateTime::fromMSecsSinceEpoch(milliseconds.count());
+                    }
+                    for (const auto &previous : commit->getPreviusCommits())
+                        if (previous != nullptr)
+                            info.PreviousIds.append(uuidText(previous->getId()));
+                    outcome.Value.Commits.append(info);
+                }
+            } catch (const std::exception &ex) {
+                outcome.Error = QString::fromStdString(CommunicationService::describeBackendError(ex));
+                if (outcome.Error.isEmpty())
+                    outcome.Error = QStringLiteral("Unknown error");
+            } catch (...) {
+                outcome.Error = QStringLiteral("Unknown error");
+            }
+            return outcome;
+        };
+
+        QtConcurrent::run(std::move(work)).then(this, [this, generation](Outcome<HistoryLoadResult> outcome) {
+            if (generation != HistoryGeneration)
+                return;
+            setHistoryLoading(false);
+            if (!outcome.Error.isEmpty()) {
+                emitNotify(2, tr("The branches and commits of the project could not be loaded."), outcome.Error);
+                return;
+            }
+
+            const auto document = CurrentDocument;
+            if (!document || document->projectId() != outcome.Value.ProjectId)
+                return;
+
+            // Documents without branch (uploaded ones) are on the default branch, the name of a branch is only known from the list.
+            QString branchId = document->branchId();
+            if (branchId.isEmpty()) {
+                for (const auto &branch : std::as_const(outcome.Value.Branches))
+                    if (branch.IsDefault)
+                        branchId = branch.Id;
+            }
+            for (const auto &branch : std::as_const(outcome.Value.Branches))
+                if (branch.Id == branchId && !branch.Name.isEmpty())
+                    document->setBranch(branch.Id, branch.Name);
+
+            updateHistoryContext();
+            Branches->setBranches(outcome.Value.Branches);
+            CommitHistory->setHistory(outcome.Value.Commits, outcome.Value.Branches);
+        });
+    }
+
+    void AppController::refreshHistory() {
+        if (!requireConnection())
+            return;
+        if (!CurrentDocument || !CurrentDocument->isOnline()) {
+            emitNotify(2, tr("Branches and history are only available for online projects."));
+            return;
+        }
+        loadHistory();
+    }
+
+    void AppController::switchBranch(const QString &branchId) {
+        const auto document = CurrentDocument;
+        if (!document || !requireConnection())
+            return;
+        if (!document->isOnline()) {
+            emitNotify(2, tr("Branches are only available for online projects."));
             return;
         }
 
         const auto service = BackendConnection;
         const auto projectId = document->getProject()->getId();
-        runAsync<bool>(tr("Creating digital twin"),
-            [service, projectId, digitalTwin]() {
-                service->postDigitalTwinToProject(projectId, digitalTwin);
-                return true;
+        const auto branchIdText = branchId.toStdString();
+        QPointer<DocumentModel> guard(document);
+        runAsync<CommitContent>(tr("Switching branch"),
+            [service, projectId, branchIdText]() {
+                const auto id = boost::uuids::string_generator()(branchIdText);
+                // The head is read again, other users may have committed since the branch list was loaded.
+                for (const auto &branch : service->getAllBranchesForProjectWithID(projectId)) {
+                    if (branch == nullptr || branch->getId() != id)
+                        continue;
+                    if (branch->getHead() == nullptr)
+                        throw std::runtime_error("The branch " + branch->getName() + " has no commit yet.");
+                    auto content = downloadCommit(service, projectId, branch->getHead()->getId());
+                    content.BranchId = uuidText(branch->getId());
+                    content.BranchName = QString::fromStdString(branch->getName());
+                    content.BranchHeadCommitId = uuidText(branch->getHead()->getId());
+                    return content;
+                }
+                throw std::runtime_error("The branch does not exist on the server (anymore). Refresh the history.");
             },
-            [this](bool) { emitNotify(1, tr("Digital twin created.")); });
+            [this, guard](CommitContent content) {
+                if (!guard)
+                    return;
+                guard->setBranch(content.BranchId, content.BranchName);
+                guard->setDetached(false);
+                guard->replaceContent(content.Commit, std::move(content.Elements));
+                loadHistory();
+                emitNotify(1, tr("Switched to branch %1.").arg(content.BranchName));
+            });
+    }
+
+    void AppController::checkoutCommit(const QString &commitId) {
+        const auto document = CurrentDocument;
+        if (!document || !requireConnection())
+            return;
+        if (!document->isOnline()) {
+            emitNotify(2, tr("The history is only available for online projects."));
+            return;
+        }
+
+        const auto service = BackendConnection;
+        const auto projectId = document->getProject()->getId();
+        const auto commitIdText = commitId.toStdString();
+        const auto branchIdText = document->branchId().toStdString();
+        QPointer<DocumentModel> guard(document);
+        runAsync<CommitContent>(tr("Loading commit %1").arg(commitId.left(8)),
+            [service, projectId, commitIdText, branchIdText]() {
+                auto content = downloadCommit(service, projectId, boost::uuids::string_generator()(commitIdText));
+                // The document is only editable if the commit is the head of its branch.
+                if (!branchIdText.empty()) {
+                    const auto id = boost::uuids::string_generator()(branchIdText);
+                    for (const auto &branch : service->getAllBranchesForProjectWithID(projectId)) {
+                        if (branch != nullptr && branch->getId() == id && branch->getHead() != nullptr) {
+                            content.BranchId = uuidText(branch->getId());
+                            content.BranchName = QString::fromStdString(branch->getName());
+                            content.BranchHeadCommitId = uuidText(branch->getHead()->getId());
+                        }
+                    }
+                }
+                return content;
+            },
+            [this, guard, commitId](CommitContent content) {
+                if (!guard)
+                    return;
+                const bool detached = content.BranchHeadCommitId.isEmpty()
+                                      || uuidText(content.Commit->getId()) != content.BranchHeadCommitId;
+                guard->setDetached(detached);
+                guard->replaceContent(content.Commit, std::move(content.Elements));
+                if (detached)
+                    emitNotify(0, tr("Showing commit %1 (read-only).").arg(commitId.left(8)));
+                else
+                    emitNotify(0, tr("Showing the head of branch %1.").arg(guard->branchName()));
+            });
+    }
+
+    void AppController::returnToBranchHead() {
+        const auto document = CurrentDocument;
+        if (!document || !document->isOnline())
+            return;
+
+        auto branchId = document->branchId();
+        if (branchId.isEmpty()) {
+            for (const auto &branch : Branches->branches())
+                if (branch.IsDefault)
+                    branchId = branch.Id;
+        }
+        if (branchId.isEmpty()) {
+            emitNotify(2, tr("The branch of this document is unknown. Refresh the history."));
+            return;
+        }
+        switchBranch(branchId);
+    }
+
+    bool AppController::branchNameAvailable(const QString &name) const {
+        const auto trimmed = name.trimmed();
+        if (!branchNameProblem(trimmed).isEmpty())
+            return false;
+        for (const auto &branch : Branches->branches())
+            if (branch.Name.compare(trimmed, Qt::CaseInsensitive) == 0)
+                return false;
+        return true;
+    }
+
+    void AppController::createBranch(const QString &name, const QString &fromCommitId, bool switchToBranch) {
+        const auto document = CurrentDocument;
+        if (!document || !requireConnection())
+            return;
+        if (!document->isOnline() || document->getProject() == nullptr) {
+            emitNotify(2, tr("Branches are only available for online projects."));
+            return;
+        }
+
+        const auto branchName = name.trimmed();
+        if (const auto problem = branchNameProblem(branchName); !problem.isEmpty()) {
+            emitNotify(2, tr("The branch could not be created."), problem);
+            return;
+        }
+        if (!branchNameAvailable(branchName)) {
+            emitNotify(2, tr("The branch could not be created."), tr("A branch named %1 already exists.").arg(branchName));
+            return;
+        }
+
+        const auto loadedCommitId = document->commitId();
+        const auto headCommitId = fromCommitId.isEmpty() ? loadedCommitId : fromCommitId;
+        if (headCommitId.isEmpty()) {
+            emitNotify(2, tr("The branch could not be created."), tr("The project has no commit to start the branch from."));
+            return;
+        }
+        // Switching to a branch that starts at another commit shows that commit, like checkoutCommit.
+        const bool loadContent = switchToBranch && headCommitId != loadedCommitId;
+
+        const auto service = BackendConnection;
+        const auto projectId = document->getProject()->getId();
+        const auto branchNameText = branchName.toStdString();
+        const auto headCommitIdText = headCommitId.toStdString();
+        QPointer<DocumentModel> guard(document);
+        runAsync<BranchCreation>(tr("Creating branch %1").arg(branchName),
+            [service, projectId, branchNameText, headCommitIdText, loadContent]() {
+                const auto headId = boost::uuids::string_generator()(headCommitIdText);
+                const auto branch = service->postBranch(projectId, branchNameText, headId);
+                if (branch == nullptr)
+                    throw std::runtime_error("The server did not return the new branch.");
+                BranchCreation creation;
+                creation.BranchId = uuidText(branch->getId());
+                creation.BranchName = QString::fromStdString(branch->getName());
+                if (loadContent) {
+                    creation.Content = downloadCommit(service, projectId, headId);
+                    creation.HasContent = true;
+                }
+                return creation;
+            },
+            [this, guard, switchToBranch](BranchCreation creation) {
+                if (guard && switchToBranch) {
+                    // The unsaved changes stay, the new head is the loaded commit (like git checkout -b).
+                    guard->setBranch(creation.BranchId, creation.BranchName);
+                    guard->setDetached(false);
+                    if (creation.HasContent)
+                        guard->replaceContent(creation.Content.Commit, std::move(creation.Content.Elements));
+                }
+                loadHistory();
+                if (guard && switchToBranch)
+                    emitNotify(1, tr("Created branch %1 and switched to it.").arg(creation.BranchName));
+                else
+                    emitNotify(1, tr("Created branch %1.").arg(creation.BranchName));
+            });
     }
 }

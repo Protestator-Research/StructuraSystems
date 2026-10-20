@@ -84,7 +84,9 @@ Pane {
                 sourceModel: AppController.localProjects
                 iconSource: Theme.iconProject
                 filterText: search.text
+                isOpenFunction: row => AppController.isLocalProjectOpen(row)
                 onProjectActivated: row => AppController.openLocalProject(row)
+                onDeleteRequested: (row, name) => deleteDialog.openFor(row, name)
             }
 
             Label {
@@ -117,5 +119,10 @@ Pane {
                 }
             }
         }
+    }
+
+    ConfirmDeleteDialog {
+        id: deleteDialog
+        onConfirmed: (row, name) => AppController.deleteLocalProject(row, name)
     }
 }

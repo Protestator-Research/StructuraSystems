@@ -8,6 +8,7 @@ import StructuraSystems
 
 // List of projects (name and description). Double-click or Enter opens the current entry.
 // The list shows a filtered view of sourceModel; projectActivated reports the row in the SOURCE model.
+// A delete button appears for the hovered entry if its project is open as a document (see isOpenFunction).
 ListView {
     id: list
 
@@ -15,7 +16,14 @@ ListView {
     property url iconSource
     property string filterText
 
+    /** Function(sourceRow) -> bool, tells if the project of a row is open as a document. Delete is only offered for open projects. */
+    property var isOpenFunction: function (sourceRow) { return false }
+    /** Switches the delete button and the Delete key on or off, e.g. while the backend is busy. */
+    property bool deleteEnabled: true
+
     signal projectActivated(int sourceRow)
+    /** Emitted if the user wants to delete a project. Reports the row in the SOURCE model. */
+    signal deleteRequested(int sourceRow, string name)
 
     /** Selects the first entry and moves the keyboard focus into the list. */
     function focusFirst() {
@@ -23,6 +31,11 @@ ListView {
             currentIndex = 0
             forceActiveFocus()
         }
+    }
+
+    // The reference to the document count makes the bindings of the delegates react on opened and closed documents.
+    function _isOpen(row) {
+        return AppController.documents.count >= 0 && isOpenFunction(filter.sourceRow(row))
     }
 
     function _activate(row) {
@@ -46,6 +59,13 @@ ListView {
 
     readonly property bool allFilteredOut: count === 0 && sourceModel !== null && sourceModel.count > 0
 
+    Keys.onDeletePressed: {
+        if (currentIndex < 0 || !deleteEnabled || !_isOpen(currentIndex))
+            return
+        const source = filter.sourceRow(currentIndex)
+        if (source >= 0)
+            deleteRequested(source, filter.data(filter.index(currentIndex, 0), Qt.DisplayRole))
+    }
     Keys.onReturnPressed: if (currentIndex >= 0) _activate(currentIndex)
     Keys.onEnterPressed: if (currentIndex >= 0) _activate(currentIndex)
 
@@ -86,6 +106,19 @@ ListView {
                     elide: Text.ElideRight
                     font.pixelSize: 12
                     color: Theme.textSecondary
+                }
+            }
+            IconToolButton {
+                id: deleteButton
+
+                // Only for projects that are open, so that nothing is deleted by accident.
+                visible: list.deleteEnabled && (entry.hovered || hovered) && list._isOpen(entry.index)
+                iconSource: Theme.iconTrash
+                tip: qsTr("Delete project")
+                onClicked: {
+                    const source = filter.sourceRow(entry.index)
+                    if (source >= 0)
+                        list.deleteRequested(source, entry.name)
                 }
             }
         }

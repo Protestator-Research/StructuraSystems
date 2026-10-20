@@ -129,7 +129,10 @@ Pane {
                 sourceModel: AppController.onlineProjects
                 iconSource: Theme.iconOnlineProject
                 filterText: search.text
+                deleteEnabled: AppController.connected && !AppController.busy
+                isOpenFunction: row => AppController.isOnlineProjectOpen(row)
                 onProjectActivated: row => AppController.openOnlineProject(row)
+                onDeleteRequested: (row, name) => deleteDialog.openFor(row, name)
             }
 
             Label {
@@ -173,5 +176,11 @@ Pane {
                 }
             }
         }
+    }
+
+    ConfirmDeleteDialog {
+        id: deleteDialog
+        online: true
+        onConfirmed: (row, name) => AppController.deleteOnlineProject(row, name)
     }
 }

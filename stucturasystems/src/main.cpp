@@ -18,8 +18,8 @@ int main(int argc, char *argv[]) {
 
     QCoreApplication::setApplicationName("Structura Systems");
     QCoreApplication::setApplicationVersion("1.0");
-    QCoreApplication::setOrganizationName("Working Group Cyber Physical Systems");
-    QCoreApplication::setOrganizationDomain("https://cps.cs.rptu.de/");
+    QCoreApplication::setOrganizationName("Protestator-Research");
+    QCoreApplication::setOrganizationDomain("https://www.protestator-research.com");
 
     QGuiApplication::setWindowIcon(QIcon(":/icons/sience/icons/4847335-science-and-technology/png/030-chip.png"));
 
@@ -29,6 +29,8 @@ int main(int argc, char *argv[]) {
     QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed,
                      &app, []() { QCoreApplication::exit(-1); },
                      Qt::QueuedConnection);
+    QObject::connect(&engine, &QQmlApplicationEngine::quit,
+                     &app, &QGuiApplication::quit);
     engine.loadFromModule("StructuraSystems", "Main");
 
     return app.exec();

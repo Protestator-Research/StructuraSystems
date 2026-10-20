@@ -56,7 +56,9 @@ set(SOURCES
         src/Services/BECommunicationService.h
         src/Services/BECommunicationService.cpp
         src/Services/entities/DigitalTwin.h
-        src/Services/entities/DigitalTwin.cpp)
+        src/Services/entities/DigitalTwin.cpp
+        src/Services/entities/DigitalTwinRequest.h
+        src/Services/entities/DigitalTwinRequest.cpp)
 
 
 qt_add_executable(StructuraSystems ${SOURCES})
@@ -69,19 +71,24 @@ qt_add_qml_module(StructuraSystems
         QML_FILES
             qml/Main.qml
             qml/Theme.qml
+            qml/components/BranchChip.qml
             qml/components/DialogFooter.qml
             qml/components/Icon.qml
             qml/components/IconToolButton.qml
             qml/components/EmptyState.qml
             qml/components/InsertDivider.qml
             qml/components/LanguageChip.qml
+            qml/components/LineNumberGutter.qml
             qml/components/LanguageMenu.qml
             qml/components/NavigationRail.qml
             qml/components/NavRailItem.qml
+            qml/components/ConfirmDeleteDialog.qml
             qml/components/ProjectList.qml
             qml/components/SegmentedControl.qml
             qml/components/Snackbar.qml
+            qml/views/DetachedBanner.qml
             qml/views/DigitalTwinPane.qml
+            qml/views/HistoryPanel.qml
             qml/views/EditorView.qml
             qml/views/ElementCard.qml
             qml/views/ExplorerPane.qml
@@ -92,7 +99,9 @@ qt_add_qml_module(StructuraSystems
             qml/dialogs/CloseDocumentDialog.qml
             qml/dialogs/CommitDialog.qml
             qml/dialogs/DetailsDialog.qml
+            qml/dialogs/DiscardChangesDialog.qml
             qml/dialogs/DigitalTwinWizard.qml
+            qml/dialogs/NewBranchDialog.qml
             qml/dialogs/NewProjectDialog.qml
             qml/dialogs/QuitDialog.qml
             qml/dialogs/SettingsDialog.qml
@@ -122,6 +131,12 @@ qt_add_qml_module(StructuraSystems
             src/ViewModels/SysMLHighlighter.h
             src/ViewModels/AppController.cpp
             src/ViewModels/AppController.h
+            src/ViewModels/BranchListModel.cpp
+            src/ViewModels/BranchListModel.h
+            src/ViewModels/CommitHistoryModel.cpp
+            src/ViewModels/CommitHistoryModel.h
+            src/ViewModels/DigitalTwinProjectModel.cpp
+            src/ViewModels/DigitalTwinProjectModel.h
             src/ViewModels/DocumentModel.cpp
             src/ViewModels/DocumentModel.h
             src/ViewModels/OpenDocumentsModel.cpp

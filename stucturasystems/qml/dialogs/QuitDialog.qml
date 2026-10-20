@@ -12,6 +12,8 @@ Dialog {
 
     property bool hasLocal: false
 
+    signal quitAccepted()
+
     function openDialog() {
         hasLocal = AppController.hasUnsavedLocalChanges()
         open()
@@ -21,6 +23,7 @@ Dialog {
         if (save && !AppController.saveAllLocal())
             return // The error is reported by the controller; stay open so nothing is lost.
         close()
+        quitAccepted()
         Qt.quit()
     }
 

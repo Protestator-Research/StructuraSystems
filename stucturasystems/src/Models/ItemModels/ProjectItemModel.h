@@ -57,6 +57,9 @@ namespace StructuraSystems::Client {
 
         void clear();
 
+        /** Removes the project at the given row from the list. Invalid rows are ignored. */
+        void removeProjectAt(int row);
+
     signals:
         void countChanged();
 
