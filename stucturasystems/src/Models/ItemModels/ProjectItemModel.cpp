@@ -101,10 +101,14 @@ namespace StructuraSystems::Client {
     }
 
     std::shared_ptr<SysMLv2::REST::Project> ProjectItemModel::deleteProject(boost::uuids::uuid projectId) {
-//        beginRemoveColumns(index(getIndexFromProjectId(projectId),0), getIndexFromProjectId(projectId), getIndexFromProjectId(projectId));
-        auto project =  RootItem->getProjectById(projectId);
-//        endRemoveColumns();
-//        emit dataChanged(index(0,0), index(ProjectMap.size(),1), {Qt::DisplayRole});
+        auto project = RootItem->getProjectById(projectId);
+        for (int row = 0; row < RootItem->childCount(); row++) {
+            const auto projectOfRow = RootItem->child(row)->getProject();
+            if (projectOfRow != nullptr && projectOfRow->getId() == projectId) {
+                removeProjectAt(row);
+                break;
+            }
+        }
         return project;
     }
 
@@ -135,6 +139,16 @@ namespace StructuraSystems::Client {
 
         beginRemoveRows(QModelIndex(), 0, lastElement);
         RootItem->clearChildItems();
+        endRemoveRows();
+        emit countChanged();
+    }
+
+    void ProjectItemModel::removeProjectAt(int row) {
+        if (row < 0 || row >= RootItem->childCount())
+            return;
+
+        beginRemoveRows(QModelIndex(), row, row);
+        RootItem->removeChild(row);
         endRemoveRows();
         emit countChanged();
     }

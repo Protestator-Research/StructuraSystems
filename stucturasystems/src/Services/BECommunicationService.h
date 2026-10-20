@@ -258,6 +258,14 @@ namespace StructuraSystems::Client {
          */
         std::vector<std::shared_ptr<SysMLv2::REST::DigitalTwin>> getAllDigitalTwinsForProject(boost::uuids::uuid projectId);
 
+        /**
+         * Deletes a project on the server (DELETE projects/{projectId}). This cannot be undone.
+         * @param projectId UUID ("@id") of the project.
+         * @throws SysMLv2::API::EXCEPTIONS::HTTPException If the server answers with a status outside of 2xx.
+         * @throws SysMLv2::API::EXCEPTIONS::ConnectionError If the server is not reachable.
+         */
+        void deleteProject(boost::uuids::uuid projectId);
+
     private:
         std::string ServerAddress;
 

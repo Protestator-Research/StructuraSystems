@@ -254,6 +254,10 @@ namespace StructuraSystems::Client {
         return std::make_shared<SysMLv2::REST::DigitalTwin>(digiTwinJSON);
     }
 
+    void CommunicationService::deleteProject(boost::uuids::uuid projectId) {
+        APIImplementation->deleteCustomRequest("projects/"+boost::lexical_cast<std::string>(projectId),BarrierString);
+    }
+
     std::vector<std::shared_ptr<SysMLv2::REST::Commit>> CommunicationService::getAllCommitsForProject(
         boost::uuids::uuid projectId, std::map<boost::uuids::uuid, std::chrono::system_clock::time_point> *timestamps) {
         const auto commitsJSON = APIImplementation->getCustomRequest("projects/"+boost::lexical_cast<std::string>(projectId)+"/commits",BarrierString);

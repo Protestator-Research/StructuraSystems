@@ -78,6 +78,13 @@ namespace StructuraSystems::Client {
         ChildItems.clear();
     }
 
+    void ProjectTreeViewItem::removeChild(int row) {
+        if (row < 0 || row >= childCount())
+            return;
+        delete ChildItems.at(row);
+        ChildItems.erase(ChildItems.begin() + row);
+    }
+
     std::shared_ptr<SysMLv2::REST::Project> ProjectTreeViewItem::getProjectById(boost::uuids::uuid projectId) {
         for(const auto& project : ChildItems)
             if(project->ProjectData->getId()==projectId)

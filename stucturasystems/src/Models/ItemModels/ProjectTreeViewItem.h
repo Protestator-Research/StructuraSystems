@@ -30,6 +30,8 @@ namespace StructuraSystems::Client {
         [[nodiscard]] std::shared_ptr<SysMLv2::REST::Project> getProject() const;
 
         void clearChildItems();
+        /** Removes and deletes the child at the given row. Invalid rows are ignored. */
+        void removeChild(int row);
 
         std::shared_ptr<SysMLv2::REST::Project> getProjectById(boost::uuids::uuid projectId);
 

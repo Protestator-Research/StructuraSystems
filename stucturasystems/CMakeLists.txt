@@ -82,6 +82,7 @@ qt_add_qml_module(StructuraSystems
             qml/components/LanguageMenu.qml
             qml/components/NavigationRail.qml
             qml/components/NavRailItem.qml
+            qml/components/ConfirmDeleteDialog.qml
             qml/components/ProjectList.qml
             qml/components/SegmentedControl.qml
             qml/components/Snackbar.qml
@@ -169,4 +170,4 @@ elseif (UNIX AND NOT APPLE)
     target_compile_options(StructuraSystems PRIVATE -Wall -Wextra -Wpedantic -Werror)
 else ()
     target_compile_options(StructuraSystems PRIVATE -Wall -Wextra -Wpedantic -Werror)
-endif()
+endif()

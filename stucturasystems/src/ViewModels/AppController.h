@@ -95,6 +95,10 @@ namespace StructuraSystems::Client {
         Q_INVOKABLE void openLocalProject(int row);
         Q_INVOKABLE void openOnlineProject(int row);
         Q_INVOKABLE void closeDocument(int index);
+        /** @return true if the local project of the given row of localProjects is open as a document. */
+        [[nodiscard]] Q_INVOKABLE bool isLocalProjectOpen(int row) const;
+        /** @return true if the online project of the given row of onlineProjects is open as a document. */
+        [[nodiscard]] Q_INVOKABLE bool isOnlineProjectOpen(int row) const;
 
         Q_INVOKABLE void connectToBackend();
         Q_INVOKABLE void disconnectFromBackend();
@@ -146,6 +150,24 @@ namespace StructuraSystems::Client {
         Q_INVOKABLE void createOnlineProject(const QString &name, const QString &description, const QString &visibility);
         /** Creates a digital twin on the server, that references the current commit of the current online document. */
         Q_INVOKABLE void createDigitalTwin(const QString &name);
+
+        /**
+         * Moves the file of a local project to the recycle bin and removes the project from the list. If that worked, an
+         * open document of the project is closed, unsaved changes are lost, the QML side has to ask first. If the file
+         * cannot be moved, nothing changes and the document stays open.
+         * @param row Row of localProjects.
+         * @param expectedName Name of the project the user confirmed. Nothing is deleted if the project at the row has
+         *        another name, because the list changed in the meantime.
+         */
+        Q_INVOKABLE void deleteLocalProject(int row, const QString &expectedName);
+        /**
+         * Deletes a project on the server for all users. This cannot be undone, the QML side has to ask first.
+         * An open document of the project is closed.
+         * @param row Row of onlineProjects.
+         * @param expectedName Name of the project the user confirmed. Nothing is deleted if the project at the row has
+         *        another name, because the list changed in the meantime.
+         */
+        Q_INVOKABLE void deleteOnlineProject(int row, const QString &expectedName);
 
     signals:
         void connectedChanged();

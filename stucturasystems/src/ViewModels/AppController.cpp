@@ -417,6 +417,30 @@ namespace StructuraSystems::Client {
         openLocalProjectByName(fileName);
     }
 
+    void AppController::deleteLocalProject(int row, const QString &expectedName) {
+        const auto projects = LocalProjects->getProjects();
+        if (row < 0 || row >= int(projects.size()) || projects[row] == nullptr
+            || QString::fromStdString(projects[row]->getName()) != expectedName) {
+            emitNotify(2, tr("The project list has changed. Please try again."));
+            return;
+        }
+
+        const auto name = expectedName;
+        const auto filePath = QDir(LocalFolders.value(name, Settings->workingDirectory())).filePath(name);
+
+        if (!QFile::moveToTrash(filePath)) {
+            emitNotify(3, tr("Could not move %1 to the recycle bin.").arg(name), filePath);
+            return;
+        }
+
+        const int openIndex = Documents->indexOfKey(QStringLiteral("local:") + name);
+        if (openIndex >= 0)
+            closeDocument(openIndex);
+        LocalProjects->removeProjectAt(row);
+        LocalFolders.remove(name);
+        emitNotify(1, tr("Project %1 moved to the recycle bin.").arg(name));
+    }
+
     // ------------------------------------------------------------------ documents
 
     void AppController::setCurrentIndex(int index) {
@@ -460,6 +484,20 @@ namespace StructuraSystems::Client {
 
         Documents->remove(index);
         updateCurrentDocument(newIndex);
+    }
+
+    bool AppController::isLocalProjectOpen(int row) const {
+        const auto projects = LocalProjects->getProjects();
+        if (row < 0 || row >= int(projects.size()) || projects[row] == nullptr)
+            return false;
+        return Documents->indexOfKey(QStringLiteral("local:") + QString::fromStdString(projects[row]->getName())) >= 0;
+    }
+
+    bool AppController::isOnlineProjectOpen(int row) const {
+        const auto projects = OnlineProjects->getProjects();
+        if (row < 0 || row >= int(projects.size()) || projects[row] == nullptr)
+            return false;
+        return Documents->indexOfKey(QStringLiteral("online:") + uuidText(projects[row]->getId())) >= 0;
     }
 
     void AppController::saveCurrent() {
@@ -683,6 +721,36 @@ namespace StructuraSystems::Client {
         runAsync<ProjectList>(tr("Refreshing online projects"),
             [service]() { return service->getAllProjects(); },
             [this](ProjectList projects) { populateOnlineProjects(projects); });
+    }
+
+    void AppController::deleteOnlineProject(int row, const QString &expectedName) {
+        if (!requireConnection())
+            return;
+        const auto projects = OnlineProjects->getProjects();
+        if (row < 0 || row >= int(projects.size()) || projects[row] == nullptr
+            || QString::fromStdString(projects[row]->getName()) != expectedName) {
+            emitNotify(2, tr("The project list has changed. Please try again."));
+            return;
+        }
+
+        const auto service = BackendConnection;
+        const auto projectId = projects[row]->getId();
+        const auto idText = uuidText(projectId);
+        const auto name = QString::fromStdString(projects[row]->getName());
+        runAsync<ProjectList>(tr("Deleting %1").arg(name),
+            [service, projectId]() {
+                service->deleteProject(projectId);
+                return service->getAllProjects();
+            },
+            [this, idText, name](ProjectList remaining) {
+                const int openIndex = Documents->indexOfKey(QStringLiteral("online:") + idText);
+                if (openIndex >= 0)
+                    closeDocument(openIndex);
+                if (HistoryProjectId == idText)
+                    clearHistory();
+                populateOnlineProjects(remaining);
+                emitNotify(1, tr("Online project %1 deleted.").arg(name));
+            });
     }
 
     void AppController::openOnlineProject(int row) {
