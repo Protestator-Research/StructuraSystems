@@ -17,6 +17,7 @@
 #include <functional>
 #include <exception>
 #include <iterator>
+#include <tuple>
 #include <vector>
 
 namespace StructuraSystems::Client {
@@ -136,6 +137,22 @@ namespace StructuraSystems::Client {
                     direction = prefix;
             }
             return direction;
+        }
+
+        /// A reference to a type or feature as SysML expects it: "Motor", "ScalarValues::Real", "'my type'", "a.b";
+        /// with conjugated "~KraftPort" for types. Not a sentence, a number or a keyword.
+        bool isReferenceText(const std::string &text, bool conjugationAllowed) {
+            std::string reference = text;
+            if (conjugationAllowed && !reference.empty() && reference.front() == '~')
+                reference.erase(0, 1);
+            if (!Diagram::SysMLTextImporter::parseReference(reference))
+                return false;
+            for (const auto &segment: Diagram::SysMLTextImporter::splitReference(reference)) {
+                if (Diagram::SysMLCodeGenerator::formatName(segment) != segment &&
+                    reference.find("'" + segment + "'") == std::string::npos)
+                    return false; // a keyword written without quotes
+            }
+            return true;
         }
 
         bool isPartLike(ElementKind kind) {
@@ -660,6 +677,13 @@ namespace StructuraSystems::Client {
             Edges(new DiagramEdgeModel(this)) {
         ListenerToken = Model.addListener([this](const Diagram::ModelChange &) { scheduleSync(); });
         connect(Nodes, &DiagramNodeModel::geometryChanged, this, &DiagramController::updateCanvasSize);
+        const auto bumpRevision = [this] {
+            ++GeometryRevision;
+            emit geometryRevisionChanged();
+        };
+        connect(Nodes, &DiagramNodeModel::geometryChanged, this, bumpRevision);
+        connect(Nodes, &QAbstractItemModel::dataChanged, this, bumpRevision);
+        connect(Nodes, &QAbstractItemModel::modelReset, this, bumpRevision);
         syncNow();
     }
 
@@ -767,6 +791,14 @@ namespace StructuraSystems::Client {
         ElementId owner = RootId;
         if (const auto frame = frameAt(point, std::nullopt); frame && RelationshipRules::canOwn(Model, *frame, kind))
             owner = *frame;
+        // Dropped onto a part (or part definition): a part of it (composition), placed below it.
+        bool composed = false;
+        if (const auto target = toId(nodeIdAt(point, std::nullopt, false));
+            target && (kind == ElementKind::PartUsage || kind == ElementKind::OccurrenceUsage) &&
+            isPartLike(Model.element(*target).kind()) && RelationshipRules::canOwn(Model, *target, kind)) {
+            owner = *target;
+            composed = true;
+        }
 
         const std::string base = tool == DiagramTypes::ToolViewpoint ? "viewpoint"
                                  : tool == DiagramTypes::ToolConcern ? "concern"
@@ -807,7 +839,8 @@ namespace StructuraSystems::Client {
         const QPointF offset = kind == ElementKind::Package ? QPointF(20, 15) : QPointF(70, 25);
         if (!runModelChange([&] {
                 id = Model.addElement(kind, name, owner);
-                PendingPositions[*id] = QPointF(std::max<qreal>(0, x - offset.x()), std::max<qreal>(0, y - offset.y()));
+                if (!composed) // a composed part is placed below its owner (defaultPositionFor)
+                    PendingPositions[*id] = QPointF(std::max<qreal>(0, x - offset.x()), std::max<qreal>(0, y - offset.y()));
                 if (isConstraintOrCalc(kind))
                     fillNewEvaluation(*id);
                 if (kind == ElementKind::RequirementDefinition) {
@@ -1181,6 +1214,7 @@ namespace StructuraSystems::Client {
                 return;
             const QPointF center = onBorder(anchorNode->Rect, QPointF(x, y) + QPointF(PortSize / 2, PortSize / 2));
             AutoLayout = false;
+            AutoPlacedPorts.erase(*elementId);
             Nodes->setRect(row, QRectF(center - QPointF(PortSize / 2, PortSize / 2), old.size()));
             return;
         }
@@ -1248,11 +1282,15 @@ namespace StructuraSystems::Client {
             return;
         const QRectF resized(old.topLeft(), QSizeF(width, height));
         Nodes->setRect(row, resized);
-        // ports stay on the border
+        // ports stay on the border; those nobody placed by hand go to their slot (the part grew to fit them)
         for (const ElementId port: portsOf(*elementId)) {
             const int portRow = Nodes->indexOf(port);
             if (portRow < 0)
                 continue;
+            if (AutoPlacedPorts.count(port) > 0) {
+                Nodes->setRect(portRow, portSlot(port));
+                continue;
+            }
             const QPointF center = onBorder(resized, Nodes->nodes()[std::size_t(portRow)].Rect.center());
             Nodes->setRect(portRow, QRectF(center - QPointF(PortSize / 2, PortSize / 2), QSizeF(PortSize, PortSize)));
         }
@@ -1314,6 +1352,7 @@ namespace StructuraSystems::Client {
             if (node.Kind == DiagramTypes::PackageNode)
                 size = DiagramLayout::sizeOf(it.value()).value_or(size);
             Nodes->setRect(row, QRectF(*position, size));
+            AutoPlacedPorts.erase(element->second);
             applied = true;
         }
         if (applied)
@@ -1598,7 +1637,21 @@ namespace StructuraSystems::Client {
         for (const auto &reference: element.about())
             annotated.append(QString::fromStdString(reference));
         const QString aboutList = annotated.join(QStringLiteral(", "));
+        // ports that can be listed and added in the dialog (not the ends of an interface definition)
+        const bool hasPorts = kind != ElementKind::InterfaceDefinition && acceptsFeature(*elementId, DiagramTypes::ToolPort);
+        QVariantList ports;
+        if (hasPorts) {
+            for (const ElementId child: Model.children(*elementId)) {
+                const auto &port = Model.element(child);
+                if (port.kind() == ElementKind::PortUsage)
+                    ports.append(QVariantMap{{QStringLiteral("id"), QString::number(child)},
+                                             {QStringLiteral("name"), QString::fromStdString(port.name())},
+                                             {QStringLiteral("typeName"), QString::fromStdString(port.typeName())}});
+            }
+        }
         return {
+            {QStringLiteral("hasPorts"), hasPorts},
+            {QStringLiteral("ports"), ports},
             {QStringLiteral("stateAction"), stateAction},
             {QStringLiteral("hasRedefinitions"), Diagram::isUsageKind(kind) && kind != ElementKind::EnumerationLiteral &&
                                                   kind != ElementKind::ControlNode && !element.isElseBranch()},
@@ -1735,6 +1788,45 @@ namespace StructuraSystems::Client {
             return tr("Multiplicity must look like 6, 0..1 or 1..*");
 
         const std::string typeName = values.value(QStringLiteral("typeName")).toString().trimmed().toStdString();
+        if (!typeName.empty() && !isReferenceText(typeName, true))
+            return isRequirementOwner(kind)
+                   ? tr("'%1' is not a type name. The type is a requirement definition (e.g. MassRequirement); "
+                        "the text of the requirement goes into the field Text.").arg(QString::fromStdString(typeName))
+                   : tr("'%1' is not a type name, e.g. Motor, ScalarValues::Real or ~KraftPort.")
+                             .arg(QString::fromStdString(typeName));
+        const bool createType = values.value(QStringLiteral("createType")).toBool() && isUnknownType(typeName);
+
+        // ports listed in the dialog: {id (empty for a new one), name, typeName, createType}
+        struct PortEntry {
+            std::optional<ElementId> Id;
+            std::string Name;
+            std::string TypeName;
+            bool CreateType = false;
+        };
+        std::vector<PortEntry> portEntries;
+        const bool editPorts = values.contains(QStringLiteral("ports")) && acceptsFeature(*elementId, DiagramTypes::ToolPort);
+        if (editPorts) {
+            std::set<std::string> portNames;
+            for (const QVariant &entry: values.value(QStringLiteral("ports")).toList()) {
+                const QVariantMap port = entry.toMap();
+                PortEntry portEntry;
+                portEntry.Name = port.value(QStringLiteral("name")).toString().trimmed().toStdString();
+                portEntry.TypeName = port.value(QStringLiteral("typeName")).toString().trimmed().toStdString();
+                portEntry.CreateType = port.value(QStringLiteral("createType")).toBool();
+                if (const auto portId = toId(port.value(QStringLiteral("id")).toString());
+                    portId && Model.contains(*portId) && Model.element(*portId).owner() == *elementId &&
+                    Model.element(*portId).kind() == ElementKind::PortUsage)
+                    portEntry.Id = portId;
+                if (portEntry.Name.empty())
+                    return tr("Every port needs a name.");
+                if (!portNames.insert(portEntry.Name).second)
+                    return tr("There are two ports named '%1'.").arg(QString::fromStdString(portEntry.Name));
+                if (!portEntry.TypeName.empty() && !isReferenceText(portEntry.TypeName, true))
+                    return tr("'%1' is not a type name, e.g. FuelPort or ~FuelPort.")
+                            .arg(QString::fromStdString(portEntry.TypeName));
+                portEntries.push_back(std::move(portEntry));
+            }
+        }
         const bool referenceAction = values.value(QStringLiteral("referenceAction")).toBool();
         std::vector<std::string> prefixes;
         for (const auto &prefix: values.value(QStringLiteral("prefixes")).toString().split(QLatin1Char(' '), Qt::SkipEmptyParts))
@@ -1769,8 +1861,11 @@ namespace StructuraSystems::Client {
         std::vector<std::string> redefinitions;
         for (const QString &reference: values.value(QStringLiteral("redefines")).toString().split(QLatin1Char(','),
                                                                                                    Qt::SkipEmptyParts)) {
-            if (!reference.trimmed().isEmpty())
-                redefinitions.push_back(reference.trimmed().toStdString());
+            if (reference.trimmed().isEmpty())
+                continue;
+            if (!isReferenceText(reference.trimmed().toStdString(), false))
+                return tr("'%1' is not a feature name, e.g. mass or Vehicle::mass.").arg(reference.trimmed());
+            redefinitions.push_back(reference.trimmed().toStdString());
         }
         if (nameFromRedefinition && redefinitions.empty())
             return tr("Name it after a redefined feature: enter the feature it redefines.");
@@ -1795,6 +1890,32 @@ namespace StructuraSystems::Client {
 
         QString error;
         try {
+            if (createType)
+                createTypeDefinition(kind, typeName, *elementId);
+            if (editPorts) {
+                std::vector<ElementId> kept;
+                for (const auto &entry: portEntries)
+                    if (entry.Id)
+                        kept.push_back(*entry.Id);
+                std::vector<ElementId> removed;
+                for (const ElementId child: Model.children(*elementId)) {
+                    const auto &element = Model.element(child);
+                    if (element.kind() == ElementKind::PortUsage &&
+                        std::find(kept.begin(), kept.end(), child) == kept.end())
+                        removed.push_back(child);
+                }
+                for (const ElementId port: removed)
+                    Model.removeElement(port);
+                for (const auto &entry: portEntries) {
+                    if (entry.CreateType)
+                        createTypeDefinition(ElementKind::PortUsage, entry.TypeName, *elementId);
+                    const ElementId port = entry.Id ? *entry.Id : Model.addElement(ElementKind::PortUsage, entry.Name, *elementId);
+                    if (Model.element(port).name() != entry.Name)
+                        Model.rename(port, entry.Name);
+                    if (Model.element(port).typeName() != entry.TypeName)
+                        Model.setTypeName(port, entry.TypeName);
+                }
+            }
             if (values.contains(QStringLiteral("redefines")) && Diagram::isUsageKind(kind) &&
                 kind != ElementKind::EnumerationLiteral && kind != ElementKind::ControlNode)
                 Model.setRedefinitions(*elementId, redefinitionKeyword, redefinitions, false);
@@ -2069,6 +2190,7 @@ namespace StructuraSystems::Client {
             if (node.Kind == DiagramTypes::PortNode) {
                 PendingPositions.erase(id);
                 node.Rect = portSlot(id);
+                AutoPlacedPorts.insert(id);
                 Nodes->append(node);
                 continue;
             }
@@ -2176,6 +2298,8 @@ namespace StructuraSystems::Client {
             LastElementCount = int(Model.elementCount());
             emit elementCountChanged();
         }
+        ++ModelRevision;
+        emit modelRevisionChanged();
     }
 
     void DiagramController::fillNode(DiagramNode &node, const Diagram::SysMLElement &element) const {
@@ -2754,16 +2878,26 @@ namespace StructuraSystems::Client {
                 ++index;
         }
         const QRectF rect = anchorNode->Rect;
-        const qreal x = incoming(port) ? rect.left() : rect.right();
-        const qreal y = std::min(rect.top() + PortTop + index * PortSpacing, rect.bottom() - PortSize / 2);
-        return QRectF(x - PortSize / 2, y - PortSize / 2, PortSize, PortSize);
+        // as many as fit on the side; the others continue along the bottom border (no two on the same spot)
+        const int onSide = std::max(1, int((rect.height() - PortTop - PortSize / 2) / PortSpacing) + 1);
+        if (index < onSide) {
+            const qreal x = incoming(port) ? rect.left() : rect.right();
+            const qreal y = rect.top() + PortTop + index * PortSpacing;
+            return QRectF(x - PortSize / 2, y - PortSize / 2, PortSize, PortSize);
+        }
+        const qreal along = PortTop + (index - onSide) * PortSpacing;
+        const qreal x = incoming(port) ? std::min(rect.left() + along, rect.right())
+                                       : std::max(rect.right() - along, rect.left());
+        return QRectF(x - PortSize / 2, rect.bottom() - PortSize / 2, PortSize, PortSize);
     }
 
     void DiagramController::placePorts(ElementId anchor) {
         for (const ElementId port: portsOf(anchor)) {
             const int row = Nodes->indexOf(port);
-            if (row >= 0)
+            if (row >= 0) {
                 Nodes->setRect(row, portSlot(port));
+                AutoPlacedPorts.insert(port);
+            }
         }
     }
 
@@ -2811,6 +2945,402 @@ namespace StructuraSystems::Client {
         const qreal nearest = std::min({left, right, top, bottom});
         return nearest == left ? QStringLiteral("left") : nearest == right ? QStringLiteral("right")
                : nearest == top ? QStringLiteral("top") : QStringLiteral("bottom");
+    }
+
+    // --- port labels -------------------------------------------------------------------------------
+
+    namespace {
+        constexpr qreal LabelHeight = 16.0;
+        constexpr qreal LabelGap = 4.0;
+
+        /// Width of a port label (12 px font), estimated so that all labels are placed alike.
+        qreal labelWidth(const QString &text) {
+            return 8.0 + 6.8 * qreal(text.size());
+        }
+
+        /// Overlap area of two rectangles (0 if they do not overlap).
+        qreal overlap(const QRectF &a, const QRectF &b) {
+            const QRectF both = a.intersected(b);
+            return both.isEmpty() ? 0.0 : both.width() * both.height();
+        }
+    }
+
+    QPointF DiagramController::portLabelOffset(const QString &id) const {
+        const auto elementId = toId(id);
+        if (!elementId)
+            return {PortSize + LabelGap, -LabelHeight + 1};
+        computePortLabels();
+        const auto found = LabelOffsets.find(*elementId);
+        return found != LabelOffsets.end() ? found->second : QPointF(PortSize + LabelGap, -LabelHeight + 1);
+    }
+
+    qreal DiagramController::minimumNodeHeight(const QString &id) const {
+        const auto elementId = toId(id);
+        if (!elementId)
+            return 0;
+        int incoming = 0;
+        int other = 0;
+        for (const ElementId port: portsOf(*elementId)) {
+            if (portAnchor(Model, port) != elementId)
+                continue;
+            const auto &prefixes = Model.element(port).prefixes();
+            ++(std::find(prefixes.begin(), prefixes.end(), "in") != prefixes.end() ? incoming : other);
+        }
+        const int perSide = std::max(incoming, other);
+        return perSide == 0 ? 0 : PortTop + (perSide - 1) * PortSpacing + PortSize / 2 + 10;
+    }
+
+    void DiagramController::computePortLabels() const {
+        if (LabelRevision == GeometryRevision)
+            return;
+        LabelRevision = GeometryRevision;
+        LabelOffsets.clear();
+
+        // obstacles: all port squares, all other nodes (not frames), the labels placed so far
+        std::vector<const DiagramNode *> ports;
+        std::vector<const DiagramNode *> others;
+        for (const auto &node: Nodes->nodes()) {
+            if (!Model.contains(node.Id)) // removed from the model, not yet from the nodes
+                continue;
+            if (node.Kind == DiagramTypes::PortNode)
+                ports.push_back(&node);
+            else if (node.Kind != DiagramTypes::PackageNode)
+                others.push_back(&node);
+        }
+        // placed in a stable order: top to bottom, left to right
+        std::sort(ports.begin(), ports.end(), [](const DiagramNode *a, const DiagramNode *b) {
+            return std::make_tuple(a->Rect.top(), a->Rect.left(), a->Id) < std::make_tuple(b->Rect.top(), b->Rect.left(), b->Id);
+        });
+        std::vector<QRectF> placed;
+        for (const DiagramNode *port: ports) {
+            const auto anchor = portAnchor(Model, port->Id);
+            const DiagramNode *anchorNode = anchor ? Nodes->find(*anchor) : nullptr;
+            const QString side = portSide(QString::number(port->Id));
+            const qreal w = labelWidth(port->Title);
+            const qreal h = LabelHeight;
+            const qreal s = port->Rect.width();
+            // candidates relative to the square: outside first (beside the line leaving the port), inside last
+            std::vector<std::pair<QPointF, bool>> candidates; // offset, inside the part
+            if (side == QLatin1String("right"))
+                candidates = {{{s + LabelGap, -h + 1}, false}, {{s + LabelGap, s - 1}, false},
+                              {{-w - LabelGap, (s - h) / 2}, true}};
+            else if (side == QLatin1String("left"))
+                candidates = {{{-w - LabelGap, -h + 1}, false}, {{-w - LabelGap, s - 1}, false},
+                              {{s + LabelGap, (s - h) / 2}, true}};
+            else if (side == QLatin1String("top"))
+                candidates = {{{s + LabelGap, s / 2 - h - 1}, false}, {{-w - LabelGap, s / 2 - h - 1}, false},
+                              {{(s - w) / 2, s + 2}, true}};
+            else
+                candidates = {{{s + LabelGap, s / 2 + 1}, false}, {{-w - LabelGap, s / 2 + 1}, false},
+                              {{(s - w) / 2, -h - 2}, true}};
+
+            qreal bestCost = -1;
+            QPointF best = candidates.front().first;
+            for (std::size_t k = 0; k < candidates.size(); ++k) {
+                const auto &[offset, inside] = candidates[k];
+                const QRectF rect(port->Rect.topLeft() + offset, QSizeF(w, h));
+                const QRectF padded = rect.adjusted(-2, -2, 2, 2);
+                qreal cost = 0;
+                for (const DiagramNode *other: ports)
+                    if (other != port)
+                        cost += overlap(padded, other->Rect);
+                for (const QRectF &label: placed)
+                    cost += overlap(padded, label);
+                for (const DiagramNode *other: others) {
+                    if (anchorNode && other == anchorNode)
+                        continue;
+                    cost += overlap(padded, other->Rect);
+                }
+                // outside the part it must not cover the part itself; inside is the last resort
+                if (anchorNode && !inside)
+                    cost += overlap(rect, anchorNode->Rect);
+                cost += qreal(k) * 0.5; // prefer the earlier candidate on a tie
+                if (inside)
+                    cost += 20.0;
+                if (bestCost < 0 || cost < bestCost) {
+                    bestCost = cost;
+                    best = offset;
+                }
+                if (cost < 1.0) // free
+                    break;
+            }
+            LabelOffsets[port->Id] = best;
+            placed.emplace_back(port->Rect.topLeft() + best, QSizeF(w, h));
+        }
+    }
+
+    // --- types -------------------------------------------------------------------------------------
+
+    namespace {
+        struct DefinitionFor {
+            ElementKind Kind;
+            const char *Keyword;
+        };
+
+        /// The definition that types a usage of this kind (created for an unknown type).
+        std::optional<DefinitionFor> definitionFor(ElementKind usage) {
+            switch (usage) {
+                case ElementKind::PartUsage:
+                case ElementKind::Subject:
+                case ElementKind::Actor:
+                    return DefinitionFor{ElementKind::PartDefinition, "part def"};
+                case ElementKind::PortUsage:
+                    return DefinitionFor{ElementKind::PortDefinition, "port def"};
+                case ElementKind::Attribute:
+                    return DefinitionFor{ElementKind::AttributeDefinition, "attribute def"};
+                case ElementKind::ItemUsage:
+                    return DefinitionFor{ElementKind::ItemDefinition, "item def"};
+                case ElementKind::ActionUsage:
+                    return DefinitionFor{ElementKind::ActionDefinition, "action def"};
+                case ElementKind::StateUsage:
+                    return DefinitionFor{ElementKind::StateDefinition, "state def"};
+                case ElementKind::ConstraintUsage:
+                    return DefinitionFor{ElementKind::ConstraintDefinition, "constraint def"};
+                case ElementKind::CalcUsage:
+                    return DefinitionFor{ElementKind::CalcDefinition, "calc def"};
+                case ElementKind::RequirementUsage:
+                    return DefinitionFor{ElementKind::RequirementDefinition, "requirement def"};
+                case ElementKind::UseCaseUsage:
+                    return DefinitionFor{ElementKind::UseCaseDefinition, "use case def"};
+                case ElementKind::VerificationUsage:
+                    return DefinitionFor{ElementKind::VerificationDefinition, "verification def"};
+                case ElementKind::AnalysisUsage:
+                    return DefinitionFor{ElementKind::AnalysisDefinition, "analysis def"};
+                case ElementKind::OccurrenceUsage:
+                    return DefinitionFor{ElementKind::OccurrenceDefinition, "occurrence def"};
+                case ElementKind::MetadataUsage:
+                    return DefinitionFor{ElementKind::MetadataDefinition, "metadata def"};
+                case ElementKind::ViewUsage:
+                    return DefinitionFor{ElementKind::ViewDefinition, "view def"};
+                default:
+                    return std::nullopt;
+            }
+        }
+
+        /// Definitions offered as type of a usage of this kind.
+        std::vector<ElementKind> offeredDefinitions(ElementKind usage) {
+            switch (usage) {
+                case ElementKind::Attribute:
+                    return {ElementKind::AttributeDefinition, ElementKind::EnumerationDefinition};
+                case ElementKind::Subject:
+                case ElementKind::Actor:
+                case ElementKind::ItemUsage:
+                    return {ElementKind::PartDefinition, ElementKind::ItemDefinition};
+                case ElementKind::PortUsage:
+                    return {ElementKind::PortDefinition};
+                case ElementKind::ConstraintUsage:
+                    return {ElementKind::ConstraintDefinition};
+                case ElementKind::EventOccurrence:
+                    return {ElementKind::OccurrenceDefinition, ElementKind::PartDefinition, ElementKind::ItemDefinition};
+                default:
+                    if (const auto definition = definitionFor(usage))
+                        return {definition->Kind};
+                    return {};
+            }
+        }
+
+        /// Library types offered for attributes (and parameters).
+        const std::vector<const char *> &attributeLibraryTypes() {
+            static const std::vector<const char *> types = {
+                    "ScalarValues::Real", "ScalarValues::Integer", "ScalarValues::Natural", "ScalarValues::Positive",
+                    "ScalarValues::Rational", "ScalarValues::Boolean", "ScalarValues::String", "ISQ::MassValue",
+                    "ISQ::LengthValue", "ISQ::SpeedValue", "ISQ::AccelerationValue", "ISQ::ForceValue",
+                    "ISQ::PowerValue", "ISQ::EnergyValue", "ISQ::TorqueValue"};
+            return types;
+        }
+
+        /// Library types that are usually written without their package (after "import ScalarValues::*").
+        bool isLibraryName(const std::string &name) {
+            static const std::set<std::string, std::less<>> names = {"Real", "Integer", "Natural", "Positive", "Rational",
+                                                                     "Boolean", "String", "Complex", "Number", "Anything"};
+            return names.count(name) > 0;
+        }
+
+        std::string keywordText(ElementKind kind) {
+            static const std::map<ElementKind, const char *> keywords = {
+                    {ElementKind::PartDefinition, "part def"}, {ElementKind::PortDefinition, "port def"},
+                    {ElementKind::AttributeDefinition, "attribute def"}, {ElementKind::EnumerationDefinition, "enum def"},
+                    {ElementKind::ItemDefinition, "item def"}, {ElementKind::ActionDefinition, "action def"},
+                    {ElementKind::StateDefinition, "state def"}, {ElementKind::ConstraintDefinition, "constraint def"},
+                    {ElementKind::CalcDefinition, "calc def"}, {ElementKind::RequirementDefinition, "requirement def"},
+                    {ElementKind::UseCaseDefinition, "use case def"},
+                    {ElementKind::VerificationDefinition, "verification def"},
+                    {ElementKind::AnalysisDefinition, "analysis def"},
+                    {ElementKind::OccurrenceDefinition, "occurrence def"},
+                    {ElementKind::MetadataDefinition, "metadata def"}, {ElementKind::ViewDefinition, "view def"},
+                    {ElementKind::InterfaceDefinition, "interface def"}};
+            const auto found = keywords.find(kind);
+            return found != keywords.end() ? found->second : "def";
+        }
+    }
+
+    QVariantList DiagramController::typeSuggestions(const QString &id, const QString &text) const {
+        const auto elementId = toId(id);
+        if (!elementId)
+            return {};
+        return suggestionsFor(Model.element(*elementId).kind(), text);
+    }
+
+    QVariantList DiagramController::portTypeSuggestions(const QString &text) const {
+        return suggestionsFor(ElementKind::PortUsage, text);
+    }
+
+    QVariantMap DiagramController::typeStatus(const QString &id, const QString &text) const {
+        const auto elementId = toId(id);
+        if (!elementId)
+            return {{QStringLiteral("known"), true}};
+        return statusFor(Model.element(*elementId).kind(), text);
+    }
+
+    QVariantMap DiagramController::portTypeStatus(const QString &text) const {
+        return statusFor(ElementKind::PortUsage, text);
+    }
+
+    QVariantList DiagramController::suggestionsFor(ElementKind usage, const QString &text) const {
+        QString filter = text.trimmed();
+        QString prefix;
+        if (usage == ElementKind::PortUsage && filter.startsWith(QLatin1Char('~'))) {
+            prefix = QStringLiteral("~");
+            filter = filter.mid(1);
+        }
+        const auto kinds = offeredDefinitions(usage);
+        struct Candidate {
+            QString Text;
+            QString Detail;
+            int Rank; // 0 starts with the input, 1 contains it
+            bool Library;
+        };
+        std::vector<Candidate> candidates;
+        const auto consider = [&](const QString &name, const QString &detail, bool library) {
+            if (name.isEmpty())
+                return;
+            const QString shortName = name.section(QStringLiteral("::"), -1);
+            int rank = 0;
+            if (!filter.isEmpty()) {
+                if (shortName.startsWith(filter, Qt::CaseInsensitive) || name.startsWith(filter, Qt::CaseInsensitive))
+                    rank = 0;
+                else if (name.contains(filter, Qt::CaseInsensitive))
+                    rank = 1;
+                else
+                    return;
+            }
+            for (const auto &existing: candidates)
+                if (existing.Text == prefix + name)
+                    return;
+            candidates.push_back({prefix + name, detail, rank, library});
+        };
+
+        // definitions of the model: by name, qualified where the name is not unique
+        std::map<std::string, int> nameCount;
+        std::vector<ElementId> definitions;
+        std::function<void(ElementId)> collect = [&](ElementId owner) {
+            for (const ElementId child: Model.children(owner)) {
+                const auto &element = Model.element(child);
+                if (std::find(kinds.begin(), kinds.end(), element.kind()) != kinds.end() && !element.name().empty()) {
+                    definitions.push_back(child);
+                    ++nameCount[element.name()];
+                }
+                collect(child);
+            }
+        };
+        collect(RootId);
+        for (const ElementId definition: definitions) {
+            const auto &element = Model.element(definition);
+            const std::string name = nameCount[element.name()] > 1 ? Model.qualifiedName(definition)
+                                                                   : Diagram::SysMLCodeGenerator::formatName(element.name());
+            consider(QString::fromStdString(name), QString::fromStdString(keywordText(element.kind())), false);
+        }
+        if (usage == ElementKind::Attribute || usage == ElementKind::Subject)
+            for (const char *type: attributeLibraryTypes())
+                consider(QString::fromLatin1(type), tr("library"), true);
+
+        std::stable_sort(candidates.begin(), candidates.end(), [](const Candidate &a, const Candidate &b) {
+            return std::tie(a.Rank, a.Library) < std::tie(b.Rank, b.Library);
+        });
+        QVariantList result;
+        for (const auto &candidate: candidates) {
+            if (result.size() >= 12)
+                break;
+            // the exact input itself is no suggestion
+            if (candidate.Text == text.trimmed())
+                continue;
+            result.append(QVariantMap{{QStringLiteral("text"), candidate.Text}, {QStringLiteral("detail"), candidate.Detail}});
+        }
+        return result;
+    }
+
+    bool DiagramController::isUnknownType(const std::string &typeName) const {
+        std::string name = typeName;
+        if (!name.empty() && name.front() == '~')
+            name.erase(0, 1);
+        if (name.empty() || !isReferenceText(name, false))
+            return false;
+        const auto segments = Diagram::SysMLTextImporter::splitReference(name);
+        if (segments.size() != 1)
+            return false; // qualified: a library or another package, which the model may not contain
+        if (isLibraryName(segments.front()))
+            return false;
+        bool found = false;
+        std::function<void(ElementId)> search = [&](ElementId owner) {
+            for (const ElementId child: Model.children(owner)) {
+                if (found)
+                    return;
+                const auto &element = Model.element(child);
+                const bool definition = Diagram::isDefinitionKind(element.kind()) || element.kind() == ElementKind::Alias ||
+                                        (element.kind() == ElementKind::Textual &&
+                                         element.keyword().size() >= 3 &&
+                                         element.keyword().compare(element.keyword().size() - 3, 3, "def") == 0);
+                if (definition && element.name() == segments.front()) {
+                    found = true;
+                    return;
+                }
+                search(child);
+            }
+        };
+        search(RootId);
+        return !found;
+    }
+
+    QVariantMap DiagramController::statusFor(ElementKind usage, const QString &text) const {
+        const std::string typeName = text.trimmed().toStdString();
+        const auto definition = definitionFor(usage);
+        if (!definition || !isUnknownType(typeName))
+            return {{QStringLiteral("known"), true}};
+        std::string name = typeName;
+        if (name.front() == '~')
+            name.erase(0, 1);
+        return {{QStringLiteral("known"), false},
+                {QStringLiteral("name"), QString::fromStdString(Diagram::SysMLTextImporter::splitReference(name).front())},
+                {QStringLiteral("keyword"), QString::fromLatin1(definition->Keyword)}};
+    }
+
+    void DiagramController::createTypeDefinition(ElementKind usage, const std::string &typeName, ElementId near) {
+        const auto definition = definitionFor(usage);
+        if (!definition || !isUnknownType(typeName))
+            return;
+        std::string name = typeName;
+        if (name.front() == '~')
+            name.erase(0, 1);
+        name = Diagram::SysMLTextImporter::splitReference(name).front();
+        // in the package of the element (or on the top level)
+        ElementId owner = Model.contains(near) ? Model.element(near).owner() : RootId;
+        while (owner != RootId && Model.element(owner).kind() != ElementKind::Package)
+            owner = Model.element(owner).owner();
+        if (owner != RootId && !RelationshipRules::canOwn(Model, owner, definition->Kind))
+            owner = RootId;
+        const ElementId created = Model.addElement(definition->Kind, name, owner);
+        // beside the other definitions: in the top row of the package (or the canvas), right of what is there
+        const DiagramNode *ownerNode = owner != RootId ? Nodes->find(owner) : nullptr;
+        QPointF position = ownerNode ? ownerNode->Rect.topLeft() + QPointF(24, 44) : QPointF(40, 40);
+        const qreal rowTop = position.y();
+        for (const auto &node: Nodes->nodes()) {
+            if (node.Kind == DiagramTypes::PortNode || node.Id == owner || !Model.contains(node.Id) ||
+                (owner != RootId && !Model.isAncestor(owner, node.Id)))
+                continue;
+            if (node.Rect.top() < rowTop + 60 && node.Rect.bottom() > rowTop - 10)
+                position.setX(std::max(position.x(), node.Rect.right() + 30));
+        }
+        PendingPositions[created] = position;
     }
 
     QSizeF DiagramController::estimatedSize(const DiagramNode &node) const {

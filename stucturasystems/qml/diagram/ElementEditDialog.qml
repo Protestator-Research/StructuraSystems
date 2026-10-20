@@ -22,7 +22,12 @@ Dialog {
         if (details.name === undefined)
             return
         nameField.text = details.name
-        typeField.text = details.typeName
+        typeField.reset(details.typeName)
+        portModel.clear()
+        if (details.hasPorts === true) {
+            for (const port of details.ports)
+                portModel.append({ portId: port.id, portName: port.name, portType: port.typeName, createType: true })
+        }
         multiplicityField.text = details.multiplicity
         valueField.text = details.value
         prefixField.text = details.prefixes
@@ -53,14 +58,35 @@ Dialog {
         }
     }
 
+    /** A free name for a new port: port1, port2, ... */
+    function newPortName() {
+        let taken = {}
+        for (let i = 0; i < portModel.count; ++i)
+            taken[portModel.get(i).portName] = true
+        let n = 1
+        while (taken["port" + n])
+            ++n
+        return "port" + n
+    }
+
     function apply() {
         let values = {
             name: nameField.text,
             typeName: typeField.text,
+            createType: typeField.createsType,
             multiplicity: multiplicityField.text,
             value: valueField.text,
             prefixes: prefixField.text,
             referenceAction: referenceCheck.checked
+        }
+        if (details.hasPorts === true) {
+            let ports = []
+            for (let i = 0; i < portModel.count; ++i) {
+                const port = portModel.get(i)
+                ports.push({ id: port.portId, name: port.portName, typeName: port.portType,
+                             createType: port.createType && controller.portTypeStatus(port.portType).known === false })
+            }
+            values.ports = ports
         }
         if (details.hasExpression)
             values.expression = expressionArea.text
@@ -102,7 +128,7 @@ Dialog {
     parent: Overlay.overlay
     anchors.centerIn: parent
     modal: true
-    width: details.isTextual === true || details.hasExpression === true || details.hasDoc === true ? 620 : 460
+    width: details.isTextual === true || details.hasExpression === true || details.hasDoc === true || details.hasPorts === true ? 620 : 460
     title: qsTr("Edit %1").arg(details.kindLabel !== undefined ? details.kindLabel : "")
 
     footer: DialogFooter {
@@ -177,13 +203,98 @@ Dialog {
             text: qsTr("Type")
             color: Theme.textSecondary
         }
-        TextField {
+        TypeField {
             id: typeField
+            objectName: "typeField"
             visible: dialog.details.typed === true
             Layout.fillWidth: true
             placeholderText: dialog.details.typePlaceholder !== undefined ? dialog.details.typePlaceholder : ""
+            suggest: text => dialog.controller ? dialog.controller.typeSuggestions(dialog.elementId, text) : []
+            check: text => dialog.controller ? dialog.controller.typeStatus(dialog.elementId, text) : ({ known: true })
             onAccepted: dialog.apply()
-            Accessible.name: qsTr("Type")
+        }
+
+        // ports of a part (or port definition, item, ...): listed here, connected in the diagram
+        Label {
+            visible: dialog.details.hasPorts === true
+            Layout.alignment: Qt.AlignTop
+            Layout.topMargin: 10
+            text: qsTr("Ports")
+            color: Theme.textSecondary
+        }
+        ColumnLayout {
+            visible: dialog.details.hasPorts === true
+            Layout.fillWidth: true
+            spacing: 4
+
+            ListModel {
+                id: portModel
+            }
+            ListView {
+                id: portList
+
+                objectName: "portList"
+                Layout.fillWidth: true
+                Layout.preferredHeight: Math.min(contentHeight, 240)
+                visible: portModel.count > 0
+                clip: true
+                spacing: 4
+                boundsBehavior: Flickable.StopAtBounds
+                model: portModel
+                ScrollIndicator.vertical: ScrollIndicator {}
+
+                delegate: RowLayout {
+                    id: portRow
+
+                    required property int index
+                    required property string portName
+                    required property string portType
+                    required property bool createType
+
+                    width: ListView.view.width
+                    spacing: 6
+
+                    TextField {
+                        Layout.preferredWidth: 120
+                        Layout.alignment: Qt.AlignTop
+                        text: portRow.portName
+                        placeholderText: qsTr("name")
+                        Accessible.name: qsTr("Port name")
+                        onTextEdited: portModel.setProperty(portRow.index, "portName", text)
+                        onAccepted: dialog.apply()
+                    }
+                    TypeField {
+                        Layout.fillWidth: true
+                        Layout.alignment: Qt.AlignTop
+                        text: portRow.portType
+                        createType: portRow.createType
+                        placeholderText: qsTr("type, e.g. FuelPort or ~FuelPort")
+                        accessibleName: qsTr("Port type")
+                        suggest: text => dialog.controller ? dialog.controller.portTypeSuggestions(text) : []
+                        check: text => dialog.controller ? dialog.controller.portTypeStatus(text) : ({ known: true })
+                        onTextChanged: if (text !== portRow.portType) portModel.setProperty(portRow.index, "portType", text)
+                        onCreateTypeChanged: if (createType !== portRow.createType) portModel.setProperty(portRow.index, "createType", createType)
+                        onAccepted: dialog.apply()
+                    }
+                    ToolButton {
+                        Layout.alignment: Qt.AlignTop
+                        text: "\u2715"
+                        Accessible.name: qsTr("Remove port")
+                        ToolTip.visible: hovered
+                        ToolTip.text: qsTr("Remove the port (and its connections)")
+                        onClicked: portModel.remove(portRow.index)
+                    }
+                }
+            }
+            Button {
+                objectName: "addPortButton"
+                flat: true
+                text: qsTr("+ Add port")
+                onClicked: {
+                    portModel.append({ portId: "", portName: dialog.newPortName(), portType: "", createType: true })
+                    portList.positionViewAtEnd()
+                }
+            }
         }
 
         Label {

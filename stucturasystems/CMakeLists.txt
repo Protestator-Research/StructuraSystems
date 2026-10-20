@@ -103,6 +103,7 @@ qt_add_qml_module(StructuraSystems
             qml/diagram/EdgeKindMenu.qml
             qml/diagram/BlockStateBar.qml
             qml/diagram/ElementEditDialog.qml
+            qml/diagram/TypeField.qml
             qml/diagram/EdgeEditDialog.qml
             qml/diagram/DiagramPreview.qml
             qml/diagram/ParametricCanvas.qml

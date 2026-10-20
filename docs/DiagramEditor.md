@@ -25,6 +25,18 @@ One window per document. The window is closed together with its document.
 Double-click a node, an entry or an arrow to edit it (name, id, type, multiplicity, value, prefixes, redefinitions,
 what an action does, documentation, ...). Del removes the selection.
 
+- **Type**: while typing, the fitting definitions of the block are offered (port defs for a port, part defs for a
+  part, attribute and enum defs for an attribute, ...), for attributes also library types (`ScalarValues::Real`,
+  `ISQ::MassValue`, ...). Up / Down and Enter choose, Esc keeps the input. A simple name that is defined nowhere is
+  marked (*'KrafPort' is not defined in this block.*) with the tick *Create port def KrafPort*: on *Apply* the
+  definition is created in the package of the element. Qualified names (`ISQ::TorqueValue`) count as library types.
+- **Ports**: parts, part definitions, items and port definitions list their ports in the edit dialog: add, rename,
+  retype or remove them there (with the same type suggestions); then only the connections are drawn.
+- Ports sit on the left (`in`) or right border; a part grows until its ports fit. Their labels are placed where they
+  cover neither other ports, their labels nor other nodes, and follow when a port or a node moves.
+- In the document, a block written by the diagram editor shows its diagram below the code (with the stored positions)
+  until it is hidden with the *Diagram* button.
+
 ## Generated block and hand edits
 
 The editor writes into one dedicated block. Its first line carries a fingerprint of the code below it:

@@ -57,7 +57,7 @@ namespace StructuraSystems::Diagram {
         // requirements, use cases and verifications (usages) on the top level, in packages and parts
         const bool caseUsage = childKind == ElementKind::RequirementUsage || childKind == ElementKind::UseCaseUsage ||
                                childKind == ElementKind::VerificationUsage || childKind == ElementKind::AnalysisUsage;
-        // metadata ("@Safety;", "metadata m about a;"), imports and aliases: in any namespace
+            // metadata ("@Safety;", "metadata m about a;"), imports and aliases: in any namespace
         const bool annotation = childKind == ElementKind::MetadataUsage || childKind == ElementKind::Textual;
         const bool namespaceMember = childKind == ElementKind::Import || childKind == ElementKind::Alias;
         // filters and views on package level

@@ -375,6 +375,8 @@ Pane {
                       ? qsTr("Drop onto a use case or verification: its objective (draw «verify» arrows from a verification)")
                       : tile.tool === DiagramTypes.ToolRequirement
                       ? qsTr("A requirement (usage): satisfied by a part («satisfy»), verified by a verification («verify»)")
+                      : tile.tool === DiagramTypes.ToolPart
+                      ? qsTr("Drag onto the canvas, or onto a part: one of its parts (composition)")
                       : tile.feature
                       ? (tile.tool === DiagramTypes.ToolAction
                          ? qsTr("Drag onto a part, or click to add to the selected part")

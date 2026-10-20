@@ -42,3 +42,12 @@ TEST_CASE("Preview: KerML blocks and updates of the text") {
     preview.rebuild();
     CHECK_EQ(preview.controller()->nodes()->count(), 2);
 }
+
+TEST_CASE("Preview: a block of the diagram editor shows the nodes where they were placed") {
+    DiagramPreviewModel preview;
+    preview.setSource(QString::fromStdString(
+            GeneratedBlockGuard::wrap("part a;\npart b;\n", R"({"s":{"a":[400,300],"b":[40,500]}})")));
+    preview.rebuild();
+    CHECK(preview.controller()->nodeRect(preview.controller()->nodeAt(410, 310)).topLeft() == QPointF(400, 300));
+    CHECK(preview.controller()->nodeRect(preview.controller()->nodeAt(50, 510)).topLeft() == QPointF(40, 500));
+}

@@ -33,8 +33,6 @@ Item {
 
     readonly property bool isFrame: nodeKind === DiagramTypes.PackageNode
     readonly property bool isPort: nodeKind === DiagramTypes.PortNode
-    /** Border of the part the port sits on (for its label); re-read when the port or its part moves. */
-    readonly property string portSide: isPort && controller ? (nodeX, nodeY, controller.portSide(elementId)) : "right"
     readonly property bool isDefinition: nodeKind === DiagramTypes.PartDefinitionNode
                                          || nodeKind === DiagramTypes.DefinitionNode
                                          || nodeKind === DiagramTypes.TextualNode
@@ -86,7 +84,10 @@ Item {
     x: nodeX
     y: nodeY
     width: isFrame || isPort ? nodeWidth : Math.max(140, partContent.contentWidth + 2 * padding)
-    height: isFrame || isPort ? nodeHeight : partContent.implicitHeight + padding
+    // tall enough for its ports on the left and right border
+    height: isFrame || isPort ? nodeHeight
+                              : Math.max(partContent.implicitHeight + padding,
+                                         controller && controller.modelRevision >= 0 ? controller.minimumNodeHeight(elementId) : 0)
     z: isFrame ? depth : isPort ? 3000 + depth : 1000 + depth
 
     onWidthChanged: reportSize()
@@ -294,14 +295,33 @@ Item {
         }
     }
     Label {
+        id: portLabel
+
+        // placed by the controller where it covers no other port, label or node (outside the part if possible);
+        // computed again whenever any node moves
+        // (the revision is read so that the binding depends on it)
+        readonly property point offset: node.isPort && node.controller && node.controller.geometryRevision >= 0
+                                        ? node.controller.portLabelOffset(node.elementId)
+                                        : Qt.point(node.width + 4, -15)
+        // estimated widths are used for the placement: a longer text grows away from the square
+        readonly property bool leftOfSquare: offset.x < 0
+
+        objectName: "portLabel"
         visible: node.isPort
         text: node.title
         textFormat: Text.PlainText
         font.pixelSize: 12
         color: Theme.textPrimary
-        // outside the part, next to the square
-        x: node.portSide === "left" ? -implicitWidth - 6 : node.portSide === "right" ? node.width + 6 : node.width / 2 - implicitWidth / 2
-        y: node.portSide === "top" ? -implicitHeight - 2 : node.portSide === "bottom" ? node.height + 2 : -implicitHeight + 1
+        leftPadding: 2
+        rightPadding: 2
+        x: leftOfSquare ? -implicitWidth - 4 : offset.x
+        y: offset.y
+
+        // lines running behind the label do not cross the text
+        background: Rectangle {
+            color: Qt.alpha(Theme.card, 0.85)
+            radius: 2
+        }
     }
 
     // ---------------------------------------------------------------- package frame

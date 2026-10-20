@@ -96,6 +96,26 @@ TEST_CASE("Controller: dropping into a package frame and moving out changes the 
     CHECK_EQ(model.element(idOf(part)).owner(), idOf(package));
 }
 
+TEST_CASE("Controller: a part dropped onto a part becomes one of its parts") {
+    SemanticModel model;
+    DiagramController controller(model);
+
+    const QString package = controller.addElement(DiagramTypes::ToolPackage, 120, 115);
+    const QRectF frame = controller.nodeRect(package);
+    const QString vehicle = dropPart(controller, frame.x() + 150, frame.y() + 120);
+    const QRectF vehicleRect = controller.nodeRect(vehicle);
+
+    const QString engine = dropPart(controller, vehicleRect.center().x(), vehicleRect.center().y());
+    CHECK_EQ(model.element(idOf(engine)).owner(), idOf(vehicle));
+    CHECK(controller.nodeRect(engine).top() > vehicleRect.bottom()); // placed below its owner
+    CHECK_EQ(generated(model), std::string("package Package1 {\n    part part1 {\n        part part1;\n    }\n}\n")); // names are unique per owner
+
+    // definitions are not owned by the part: they stay in the package
+    const QString definition = controller.addElement(DiagramTypes::ToolPartDefinition, vehicleRect.center().x(),
+                                                     vehicleRect.center().y());
+    CHECK_EQ(model.element(idOf(definition)).owner(), idOf(package));
+}
+
 TEST_CASE("Controller: moving a frame takes its content along") {
     SemanticModel model;
     DiagramController controller(model);
@@ -227,6 +247,18 @@ TEST_CASE("Controller: edit values are validated and applied") {
     CHECK(controller.updateElement(part, {{"name", "engine"}, {"typeName", "Engine"}, {"multiplicity", "1..*"}}).isEmpty());
     CHECK_EQ(model.element(idOf(part)).name(), std::string("engine"));
     CHECK_EQ(controller.nodes()->nodes().front().Title, QString("engine : Engine[1..*]"));
+
+    // the type and redefined features must be references: no sentences, numbers or keywords
+    for (const char *type: {"max Masse Auto 1500kg", "1500", "part", "Engine;", "A, B"})
+        CHECK(!controller.updateElement(part, {{"name", "engine"}, {"typeName", type}}).isEmpty());
+    for (const char *type: {"Vehicles::Engine", "'my engine'", "~EnginePort", "'part'"})
+        CHECK(controller.updateElement(part, {{"name", "engine"}, {"typeName", type}}).isEmpty());
+    CHECK(!controller.updateElement(part, {{"name", "engine"}, {"redefines", "eng 2"}}).isEmpty());
+    CHECK_EQ(model.element(idOf(part)).typeName(), std::string("'part'"));
+
+    const QString requirement = controller.addElement(DiagramTypes::ToolRequirement, 600, 100);
+    CHECK(controller.updateElement(requirement, {{"name", "maxMass"}, {"typeName", "max mass 1500 kg"}})
+                  .contains("Text"));
 }
 
 TEST_CASE("Controller: multiplicity input") {
@@ -994,4 +1026,214 @@ TEST_CASE("Edges: straight where free, around the nodes in between, side by side
     const auto straightFirst = route(a, b, {}, parallelOffset(edges, edges[0]));
     const auto straightSecond = route(b, a, {}, parallelOffset(edges, edges[1]));
     CHECK(std::abs(straightFirst.front().y() - straightSecond.back().y()) > 5);
+}
+
+TEST_CASE("Controller: type suggestions offer the fitting definitions and library types") {
+    SemanticModel model;
+    SysMLTextImporter::importText("package P {\n    port def KraftPort;\n    port def Signal;\n    part def Motor;\n"
+                                  "    attribute def Mass;\n    enum def Colour;\n    part vehicle {\n"
+                                  "        port p;\n        attribute m;\n    }\n}\n", model);
+    DiagramController controller(model);
+    const auto idNamed = [&](const std::string &name) {
+        for (ElementId id = 1; id < 100; ++id)
+            if (model.contains(id) && model.element(id).name() == name)
+                return key(id);
+        return QString();
+    };
+    const auto texts = [](const QVariantList &list) {
+        QStringList result;
+        for (const QVariant &entry: list)
+            result.append(entry.toMap().value("text").toString());
+        return result;
+    };
+
+    // a port: port defs only, filtered by the input, "~" kept
+    CHECK(texts(controller.typeSuggestions(idNamed("p"), "")) == QStringList({"KraftPort", "Signal"}));
+    CHECK(texts(controller.typeSuggestions(idNamed("p"), "kr")) == QStringList({"KraftPort"}));
+    CHECK(texts(controller.typeSuggestions(idNamed("p"), "~Kr")) == QStringList({"~KraftPort"}));
+    CHECK(texts(controller.portTypeSuggestions("sig")) == QStringList({"Signal"}));
+    // an attribute: attribute and enum defs first, then library types
+    const QStringList attribute = texts(controller.typeSuggestions(idNamed("m"), ""));
+    CHECK(attribute.size() == 12);
+    CHECK(attribute.mid(0, 3) == QStringList({"Mass", "Colour", "ScalarValues::Real"}));
+    CHECK(texts(controller.typeSuggestions(idNamed("m"), "torque")) == QStringList({"ISQ::TorqueValue"}));
+    // a part: part defs
+    CHECK(texts(controller.typeSuggestions(idNamed("vehicle"), "")) == QStringList({"Motor"}));
+
+    // known or not
+    CHECK(controller.typeStatus(idNamed("p"), "KraftPort").value("known").toBool());
+    CHECK(controller.typeStatus(idNamed("p"), "~KraftPort").value("known").toBool());
+    CHECK(controller.typeStatus(idNamed("p"), "").value("known").toBool());
+    CHECK(controller.typeStatus(idNamed("m"), "Real").value("known").toBool());
+    CHECK(controller.typeStatus(idNamed("m"), "ISQ::MassValue").value("known").toBool()); // qualified: a library
+    const QVariantMap unknown = controller.typeStatus(idNamed("p"), "~KrafPort");
+    CHECK(!unknown.value("known").toBool());
+    CHECK_EQ(unknown.value("name").toString(), QString("KrafPort"));
+    CHECK_EQ(unknown.value("keyword").toString(), QString("port def"));
+    CHECK_EQ(controller.portTypeStatus("Fuel").value("keyword").toString(), QString("port def"));
+    CHECK_EQ(controller.typeStatus(idNamed("vehicle"), "Car").value("keyword").toString(), QString("part def"));
+}
+
+TEST_CASE("Controller: an unknown type is created as definition in the package") {
+    SemanticModel model;
+    SysMLTextImporter::importText("package P {\n    part vehicle {\n        port p;\n    }\n}\n", model);
+    DiagramController controller(model);
+    ElementId port = 0;
+    ElementId vehicle = 0;
+    for (ElementId id = 1; id < 20; ++id) {
+        if (model.contains(id) && model.element(id).name() == "p")
+            port = id;
+        if (model.contains(id) && model.element(id).name() == "vehicle")
+            vehicle = id;
+    }
+    QVariantMap values = controller.elementDetails(key(port));
+    values["typeName"] = "~FuelPort";
+    values["createType"] = true;
+    CHECK(controller.updateElement(key(port), values).isEmpty());
+    controller.syncNow();
+    CHECK_EQ(generated(model), std::string("package P {\n    part vehicle {\n        port p : ~FuelPort;\n    }\n"
+                                           "    port def FuelPort;\n}\n"));
+    // known now: not created a second time
+    values["typeName"] = "FuelPort";
+    CHECK(controller.updateElement(key(port), values).isEmpty());
+    CHECK_EQ(model.elementCount(), std::size_t(4));
+
+    // without the tick nothing is created
+    QVariantMap part = controller.elementDetails(key(vehicle));
+    part["typeName"] = "Vehicle";
+    CHECK(controller.updateElement(key(vehicle), part).isEmpty());
+    CHECK_EQ(model.elementCount(), std::size_t(4));
+    part["createType"] = true;
+    CHECK(controller.updateElement(key(vehicle), part).isEmpty());
+    CHECK_EQ(model.elementCount(), std::size_t(5));
+    CHECK(generated(model).find("    part def Vehicle;\n") != std::string::npos);
+}
+
+TEST_CASE("Controller: ports are listed, added, renamed and removed in the edit dialog") {
+    SemanticModel model;
+    SysMLTextImporter::importText("package P {\n    port def KraftPort;\n    part motor {\n        port a : KraftPort;\n"
+                                  "        port b;\n    }\n    interface def I {\n        end port e;\n    }\n}\n", model);
+    DiagramController controller(model);
+    ElementId motor = 0;
+    ElementId interfaceDefinition = 0;
+    for (ElementId id = 1; id < 20; ++id) {
+        if (model.contains(id) && model.element(id).name() == "motor")
+            motor = id;
+        if (model.contains(id) && model.element(id).name() == "I")
+            interfaceDefinition = id;
+    }
+    QVariantMap details = controller.elementDetails(key(motor));
+    CHECK(details.value("hasPorts").toBool());
+    QVariantList ports = details.value("ports").toList();
+    CHECK_EQ(ports.size(), qsizetype(2));
+    CHECK_EQ(ports[0].toMap().value("typeName").toString(), QString("KraftPort"));
+    CHECK(!controller.elementDetails(key(interfaceDefinition)).value("hasPorts").toBool());
+
+    // rename a, drop b, add two new ones (one with a new port def)
+    QVariantMap first = ports[0].toMap();
+    first["name"] = "abtrieb";
+    ports = {first, QVariantMap{{"id", ""}, {"name", "kuehlung"}, {"typeName", "~CoolantPort"}, {"createType", true}},
+             QVariantMap{{"id", ""}, {"name", "signal"}, {"typeName", ""}}};
+    details["ports"] = ports;
+    CHECK(controller.updateElement(key(motor), details).isEmpty());
+    controller.syncNow();
+    CHECK_EQ(generated(model), std::string("package P {\n    port def KraftPort;\n    part motor {\n"
+                                           "        port abtrieb : KraftPort;\n        port kuehlung : ~CoolantPort;\n"
+                                           "        port signal;\n    }\n    interface def I {\n        end port e;\n    }\n"
+                                           "    port def CoolantPort;\n}\n"));
+
+    // invalid entries change nothing
+    details = controller.elementDetails(key(motor));
+    QVariantList twice = details.value("ports").toList();
+    twice.append(QVariantMap{{"id", ""}, {"name", "signal"}, {"typeName", ""}});
+    details["ports"] = twice;
+    CHECK(!controller.updateElement(key(motor), details).isEmpty());
+    details["ports"] = QVariantList{QVariantMap{{"id", ""}, {"name", "x"}, {"typeName", "a port"}}};
+    CHECK(!controller.updateElement(key(motor), details).isEmpty());
+    details["ports"] = QVariantList{QVariantMap{{"id", ""}, {"name", ""}, {"typeName", ""}}};
+    CHECK(!controller.updateElement(key(motor), details).isEmpty());
+    CHECK(generated(model).find("port kuehlung") != std::string::npos);
+}
+
+TEST_CASE("Controller: port labels avoid other ports, labels and nodes") {
+    SemanticModel model;
+    SysMLTextImporter::importText("part a {\n    port p1;\n    port p2;\n}\npart b;\n", model);
+    DiagramController controller(model);
+    controller.syncNow();
+    ElementId a = 0, b = 0, p1 = 0, p2 = 0;
+    for (ElementId id = 1; id < 20; ++id) {
+        if (!model.contains(id))
+            continue;
+        const std::string &name = model.element(id).name();
+        (name == "a" ? a : name == "b" ? b : name == "p1" ? p1 : name == "p2" ? p2 : id) = id;
+    }
+    controller.setNodeSize(key(a), 160, 100);
+    controller.setNodeSize(key(b), 160, 60);
+    controller.moveNode(key(a), 100, 100);
+    controller.moveNode(key(b), 500, 100);
+    // both ports on the right border, close to each other
+    controller.moveNode(key(p1), 253, 120);
+    controller.moveNode(key(p2), 253, 140);
+    const int revision = controller.geometryRevision();
+    const QRectF r1 = controller.nodeRect(key(p1));
+    const QRectF r2 = controller.nodeRect(key(p2));
+    CHECK(r1.center().x() == 260.0 && r2.center().x() == 260.0);
+    const QPointF o1 = controller.portLabelOffset(key(p1));
+    const QPointF o2 = controller.portLabelOffset(key(p2));
+    const QRectF l1(r1.topLeft() + o1, QSizeF(30, 16));
+    const QRectF l2(r2.topLeft() + o2, QSizeF(30, 16));
+    CHECK(o1.x() > 0); // outside, right of the square
+    CHECK(!l1.intersects(l2));
+    CHECK(!l1.intersects(r2) && !l2.intersects(r1));
+
+    // a node right beside the port: its label moves away from it
+    controller.moveNode(key(b), 282, 104);
+    CHECK(controller.geometryRevision() > revision);
+    const QPointF moved = controller.portLabelOffset(key(p1));
+    const QRectF label(controller.nodeRect(key(p1)).topLeft() + moved, QSizeF(30, 16));
+    CHECK(!label.intersects(controller.nodeRect(key(b))));
+
+    // a port removed from the model but not yet from the nodes (before the next sync)
+    model.removeElement(p2);
+    controller.moveNode(key(b), 500, 100);
+    CHECK(controller.portLabelOffset(key(p1)).x() > 0);
+}
+
+TEST_CASE("Controller: ports that do not fit on the side continue along the bottom border") {
+    SemanticModel model;
+    SysMLTextImporter::importText("part a {\n    port p1;\n    port p2;\n    port p3;\n    port p4;\n}\n", model);
+    DiagramController controller(model);
+    controller.syncNow();
+    ElementId a = 0;
+    std::vector<ElementId> ports;
+    for (ElementId id = 1; id < 20; ++id) {
+        if (!model.contains(id))
+            continue;
+        if (model.element(id).name() == "a")
+            a = id;
+        else
+            ports.push_back(id);
+    }
+    CHECK_EQ(controller.minimumNodeHeight(key(a)), 30.0 + 3 * 24.0 + 7.0 + 10.0); // QML makes it this tall
+    controller.setNodeSize(key(a), 160, 80); // here (a size from elsewhere) room for two ports on the right border
+    controller.layoutAll();
+    const QRectF part = controller.nodeRect(key(a));
+    std::vector<QRectF> rects;
+    for (const ElementId port: ports)
+        rects.push_back(controller.nodeRect(key(port)));
+    for (std::size_t i = 0; i < rects.size(); ++i)
+        for (std::size_t j = i + 1; j < rects.size(); ++j)
+            CHECK(!rects[i].intersects(rects[j]));
+    CHECK(rects[0].center().x() == part.right());
+    CHECK(rects[1].center().x() == part.right());
+    CHECK(rects[2].center().y() == part.bottom());
+    CHECK(rects[3].center().y() == part.bottom());
+
+    // grown to its minimum height (as QML does): all on the right border; a port moved by hand stays where it is
+    controller.moveNode(key(ports[3]), part.center().x(), part.top() - 7);
+    controller.setNodeSize(key(a), 160, controller.minimumNodeHeight(key(a)));
+    const QRectF grown = controller.nodeRect(key(a));
+    for (std::size_t i = 0; i < 3; ++i)
+        CHECK(controller.nodeRect(key(ports[i])).center().x() == grown.right());
+    CHECK(controller.nodeRect(key(ports[3])).center().y() == grown.top());
 }

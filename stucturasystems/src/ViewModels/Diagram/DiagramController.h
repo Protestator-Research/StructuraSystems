@@ -48,6 +48,10 @@ namespace StructuraSystems::Client {
         Q_PROPERTY(qreal canvasWidth READ canvasWidth NOTIFY canvasSizeChanged)
         Q_PROPERTY(qreal canvasHeight READ canvasHeight NOTIFY canvasSizeChanged)
         Q_PROPERTY(int elementCount READ elementCount NOTIFY elementCountChanged)
+        /// Counts every change of the node positions, sizes and titles (bindings that depend on all nodes).
+        Q_PROPERTY(int geometryRevision READ geometryRevision NOTIFY geometryRevisionChanged)
+        /// Counts the updates from the model (not the moves): for bindings that depend on the elements only.
+        Q_PROPERTY(int modelRevision READ modelRevision NOTIFY modelRevisionChanged)
 
     public:
         explicit DiagramController(Diagram::SemanticModel &model, QObject *parent = nullptr);
@@ -63,6 +67,8 @@ namespace StructuraSystems::Client {
         [[nodiscard]] qreal canvasWidth() const { return CanvasSize.width(); }
         [[nodiscard]] qreal canvasHeight() const { return CanvasSize.height(); }
         [[nodiscard]] int elementCount() const { return int(Model.elementCount()); }
+        [[nodiscard]] int geometryRevision() const { return GeometryRevision; }
+        [[nodiscard]] int modelRevision() const { return ModelRevision; }
 
         // ---- adding --------------------------------------------------------------------------------
         /// Adds the element of a palette tool (DiagramTypes::Tool) at a canvas position.
@@ -122,6 +128,30 @@ namespace StructuraSystems::Client {
         Q_INVOKABLE QString updateEdge(const QString &key, const QVariantMap &values);
         /// Border of its part a port sits on: "left", "right", "top" or "bottom" (for its label).
         Q_INVOKABLE QString portSide(const QString &id) const;
+        /**
+         * Position of a port's label relative to the port square: outside its part next to the square, on the side
+         * where it covers neither other ports, their labels nor other nodes (inside the part as a last resort).
+         */
+        Q_INVOKABLE QPointF portLabelOffset(const QString &id) const;
+        /// Height a part needs so that its ports fit on its left and right border (0 without ports).
+        Q_INVOKABLE qreal minimumNodeHeight(const QString &id) const;
+
+        // ---- types ---------------------------------------------------------------------------------
+        /**
+         * Types offered for an element while its type is typed: the fitting definitions of the model (port defs for
+         * a port, part defs for a part, attribute and enum defs for an attribute, ...) and common library types.
+         * Each entry: {text (as inserted), detail ("port def", "library")}. "~" in front is kept for ports.
+         */
+        Q_INVOKABLE QVariantList typeSuggestions(const QString &id, const QString &text) const;
+        /// The same for a new port (port list of the edit dialog).
+        Q_INVOKABLE QVariantList portTypeSuggestions(const QString &text) const;
+        /**
+         * Whether a typed type is known: {known, name, keyword}. Unknown is a simple name that is neither defined in
+         * the model nor a library type; name and keyword ("port def") describe the definition that
+         * updateElement(..., {createType: true}) creates for it.
+         */
+        Q_INVOKABLE QVariantMap typeStatus(const QString &id, const QString &text) const;
+        Q_INVOKABLE QVariantMap portTypeStatus(const QString &text) const;
 
         /// Applies pending model changes to the node and edge models immediately.
         void syncNow();
@@ -155,6 +185,8 @@ namespace StructuraSystems::Client {
         void selectionChanged();
         void canvasSizeChanged();
         void elementCountChanged();
+        void geometryRevisionChanged();
+        void modelRevisionChanged();
 
     private:
         [[nodiscard]] std::optional<Diagram::ElementId> toId(const QString &id) const;
@@ -197,6 +229,13 @@ namespace StructuraSystems::Client {
         void place(Diagram::ElementId id, const QPointF &topLeft, const std::map<Diagram::ElementId, QSizeF> &extents,
                    const std::map<Diagram::ElementId, std::vector<QPointF>> &framePositions);
         [[nodiscard]] std::vector<Diagram::ElementId> nodeChildren(Diagram::ElementId owner) const;
+        [[nodiscard]] QVariantList suggestionsFor(Diagram::ElementKind usage, const QString &text) const;
+        [[nodiscard]] QVariantMap statusFor(Diagram::ElementKind usage, const QString &text) const;
+        /// A simple type name that is neither defined in the model nor a library type.
+        [[nodiscard]] bool isUnknownType(const std::string &typeName) const;
+        /// Creates the definition for an unknown type of a usage (inside a model change), next to the element.
+        void createTypeDefinition(Diagram::ElementKind usage, const std::string &typeName, Diagram::ElementId near);
+        void computePortLabels() const;
 
         Diagram::SemanticModel &Model;
         Diagram::SemanticModel::ListenerToken ListenerToken = 0;
@@ -211,11 +250,17 @@ namespace StructuraSystems::Client {
         bool AutoLayout = false;
         bool LayoutQueued = false;
         std::set<Diagram::ElementId> Measured;
+        /// Ports in their default slot (not moved by hand): they follow when their part changes its size.
+        std::set<Diagram::ElementId> AutoPlacedPorts;
         int LastElementCount = 0;
 
         bool ArrowMode = false;
         DiagramTypes::ArrowDefault ArrowDefaultValue = DiagramTypes::AskOnRelease;
         QSizeF CanvasSize{2400, 1600};
+        int GeometryRevision = 0;
+        int ModelRevision = 0;
+        mutable int LabelRevision = -1;
+        mutable std::map<Diagram::ElementId, QPointF> LabelOffsets;
     };
 }
 

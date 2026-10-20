@@ -6,6 +6,9 @@
 
 #include <Diagram/Conversion/GeneratedBlockGuard.h>
 
+#include <QJsonDocument>
+#include <QJsonObject>
+
 namespace StructuraSystems::Client {
 
     using Diagram::GeneratedBlockGuard;
@@ -51,6 +54,10 @@ namespace StructuraSystems::Client {
                                                             ? SysMLTextImporter::Dialect::KerML
                                                             : SysMLTextImporter::Dialect::SysML);
         Controller->layoutAll();
+        // a block of the diagram editor: the nodes where they were placed there ("// Layout: ..." line)
+        const auto layout = QJsonDocument::fromJson(
+                QByteArray::fromStdString(GeneratedBlockGuard::extractLayout(Source.toStdString()))).object();
+        Controller->restoreLayout(layout.value(QStringLiteral("s")).toObject());
         emit updated();
     }
 }
