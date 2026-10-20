@@ -21,6 +21,8 @@
 #include "entities/DigitalTwinRequest.h"
 #include <nlohmann/json.hpp>
 #include <sysmlv2/service/online/SysMLAPIImplementation.h>
+#include <sysmlv2/service/online/HttpException.h>
+#include <sysmlv2/service/online/ConnectionError.h>
 #include <boost/uuid/uuid_io.hpp>
 #include <boost/lexical_cast.hpp>
 #include <cstdio>
@@ -33,7 +35,6 @@
 //---------------------------------------------------------
 #include "BECommunicationService.h"
 
-#include <iostream>
 
 
 namespace {
@@ -156,41 +157,109 @@ namespace StructuraSystems::Client {
     std::shared_ptr<SysMLv2::REST::Commit> CommunicationService::postCommitWithId(boost::uuids::uuid projectId, std::shared_ptr<SysMLv2::REST::CommitRequest> commit)
     {
         std::string projectdString = boost::uuids::to_string(projectId);
-        std::shared_ptr<SysMLv2::REST::IEntity> commi;
-        try {
-            commi = APIImplementation->postCommit(projectdString, commit, BarrierString);
-        }catch (std::exception &e) {
-            std::cerr << e.what() << std::endl;
-        }
-        std::shared_ptr<SysMLv2::REST::Commit> returnValue = dynamic_pointer_cast<SysMLv2::REST::Commit>(commi);
-        return returnValue;
+        auto commi = APIImplementation->postCommit(projectdString, commit, BarrierString);
+        return dynamic_pointer_cast<SysMLv2::REST::Commit>(commi);
     }
 
 
     bool CommunicationService::setUserForLoginInBackend(std::string username, std::string password) {
         try {
             BarrierString = APIImplementation->loginUserWithPassword(username,password);
-        }catch (...) {
-            throw std::invalid_argument("Invalid username or password");
+        } catch (const SysMLv2::API::EXCEPTIONS::HTTPException &exception) {
+            if (exception.httpErrorCode() == 401)
+                throw std::invalid_argument("Invalid username or password");
+            if (exception.httpErrorCode() == 429) {
+                std::string message = "Too many login attempts.";
+                if (exception.retryAfterSeconds() >= 0)
+                    message += " Please try again in " + std::to_string(exception.retryAfterSeconds()) + " s.";
+                throw std::runtime_error(message);
+            }
+            throw;
         }
         return !BarrierString.empty();
     }
 
+    std::optional<UserInfo> CommunicationService::getCurrentUser() {
+        std::string answer;
+        try {
+            answer = APIImplementation->getCustomRequest("me", BarrierString);
+        } catch (const SysMLv2::API::EXCEPTIONS::HTTPException &exception) {
+            // A server without the extension does not know the endpoint.
+            if (exception.httpErrorCode() == 404)
+                return std::nullopt;
+            throw;
+        }
+
+        if (!nlohmann::json::accept(answer))
+            throw std::runtime_error("The server did not return valid user information.");
+        const auto json = nlohmann::json::parse(answer);
+        if (!json.is_object() || !json.contains("username") || !json["username"].is_string())
+            throw std::runtime_error("The server did not return valid user information.");
+
+        UserInfo user;
+        user.Username = json["username"].get<std::string>();
+        if (json.contains("group") && json["group"].is_string())
+            user.Group = json["group"].get<std::string>();
+        if (json.contains("role") && json["role"].is_number_integer())
+            user.Role = json["role"].get<int>();
+        if (json.contains("mustChangePassword") && json["mustChangePassword"].is_boolean())
+            user.MustChangePassword = json["mustChangePassword"].get<bool>();
+        return user;
+    }
+
+    void CommunicationService::changeOwnPassword(const std::string &oldPassword, const std::string &newPassword) {
+        // Counted in bytes of UTF-8 by the server too; the check only avoids a request that is rejected anyway.
+        if (newPassword.size() < 12)
+            throw std::invalid_argument("The new password must have at least 12 characters.");
+
+        nlohmann::json request;
+        request["oldPassword"] = oldPassword;
+        request["newPassword"] = newPassword;
+        APIImplementation->putCustomRequest("me/password", request.dump(), BarrierString);
+    }
+
+    std::string CommunicationService::describeBackendError(const std::exception &exception) {
+        if (const auto *http = dynamic_cast<const SysMLv2::API::EXCEPTIONS::HTTPException *>(&exception)) {
+            switch (http->httpErrorCode()) {
+                case 401:
+                    return "The session has expired or you are not logged in. Please log in again.";
+                case 403:
+                    if (http->serverErrorCode() == "password_change_required")
+                        return "The password must be changed before you can continue.";
+                    return "You do not have permission for this action.";
+                case 404:
+                    return "Not found, or you do not have access to it.";
+                case 409: {
+                    const auto serverText = http->serverErrorCode();
+                    return "Conflict with the current state of the server." + (serverText.empty() ? std::string() : " " + serverText);
+                }
+                case 429:
+                    if (http->retryAfterSeconds() >= 0)
+                        return "Too many attempts. Please try again in " + std::to_string(http->retryAfterSeconds()) + " s.";
+                    return "Too many attempts. Please try again later.";
+                default:
+                    break;
+            }
+        } else if (dynamic_cast<const SysMLv2::API::EXCEPTIONS::ConnectionError *>(&exception) != nullptr) {
+            return std::string("The server is not reachable: ") + exception.what();
+        }
+        return exception.what();
+    }
+
     std::shared_ptr<SysMLv2::REST::DigitalTwin> CommunicationService::postDigitalTwinToProject(
         boost::uuids::uuid projectId, std::shared_ptr<SysMLv2::REST::DigitalTwinRequest> twinRequest) {
-        const auto digiTwinJSON = APIImplementation->postCustomRequest("/projects/"+boost::lexical_cast<std::string>(projectId)+"/twins",twinRequest->serializeToJson(),BarrierString);
-        // The server answers errors (400, 404) without body.
-        if (digiTwinJSON.empty() || !nlohmann::json::accept(digiTwinJSON))
-            throw std::runtime_error("The server rejected the digital twin. Check that the project and the commit exist on the server.");
+        const auto digiTwinJSON = APIImplementation->postCustomRequest("projects/"+boost::lexical_cast<std::string>(projectId)+"/twins",twinRequest->serializeToJson(),BarrierString);
+        if (!nlohmann::json::accept(digiTwinJSON))
+            throw std::runtime_error("The server did not return a valid digital twin.");
         return std::make_shared<SysMLv2::REST::DigitalTwin>(digiTwinJSON);
     }
 
     std::vector<std::shared_ptr<SysMLv2::REST::Commit>> CommunicationService::getAllCommitsForProject(
         boost::uuids::uuid projectId, std::map<boost::uuids::uuid, std::chrono::system_clock::time_point> *timestamps) {
         const auto commitsJSON = APIImplementation->getCustomRequest("projects/"+boost::lexical_cast<std::string>(projectId)+"/commits",BarrierString);
-        // The server answers errors (404) without body. A project without commits answers with an empty array.
-        if (commitsJSON.empty() || !nlohmann::json::accept(commitsJSON))
-            throw std::runtime_error("The server did not return the commits of the project. Check that the project still exists on the server.");
+        // A project without commits answers with an empty array.
+        if (!nlohmann::json::accept(commitsJSON))
+            throw std::runtime_error("The server did not return the commits of the project.");
 
         const auto parsedJson = nlohmann::json::parse(commitsJSON);
         if (!parsedJson.is_array()) {
@@ -214,9 +283,8 @@ namespace StructuraSystems::Client {
         boost::uuids::uuid projectId, boost::uuids::uuid branchId, std::shared_ptr<SysMLv2::REST::CommitRequest> commit) {
         const auto endpoint = "projects/"+boost::lexical_cast<std::string>(projectId)+"/commits?branchId="+boost::lexical_cast<std::string>(branchId);
         const auto commitJSON = APIImplementation->postCustomRequest(endpoint,commit->serializeToJson(),BarrierString);
-        // The server answers errors (400, 404) without body.
-        if (commitJSON.empty() || !nlohmann::json::accept(commitJSON))
-            throw std::runtime_error("The server rejected the commit. Check that the project and the branch exist on the server.");
+        if (!nlohmann::json::accept(commitJSON))
+            throw std::runtime_error("The server did not return a valid commit.");
 
         const auto parsedJson = nlohmann::json::parse(commitJSON);
         std::optional<std::chrono::system_clock::time_point> timestamp;
@@ -238,14 +306,13 @@ namespace StructuraSystems::Client {
 
         const auto endpoint = "projects/"+boost::lexical_cast<std::string>(projectId)+"/branches";
         const auto branchJSON = APIImplementation->postCustomRequest(endpoint,request.dump(),BarrierString);
-        // The server answers errors (400, 404, 409) without body or with a JSON message.
-        if (branchJSON.empty() || !nlohmann::json::accept(branchJSON))
-            throw std::runtime_error("The server rejected the branch " + name + ". Check that the project and the commit exist on the server and that the name is not used yet.");
+        if (!nlohmann::json::accept(branchJSON))
+            throw std::runtime_error("The server did not return a valid branch for " + name + ".");
 
         auto parsedJson = nlohmann::json::parse(branchJSON);
         if (!parsedJson.is_object() || !parsedJson.contains("@id") || !parsedJson["@id"].is_string()) {
             const auto message = serverMessage(parsedJson);
-            throw std::runtime_error("The server rejected the branch " + name + "." + (message.empty() ? std::string() : " " + message));
+            throw std::runtime_error("The server did not return a valid branch for " + name + "." + (message.empty() ? std::string() : " " + message));
         }
 
         // Some servers answer without name or head; the values that were sent are then the ones of the new branch.
@@ -257,14 +324,16 @@ namespace StructuraSystems::Client {
     }
 
     std::vector<std::shared_ptr<SysMLv2::REST::DigitalTwin>> CommunicationService::getAllDigitalTwinsForProject(boost::uuids::uuid projectId) {
-        const auto twinsJSON = APIImplementation->getCustomRequest("/projects/"+boost::lexical_cast<std::string>(projectId)+"/twins",BarrierString);
-        std::vector<std::shared_ptr<SysMLv2::REST::DigitalTwin>> returnValue;
-        if (twinsJSON.empty())
-            return returnValue;
+        const auto twinsJSON = APIImplementation->getCustomRequest("projects/"+boost::lexical_cast<std::string>(projectId)+"/twins",BarrierString);
+        if (!nlohmann::json::accept(twinsJSON))
+            throw std::runtime_error("The server did not return the digital twins of the project.");
 
         const auto parsedJson = nlohmann::json::parse(twinsJSON);
         if (!parsedJson.is_array())
-            return returnValue;
+            throw std::runtime_error("The server did not return a list of digital twins.");
+
+        std::vector<std::shared_ptr<SysMLv2::REST::DigitalTwin>> returnValue;
+        returnValue.reserve(parsedJson.size());
 
         for (const auto& twin : parsedJson)
             returnValue.push_back(std::make_shared<SysMLv2::REST::DigitalTwin>(twin.dump()));
@@ -294,9 +363,9 @@ namespace StructuraSystems::Client {
         return returnValue;
     }
 
-    std::shared_ptr<SysMLv2::REST::Project> CommunicationService::postProject(std::string projectName, std::string projectDescription, std::string defaultBranchName,  std::string owner, std::string owningGroup) {
+    std::shared_ptr<SysMLv2::REST::Project> CommunicationService::postProject(std::string projectName, std::string projectDescription, std::string defaultBranchName, std::string owningGroup) {
         std::shared_ptr<SysMLv2::REST::ProjectRequest> projectRequest = std::make_shared<SysMLv2::REST::ProjectRequest>(projectName, projectDescription, defaultBranchName);
-        const auto returnValue = APIImplementation->postProject(projectRequest, BarrierString, owner,owningGroup);
+        const auto returnValue = APIImplementation->postProject(projectRequest, BarrierString, owningGroup);
         const auto project = dynamic_pointer_cast<SysMLv2::REST::Project>(returnValue);
         return project;
     }

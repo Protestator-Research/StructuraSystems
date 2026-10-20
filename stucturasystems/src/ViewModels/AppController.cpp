@@ -221,7 +221,7 @@ namespace StructuraSystems::Client {
             try {
                 outcome.Value = work();
             } catch (const std::exception &ex) {
-                outcome.Error = QString::fromUtf8(ex.what());
+                outcome.Error = QString::fromStdString(CommunicationService::describeBackendError(ex));
                 if (outcome.Error.isEmpty())
                     outcome.Error = QStringLiteral("Unknown error");
             } catch (...) {
@@ -586,7 +586,7 @@ namespace StructuraSystems::Client {
                     result.Projects.append(entry);
                 } catch (const std::exception &ex) {
                     if (result.FailedProjects++ == 0)
-                        result.FirstError = QString::fromUtf8(ex.what());
+                        result.FirstError = QString::fromStdString(CommunicationService::describeBackendError(ex));
                 } catch (...) {
                     if (result.FailedProjects++ == 0)
                         result.FirstError = QStringLiteral("Unknown error");
@@ -818,18 +818,13 @@ namespace StructuraSystems::Client {
         const auto service = BackendConnection;
         const auto projectName = name.trimmed().toStdString();
         const auto projectDescription = description.toStdString();
-        const auto owner = Settings->username().toStdString();
         const auto visibilityText = visibility.toStdString();
         runAsync<ProjectList>(tr("Creating online project"),
-            [service, projectName, projectDescription, owner, visibilityText]() {
-                if (visibilityText == "Private")
-                    service->postProject(projectName, projectDescription, "Main", owner);
-                else if (visibilityText == "Internal")
-                    service->postProject(projectName, projectDescription, "Main", owner); //TODO fix for group required
-                else if (visibilityText == "Public")
-                    service->postProject(projectName, projectDescription, "Main");
-                else
+            [service, projectName, projectDescription, visibilityText]() {
+                if (visibilityText != "Private" && visibilityText != "Internal" && visibilityText != "Public")
                     throw std::invalid_argument("Unknown visibility: " + visibilityText);
+                // The server uses the logged in user as owner. No group is selectable in the UI yet.
+                service->postProject(projectName, projectDescription, "Main");
                 return service->getAllProjects();
             },
             [this](ProjectList projects) {
@@ -942,7 +937,7 @@ namespace StructuraSystems::Client {
                     outcome.Value.Commits.append(info);
                 }
             } catch (const std::exception &ex) {
-                outcome.Error = QString::fromUtf8(ex.what());
+                outcome.Error = QString::fromStdString(CommunicationService::describeBackendError(ex));
                 if (outcome.Error.isEmpty())
                     outcome.Error = QStringLiteral("Unknown error");
             } catch (...) {
