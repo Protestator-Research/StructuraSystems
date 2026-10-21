@@ -120,6 +120,8 @@ qt_add_qml_module(StructuraSystems
             src/ViewModels/DocumentModel.h
             src/ViewModels/OpenDocumentsModel.cpp
             src/ViewModels/OpenDocumentsModel.h
+            src/ViewModels/ElementTreeModel.cpp
+            src/ViewModels/ElementTreeModel.h
             src/ViewModels/ProblemListModel.cpp
             src/ViewModels/ProblemListModel.h
             src/ViewModels/ProjectFilterModel.cpp

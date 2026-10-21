@@ -13,6 +13,7 @@
 #include <QStringList>
 #include <QtQml/qqmlregistration.h>
 
+#include "ElementTreeModel.h"
 #include "ProblemListModel.h"
 
 namespace SysMLv2::REST {
@@ -41,6 +42,7 @@ namespace StructuraSystems::Client {
      */
     struct ParseResult {
         QList<Problem> Problems;
+        QHash<int, QList<ElementTreeNode>> ElementTrees;   ///< Root namespace and its owned elements per ParseInput::Row, only for error-free rows
         std::vector<std::shared_ptr<KerML::Entities::Element>> InstanceElements;
     };
 
@@ -72,7 +74,9 @@ namespace StructuraSystems::Client {
             HeaderTitleRole,
             HeaderAuthorRole,
             SelectedRole,
-            ProblemCountRole
+            ProblemCountRole,
+            ElementTreeRole,
+            ElementCountRole
         };
         Q_ENUM(Roles)
 
@@ -182,6 +186,7 @@ namespace StructuraSystems::Client {
             std::shared_ptr<KerML::Entities::TextualRepresentation> Element;
             bool Selected = false;
             int ProblemCount = 0;
+            ElementTreeModel *ElementTree = nullptr;   ///< Owned by the DocumentModel (QObject parent)
             QString HeaderTitle;
             QString HeaderAuthor;
         };

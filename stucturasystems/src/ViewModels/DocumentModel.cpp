@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <exception>
+#include <unordered_set>
 #include <utility>
 
 #include <QFile>
@@ -16,6 +17,9 @@
 #include <boost/uuid/random_generator.hpp>
 #include <yaml-cpp/yaml.h>
 #include <kerml/root/elements/Element.h>
+#include <kerml/root/elements/Relationship.h>
+#include <kerml/root/namespaces/Namespace.h>
+#include <kerml/root/namespaces/OwningMembership.h>
 #include <kerml/root/annotations/TextualRepresentation.h>
 #include <sysmlv2/Parser.h>
 #include <sysmlv2/ParserError.h>
@@ -92,6 +96,7 @@ namespace StructuraSystems::Client {
 
             Row row;
             row.Element = std::move(textualRepresentation);
+            row.ElementTree = new ElementTreeModel(this);
             updateHeader(row);
             Rows.push_back(std::move(row));
         }
@@ -168,6 +173,10 @@ namespace StructuraSystems::Client {
                 return row.Selected;
             case ProblemCountRole:
                 return row.ProblemCount;
+            case ElementTreeRole:
+                return QVariant::fromValue(row.ElementTree);
+            case ElementCountRole:
+                return row.ElementTree ? row.ElementTree->count() : 0;
             default:
                 return {};
         }
@@ -206,7 +215,9 @@ namespace StructuraSystems::Client {
             {HeaderTitleRole, "headerTitle"},
             {HeaderAuthorRole, "headerAuthor"},
             {SelectedRole, "selected"},
-            {ProblemCountRole, "problemCount"}
+            {ProblemCountRole, "problemCount"},
+            {ElementTreeRole, "elementTree"},
+            {ElementCountRole, "elementCount"}
         };
     }
 
@@ -273,6 +284,8 @@ namespace StructuraSystems::Client {
         beginResetModel();
         Commit = std::move(commit);
         Elements = std::move(elements);
+        for (auto &row : Rows)
+            row.ElementTree->deleteLater();
         Rows.clear();
         loadRows();
         InstanceElements.clear();
@@ -375,6 +388,7 @@ namespace StructuraSystems::Client {
         Elements.insert(position, element);
         Row entry;
         entry.Element = element;
+        entry.ElementTree = new ElementTreeModel(this);
         Rows.insert(Rows.begin() + row, std::move(entry));
         endInsertRows();
 
@@ -389,6 +403,7 @@ namespace StructuraSystems::Client {
 
         const auto element = std::static_pointer_cast<KerML::Entities::Element>(Rows[row].Element);
         beginRemoveRows(QModelIndex(), row, row);
+        Rows[row].ElementTree->deleteLater();
         Rows.erase(Rows.begin() + row);
         Elements.erase(std::remove(Elements.begin(), Elements.end(), element), Elements.end());
         endRemoveRows();
@@ -457,6 +472,86 @@ namespace StructuraSystems::Client {
         return inputs;
     }
 
+    namespace {
+        /** Walks the owners of the first element up to the root namespace. */
+        std::shared_ptr<KerML::Entities::Element>
+        findRootElement(const std::vector<std::shared_ptr<KerML::Entities::Element>> &elements) {
+            std::shared_ptr<KerML::Entities::Element> current;
+            for (const auto &element : elements) {
+                if (element != nullptr) {
+                    current = element;
+                    break;
+                }
+            }
+            if (current == nullptr)
+                return nullptr;
+            while (const auto owner = current->owner())
+                current = owner;
+            return current;
+        }
+
+        /** Adds the owned elements a relationship contributes: its owned related elements and, for an owning membership, the member. */
+        void appendRelationshipChildren(const std::shared_ptr<KerML::Entities::Relationship> &relationship,
+                                        std::vector<std::shared_ptr<KerML::Entities::Element>> &children) {
+            if (relationship == nullptr)
+                return;
+            for (const auto &related : relationship->ownedRelatedElement())
+                children.push_back(related);
+            if (const auto membership = std::dynamic_pointer_cast<KerML::Entities::OwningMembership>(relationship))
+                children.push_back(membership->ownedMemberElement());
+        }
+
+        /**
+         * Children of an element in the sense of KerML: the elements owned through its owned relationships (and the members
+         * of owning memberships), plus owned elements that are no plain relationships. Relationships are never returned.
+         */
+        std::vector<std::shared_ptr<KerML::Entities::Element>>
+        ownedChildren(const std::shared_ptr<KerML::Entities::Element> &element) {
+            std::vector<std::shared_ptr<KerML::Entities::Element>> candidates;
+            for (const auto &relationship : element->ownedRelationship())
+                appendRelationshipChildren(relationship, candidates);
+            for (const auto &owned : element->ownedElements()) {
+                if (owned == nullptr)
+                    continue;
+                const auto relationship = std::dynamic_pointer_cast<KerML::Entities::Relationship>(owned);
+                if (relationship != nullptr && std::dynamic_pointer_cast<KerML::Entities::Namespace>(owned) == nullptr)
+                    appendRelationshipChildren(relationship, candidates);
+                else
+                    candidates.push_back(owned);
+            }
+
+            std::vector<std::shared_ptr<KerML::Entities::Element>> children;
+            std::unordered_set<const KerML::Entities::Element *> seen;
+            for (const auto &candidate : candidates) {
+                if (candidate != nullptr && seen.insert(candidate.get()).second)
+                    children.push_back(candidate);
+            }
+            return children;
+        }
+
+        /** Appends the element and all its children in pre-order. Elements seen before are skipped. */
+        void appendElementTree(const std::shared_ptr<KerML::Entities::Element> &element, int parent,
+                               std::unordered_set<const KerML::Entities::Element *> &visited,
+                               QList<ElementTreeNode> &nodes) {
+            if (element == nullptr || !visited.insert(element.get()).second)
+                return;
+
+            ElementTreeNode node;
+            node.Type = QString::fromStdString(element->getType());
+            auto name = element->effectiveName();
+            if (!name.has_value())
+                name = element->declaredName();
+            if (name.has_value())
+                node.Name = QString::fromStdString(*name);
+            node.Parent = parent;
+            const int index = int(nodes.size());
+            nodes.append(node);
+
+            for (const auto &child : ownedChildren(element))
+                appendElementTree(child, index, visited, nodes);
+        }
+    }
+
     ParseResult DocumentModel::runParser(const QList<ParseInput> &inputs, const QString &documentTitle) {
         ParseResult result;
         for (const auto &input : inputs) {
@@ -477,6 +572,14 @@ namespace StructuraSystems::Client {
                 }
                 for (const auto &element : parsed.first)
                     result.InstanceElements.push_back(element);
+
+                if (parsed.second.empty()) {
+                    const auto root = findRootElement(parsed.first);
+                    if (root != nullptr) {
+                        std::unordered_set<const KerML::Entities::Element *> visited;
+                        appendElementTree(root, -1, visited, result.ElementTrees[input.Row]);
+                    }
+                }
             } catch (const std::exception &ex) {
                 Problem problem;
                 problem.Message = QString::fromUtf8(ex.what());
@@ -497,10 +600,18 @@ namespace StructuraSystems::Client {
             const int rowIndex = int(i);
             const int errors = int(std::count_if(ParserProblems.begin(), ParserProblems.end(),
                                                  [rowIndex](const Problem &problem) { return problem.Row == rowIndex; }));
+            QList<int> changedRoles;
             if (Rows[i].ProblemCount != errors) {
                 Rows[i].ProblemCount = errors;
+                changedRoles.append(ProblemCountRole);
+            }
+            const int elementsBefore = Rows[i].ElementTree->count();
+            Rows[i].ElementTree->setNodes(result.ElementTrees.value(rowIndex));
+            if (Rows[i].ElementTree->count() != elementsBefore)
+                changedRoles.append(ElementCountRole);
+            if (!changedRoles.isEmpty()) {
                 const auto changed = index(rowIndex);
-                emit dataChanged(changed, changed, {ProblemCountRole});
+                emit dataChanged(changed, changed, changedRoles);
             }
         }
         emit problemsChanged();

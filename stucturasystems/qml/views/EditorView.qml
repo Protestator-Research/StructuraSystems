@@ -120,6 +120,8 @@ Item {
             required property string headerTitle
             required property string headerAuthor
             required property int problemCount
+            required property ElementTreeModel elementTree
+            required property int elementCount
 
             width: list.width
             height: card.implicitHeight + divider.implicitHeight
@@ -135,6 +137,8 @@ Item {
                 headerTitle: delegate.headerTitle
                 headerAuthor: delegate.headerAuthor
                 problemCount: delegate.problemCount
+                elementTree: delegate.elementTree
+                elementCount: delegate.elementCount
                 first: delegate.index === 0
                 last: delegate.index === list.count - 1
                 locked: view.locked
