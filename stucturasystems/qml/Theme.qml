@@ -107,6 +107,8 @@ QtObject {
     readonly property url iconDocument: _cloud + "032-document.png"
     readonly property url iconUser: _ui + "3032829-user-interface/png/045-user.png"
     readonly property url iconPanelCollapse: "qrc:/icons/arrows/StepBack"
+    // Lives in the QML module (qml/diagram), not in the resources submodule.
+    readonly property url iconDiagram: Qt.resolvedUrl("diagram/diagram-editor.png")
 
     function severityIcon(severity) {
         return severity >= 3 ? iconError : severity === 2 ? iconWarning : iconInfo
