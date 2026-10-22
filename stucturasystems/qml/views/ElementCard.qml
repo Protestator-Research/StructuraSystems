@@ -27,11 +27,16 @@ Pane {
     property bool editing: false
     /** True while the model elements of this section are shown. */
     property bool modelExpanded: false
+    /** Headings of the whole document as list of {level, title, row}, shown by a [toc] element. */
+    property var tableOfContents: []
+    /** True for a Markdown element that only contains the [toc] marker. */
+    readonly property bool isToc: language === "Markdown" && body.trim().toLowerCase() === "[toc]"
 
     signal commitRequested(string text, string language)
     signal moveRequested(int target)
     signal insertRequested(int targetRow, string language)
     signal deleteRequested
+    signal tocEntryActivated(int row)
 
     function startEdit() {
         if (!locked)
@@ -272,7 +277,7 @@ Pane {
                     x: 14
                     y: 0
                     width: parent.width - 28
-                    sourceComponent: card.editing ? editorComponent : card.language === "YAML" && card.headerTitle.length > 0 ? yamlComponent : card.language === "Markdown" ? markdownComponent : codeComponent
+                    sourceComponent: card.editing ? editorComponent : card.language === "YAML" && card.headerTitle.length > 0 ? yamlComponent : card.isToc ? tocComponent : card.language === "Markdown" ? markdownComponent : codeComponent
                 }
             }
 
@@ -420,6 +425,55 @@ Pane {
                 Layout.fillWidth: true
                 visible: card.headerAuthor.length > 0
                 text: qsTr("Author: %1").arg(card.headerAuthor)
+                color: Theme.textSecondary
+            }
+            TapHandler {
+                onDoubleTapped: card.startEdit()
+            }
+        }
+    }
+
+    Component {
+        id: tocComponent
+
+        ColumnLayout {
+            spacing: 4
+
+            Label {
+                Layout.fillWidth: true
+                text: qsTr("Table of contents")
+                wrapMode: Text.Wrap
+                font.pixelSize: 18
+                font.weight: Font.Medium
+                color: Theme.textPrimary
+            }
+            Repeater {
+                model: card.tableOfContents
+
+                Label {
+                    id: tocEntry
+                    required property var modelData
+                    Layout.fillWidth: true
+                    leftPadding: (modelData.level - 1) * 16
+                    text: modelData.title
+                    wrapMode: Text.Wrap
+                    font.bold: modelData.level === 1
+                    font.underline: entryHover.hovered
+                    color: entryHover.hovered ? Material.accentColor : Theme.textPrimary
+                    HoverHandler {
+                        id: entryHover
+                        cursorShape: Qt.PointingHandCursor
+                    }
+                    TapHandler {
+                        onTapped: card.tocEntryActivated(tocEntry.modelData.row)
+                    }
+                }
+            }
+            Label {
+                Layout.fillWidth: true
+                visible: card.tableOfContents.length === 0
+                text: qsTr("No headings (levels 1–3) in this document.")
+                wrapMode: Text.Wrap
                 color: Theme.textSecondary
             }
             TapHandler {

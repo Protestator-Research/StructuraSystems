@@ -23,7 +23,9 @@ namespace StructuraSystems::Client {
     public:
 
         MarkdownParser() = default;
-
+        ~MarkdownParser();
+        MarkdownParser(const MarkdownParser&) = delete;
+        MarkdownParser& operator=(const MarkdownParser&) = delete;
 
         void parseMarkdownFile(QString path);
         void parseMarkdown(QString markdown);
@@ -31,13 +33,19 @@ namespace StructuraSystems::Client {
         std::vector<std::shared_ptr<KerML::Entities::Element>> getElementsOfProject();
         QString getHTMLOfMarkdown();
         QString getMarkdownString();
+        void setParseYamlFrontMatter(bool parse);
+        QString getYamlFrontMatter();
 
     private:
         std::string MarkdownString;
-        cmark_node* MarkdownDocument;
+        bool ParseYamlFrontMatter = true;
+        std::string YamlFrontMatter;
+        cmark_node* FrontMatterNode = nullptr;
+        cmark_node* MarkdownDocument = nullptr;
 
         std::shared_ptr<KerML::Entities::Element> createElement(std::string language, std::string body);
         void parseInternally();
+        bool extractYamlFrontMatter(std::string& markdownBody);
     };
 }
 

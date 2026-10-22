@@ -26,6 +26,7 @@ namespace StructuraSystems::Client {
     class CommunicationService;
     class DigitalTwinProjectModel;
     class DocumentModel;
+    class LocalProjectTreeModel;
     class OpenDocumentsModel;
     class ProblemListModel;
     class ProjectItemModel;
@@ -44,6 +45,7 @@ namespace StructuraSystems::Client {
         Q_MOC_INCLUDE("CommitHistoryModel.h")
         Q_MOC_INCLUDE("DigitalTwinProjectModel.h")
         Q_MOC_INCLUDE("DocumentModel.h")
+        Q_MOC_INCLUDE("LocalProjectTreeModel.h")
         Q_MOC_INCLUDE("OpenDocumentsModel.h")
         Q_MOC_INCLUDE("ProblemListModel.h")
         Q_MOC_INCLUDE("SettingsController.h")
@@ -52,6 +54,7 @@ namespace StructuraSystems::Client {
         Q_PROPERTY(bool busy READ busy NOTIFY busyChanged)
         Q_PROPERTY(QString statusText READ statusText NOTIFY statusTextChanged)
         Q_PROPERTY(StructuraSystems::Client::ProjectItemModel *localProjects READ localProjects CONSTANT)
+        Q_PROPERTY(StructuraSystems::Client::LocalProjectTreeModel *localProjectTree READ localProjectTree CONSTANT)
         Q_PROPERTY(StructuraSystems::Client::ProjectItemModel *onlineProjects READ onlineProjects CONSTANT)
         Q_PROPERTY(StructuraSystems::Client::DigitalTwinProjectModel *digitalTwinProjects READ digitalTwinProjects CONSTANT)
         Q_PROPERTY(bool twinsLoading READ twinsLoading NOTIFY twinsLoadingChanged)
@@ -71,6 +74,7 @@ namespace StructuraSystems::Client {
         [[nodiscard]] bool busy() const;
         [[nodiscard]] QString statusText() const;
         [[nodiscard]] ProjectItemModel *localProjects() const;
+        [[nodiscard]] LocalProjectTreeModel *localProjectTree() const;
         [[nodiscard]] ProjectItemModel *onlineProjects() const;
         [[nodiscard]] DigitalTwinProjectModel *digitalTwinProjects() const;
         /** True while the digital twins are loaded. Independent of busy, the twins are loaded in the background. */
@@ -196,7 +200,12 @@ namespace StructuraSystems::Client {
         void emitNotify(int level, const QString &message, const QString &details = QString());
 
         void loadFolder(const QString &folder);
-        void loadFile(const QString &filePath, const QString &folder);
+        /**
+         * Loads a file as local project.
+         * @param name Project name, the path relative to folder (for example "sub/model.sysml").
+         * @param folder Folder the name is relative to.
+         */
+        void loadFile(const QString &filePath, const QString &folder, const QString &name);
         void openLocalProjectByName(const QString &name);
         void openDocument(const QString &key, DocumentModel *document);
         void updateCurrentDocument(int newIndex);
@@ -214,6 +223,7 @@ namespace StructuraSystems::Client {
         SettingsController *Settings;
         std::shared_ptr<CommunicationService> BackendConnection;
         ProjectItemModel *LocalProjects;
+        LocalProjectTreeModel *LocalProjectTree;
         ProjectItemModel *OnlineProjects;
         DigitalTwinProjectModel *DigitalTwinProjects;
         OpenDocumentsModel *Documents;

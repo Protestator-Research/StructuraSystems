@@ -11,6 +11,7 @@
 #include <QList>
 #include <QString>
 #include <QStringList>
+#include <QVariantList>
 #include <QtQml/qqmlregistration.h>
 
 #include "ElementTreeModel.h"
@@ -66,6 +67,8 @@ namespace StructuraSystems::Client {
         Q_PROPERTY(QString branchName READ branchName NOTIFY branchChanged)
         /** True while an older commit, not the head of the branch, is loaded. The content is read-only then. */
         Q_PROPERTY(bool detached READ detached NOTIFY detachedChanged)
+        /** Headings (level 1-3) of all Markdown rows as list of {level, title, row}, used by the [toc] element. */
+        Q_PROPERTY(QVariantList tableOfContents READ tableOfContents NOTIFY tableOfContentsChanged)
     public:
         enum Roles {
             BodyRole = Qt::UserRole + 1,
@@ -108,6 +111,7 @@ namespace StructuraSystems::Client {
         [[nodiscard]] QString branchId() const;
         [[nodiscard]] QString branchName() const;
         [[nodiscard]] bool detached() const;
+        [[nodiscard]] QVariantList tableOfContents() const;
 
         Q_INVOKABLE void setBody(int row, const QString &body);
         /** @param language one of "Markdown", "YAML", "SysMLv2", "KerML" */
@@ -176,6 +180,7 @@ namespace StructuraSystems::Client {
         void identityChanged();
         void branchChanged();
         void detachedChanged();
+        void tableOfContentsChanged();
         /** Emitted whenever the content of a row was changed by the user. */
         void edited();
         /** Emitted after a parse result was applied. */
@@ -194,6 +199,7 @@ namespace StructuraSystems::Client {
         void loadRows();
         void updateHeader(Row &row) const;
         void syncElementOrder();
+        void rebuildTableOfContents();
         void setModified(bool modified);
         void markEdited(int row, const QList<int> &roles);
         [[nodiscard]] bool validRow(int row) const;
@@ -210,6 +216,7 @@ namespace StructuraSystems::Client {
         QString BranchId;
         QString BranchName;
         bool Detached = false;
+        QVariantList TableOfContents;
     };
 }
 

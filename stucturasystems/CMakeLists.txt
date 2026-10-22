@@ -84,6 +84,7 @@ qt_add_qml_module(StructuraSystems
             qml/components/NavRailItem.qml
             qml/components/ConfirmDeleteDialog.qml
             qml/components/ProjectList.qml
+            qml/components/ProjectTree.qml
             qml/components/SegmentedControl.qml
             qml/components/Snackbar.qml
             qml/views/DetachedBanner.qml
@@ -126,6 +127,8 @@ qt_add_qml_module(StructuraSystems
             src/ViewModels/ProblemListModel.h
             src/ViewModels/ProjectFilterModel.cpp
             src/ViewModels/ProjectFilterModel.h
+            src/ViewModels/LocalProjectTreeModel.cpp
+            src/ViewModels/LocalProjectTreeModel.h
             src/ViewModels/SettingsController.cpp
             src/ViewModels/SettingsController.h
             src/Models/ItemModels/ProjectItemModel.cpp

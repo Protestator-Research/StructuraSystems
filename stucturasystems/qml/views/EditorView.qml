@@ -139,6 +139,7 @@ Item {
                 problemCount: delegate.problemCount
                 elementTree: delegate.elementTree
                 elementCount: delegate.elementCount
+                tableOfContents: view.document ? view.document.tableOfContents : []
                 first: delegate.index === 0
                 last: delegate.index === list.count - 1
                 locked: view.locked
@@ -158,6 +159,7 @@ Item {
                 }
                 onInsertRequested: (targetRow, language) => view.insertAndEdit(targetRow, language)
                 onDeleteRequested: deleteDialog.openFor(delegate.index)
+                onTocEntryActivated: row => view.scrollToRow(row)
             }
 
             InsertDivider {

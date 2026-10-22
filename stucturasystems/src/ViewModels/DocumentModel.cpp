@@ -11,6 +11,7 @@
 
 #include <QFile>
 #include <QRegularExpression>
+#include <QVariantMap>
 
 #include <boost/uuid/uuid.hpp>
 #include <boost/uuid/uuid_io.hpp>
@@ -31,6 +32,7 @@
 #include <sysmlv2/service/implementation/ElementNavigationService.h>
 
 #include "../Models/Parser/StructuraSystemsParser.h"
+#include "../Models/Parser/Markdown/CommonmarkParser/cmark.h"
 
 namespace StructuraSystems::Client {
     namespace {
@@ -50,6 +52,38 @@ namespace StructuraSystems::Client {
             if (value.IsDefined() && value.IsScalar())
                 return QString::fromStdString(value.as<std::string>());
             return {};
+        }
+
+        /** True for an element whose body is just the [toc] marker. */
+        bool isTocMarker(const QString &body) {
+            return body.trimmed().toLower() == QStringLiteral("[toc]");
+        }
+
+        /** Concatenated text and code literals below a heading, line breaks become spaces. */
+        QString headingTitle(cmark_node *heading) {
+            QString title;
+            cmark_iter *iter = cmark_iter_new(heading);
+            cmark_event_type event;
+            while ((event = cmark_iter_next(iter)) != CMARK_EVENT_DONE) {
+                if (event != CMARK_EVENT_ENTER)
+                    continue;
+                cmark_node *node = cmark_iter_get_node(iter);
+                switch (cmark_node_get_type(node)) {
+                    case CMARK_NODE_TEXT:
+                    case CMARK_NODE_CODE:
+                        if (const char *literal = cmark_node_get_literal(node))
+                            title += QString::fromUtf8(literal);
+                        break;
+                    case CMARK_NODE_SOFTBREAK:
+                    case CMARK_NODE_LINEBREAK:
+                        title += QLatin1Char(' ');
+                        break;
+                    default:
+                        break;
+                }
+            }
+            cmark_iter_free(iter);
+            return title.trimmed();
         }
 
         bool fileFormatIsWritable(const QString &path) {
@@ -100,6 +134,45 @@ namespace StructuraSystems::Client {
             updateHeader(row);
             Rows.push_back(std::move(row));
         }
+        rebuildTableOfContents();
+    }
+
+    void DocumentModel::rebuildTableOfContents() {
+        QVariantList entries;
+        for (size_t i = 0; i < Rows.size(); i++) {
+            if (normalizeLanguage(QString::fromStdString(Rows[i].Element->language())) != "Markdown")
+                continue;
+            const auto &body = Rows[i].Element->body();
+            if (isTocMarker(QString::fromStdString(body)))
+                continue;
+
+            cmark_node *document = cmark_parse_document(body.c_str(), body.size(), 0);
+            if (document == nullptr)
+                continue;
+            cmark_iter *iter = cmark_iter_new(document);
+            cmark_event_type event;
+            while ((event = cmark_iter_next(iter)) != CMARK_EVENT_DONE) {
+                if (event != CMARK_EVENT_ENTER)
+                    continue;
+                cmark_node *node = cmark_iter_get_node(iter);
+                if (cmark_node_get_type(node) != CMARK_NODE_HEADING || cmark_node_get_heading_level(node) > 3)
+                    continue;
+                entries.append(QVariantMap{{"level", cmark_node_get_heading_level(node)},
+                                           {"title", headingTitle(node)},
+                                           {"row", int(i)}});
+            }
+            cmark_iter_free(iter);
+            cmark_node_free(document);
+        }
+
+        if (entries == TableOfContents)
+            return;
+        TableOfContents = std::move(entries);
+        emit tableOfContentsChanged();
+    }
+
+    QVariantList DocumentModel::tableOfContents() const {
+        return TableOfContents;
     }
 
     void DocumentModel::updateHeader(Row &row) const {
@@ -323,6 +396,7 @@ namespace StructuraSystems::Client {
         entry.Element->setBody(newBody);
         updateHeader(entry);
         markEdited(row, {BodyRole, HeaderTitleRole, HeaderAuthorRole});
+        rebuildTableOfContents();
     }
 
     void DocumentModel::setLanguage(int row, const QString &language) {
@@ -335,6 +409,7 @@ namespace StructuraSystems::Client {
         entry.Element->setLanguage(storedLanguage(normalized).toStdString());
         updateHeader(entry);
         markEdited(row, {LanguageRole, HeaderTitleRole, HeaderAuthorRole});
+        rebuildTableOfContents();
     }
 
     void DocumentModel::syncElementOrder() {
@@ -362,6 +437,7 @@ namespace StructuraSystems::Client {
         endMoveRows();
 
         syncElementOrder();
+        rebuildTableOfContents();
         setModified(true);
         emit edited();
     }
@@ -392,6 +468,7 @@ namespace StructuraSystems::Client {
         Rows.insert(Rows.begin() + row, std::move(entry));
         endInsertRows();
 
+        rebuildTableOfContents();
         emit countChanged();
         setModified(true);
         emit edited();
@@ -408,6 +485,7 @@ namespace StructuraSystems::Client {
         Elements.erase(std::remove(Elements.begin(), Elements.end(), element), Elements.end());
         endRemoveRows();
 
+        rebuildTableOfContents();
         emit countChanged();
         setModified(true);
         emit edited();

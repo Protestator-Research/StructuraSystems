@@ -4,6 +4,7 @@
 
 #include "AppController.h"
 
+#include <algorithm>
 #include <exception>
 #include <stdexcept>
 #include <chrono>
@@ -11,6 +12,7 @@
 #include <utility>
 
 #include <QDir>
+#include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
 #include <QFuture>
@@ -34,6 +36,7 @@
 #include "CommitHistoryModel.h"
 #include "DigitalTwinProjectModel.h"
 #include "DocumentModel.h"
+#include "LocalProjectTreeModel.h"
 #include "OpenDocumentsModel.h"
 #include "ProblemListModel.h"
 #include "SettingsController.h"
@@ -135,6 +138,7 @@ namespace StructuraSystems::Client {
         QObject(parent),
         Settings(new SettingsController(this)),
         LocalProjects(new ProjectItemModel(this)),
+        LocalProjectTree(new LocalProjectTreeModel(LocalProjects, this)),
         OnlineProjects(new ProjectItemModel(this)),
         DigitalTwinProjects(new DigitalTwinProjectModel(this)),
         Documents(new OpenDocumentsModel(this)),
@@ -155,6 +159,7 @@ namespace StructuraSystems::Client {
     bool AppController::busy() const { return Busy; }
     QString AppController::statusText() const { return StatusText; }
     ProjectItemModel *AppController::localProjects() const { return LocalProjects; }
+    LocalProjectTreeModel *AppController::localProjectTree() const { return LocalProjectTree; }
     ProjectItemModel *AppController::onlineProjects() const { return OnlineProjects; }
     DigitalTwinProjectModel *AppController::digitalTwinProjects() const { return DigitalTwinProjects; }
     bool AppController::twinsLoading() const { return TwinsLoading; }
@@ -282,16 +287,45 @@ namespace StructuraSystems::Client {
         LocalProjects->clear();
 
         const QDir directory(folder);
-        const auto files = directory.entryList(PROJECT_FILE_FILTERS, QDir::Files, QDir::Name);
-        for (const auto &fileName : files)
-            loadFile(directory.absoluteFilePath(fileName), directory.absolutePath());
+        const auto root = directory.absolutePath();
+
+        // Recursive, symbolic links are not followed. Hidden folders (for example .git) are skipped.
+        QStringList files;
+        QDirIterator iterator(root, PROJECT_FILE_FILTERS, QDir::Files, QDirIterator::Subdirectories);
+        while (iterator.hasNext()) {
+            const auto relative = directory.relativeFilePath(iterator.next());
+            const auto segments = relative.split('/');
+            const bool hidden = std::any_of(segments.begin(), segments.end() - 1,
+                                            [](const QString &segment) { return segment.startsWith('.'); });
+            if (!hidden)
+                files.append(relative);
+        }
+
+        // Within each folder, subfolders come before files, each sorted alphabetically.
+        std::sort(files.begin(), files.end(), [](const QString &left, const QString &right) {
+            const auto leftParts = left.split('/');
+            const auto rightParts = right.split('/');
+            const auto common = std::min(leftParts.size(), rightParts.size());
+            for (qsizetype i = 0; i < common; ++i) {
+                if (leftParts[i] == rightParts[i])
+                    continue;
+                const bool leftIsFolder = i < leftParts.size() - 1;
+                const bool rightIsFolder = i < rightParts.size() - 1;
+                if (leftIsFolder != rightIsFolder)
+                    return leftIsFolder;
+                return leftParts[i].compare(rightParts[i], Qt::CaseInsensitive) < 0;
+            }
+            return leftParts.size() < rightParts.size();
+        });
+
+        for (const auto &relative : files)
+            loadFile(directory.absoluteFilePath(relative), root, relative);
 
         setStatusText(tr("Opened %1 (%2 projects)").arg(folder).arg(LocalProjects->count()));
     }
 
-    void AppController::loadFile(const QString &filePath, const QString &folder) {
+    void AppController::loadFile(const QString &filePath, const QString &folder, const QString &name) {
         try {
-            const auto name = filePath.split("/").last();
             const auto project = LocalProjects->createProject(name.toStdString(), "Created from Filesystem");
 
             StructuraSystemsParser parser;
@@ -322,7 +356,7 @@ namespace StructuraSystems::Client {
                     known = true;
 
             if (!known)
-                loadFile(info.absoluteFilePath(), info.absolutePath());
+                loadFile(info.absoluteFilePath(), info.absolutePath(), name);
             openLocalProjectByName(name);
         }
     }
