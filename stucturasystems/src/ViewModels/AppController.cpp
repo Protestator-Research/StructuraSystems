@@ -714,6 +714,11 @@ namespace StructuraSystems::Client {
         }
         const auto username = Settings->username().toStdString();
         const auto password = Settings->password().toStdString();
+        if (Settings->passwordLoading()) {
+            // Another call is still waiting for the keychain, the password read above is not the real one.
+            emitNotify(2, tr("The password is still being read from the keychain. Please try again in a moment."));
+            return;
+        }
 
         runAsync<ConnectResult>(tr("Connecting to backend"),
             [serverPath, username, password]() {

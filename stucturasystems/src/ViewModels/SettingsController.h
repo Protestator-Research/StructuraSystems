@@ -26,6 +26,12 @@ namespace StructuraSystems::Client {
         Q_PROPERTY(QString serverPath READ serverPath WRITE setServerPath NOTIFY serverPathChanged)
         Q_PROPERTY(QString username READ username WRITE setUsername NOTIFY usernameChanged)
         Q_PROPERTY(QString password READ password WRITE setPassword NOTIFY passwordChanged)
+        /** If false the password is not stored in the keychain and only kept in memory. */
+        Q_PROPERTY(bool rememberPassword READ rememberPassword WRITE setRememberPassword NOTIFY rememberPasswordChanged)
+        /** true while the password is read from the keychain; saving and connecting must wait for it. */
+        Q_PROPERTY(bool passwordLoading READ passwordLoading NOTIFY passwordLoadingChanged)
+        /** false if the OS keychain could not be used; updated after saving. */
+        Q_PROPERTY(bool keychainAvailable READ keychainAvailable NOTIFY keychainAvailableChanged)
         /** 0 = follow system, 1 = light, 2 = dark */
         Q_PROPERTY(int themeMode READ themeMode WRITE setThemeMode NOTIFY themeModeChanged)
     public:
@@ -47,6 +53,13 @@ namespace StructuraSystems::Client {
         [[nodiscard]] QString password() const;
         void setPassword(const QString &password);
 
+        [[nodiscard]] bool rememberPassword() const;
+        void setRememberPassword(bool rememberPassword);
+
+        [[nodiscard]] bool keychainAvailable() const;
+
+        [[nodiscard]] bool passwordLoading() const;
+
         [[nodiscard]] int themeMode() const;
         void setThemeMode(int themeMode);
 
@@ -61,6 +74,9 @@ namespace StructuraSystems::Client {
         void serverPathChanged();
         void usernameChanged();
         void passwordChanged();
+        void rememberPasswordChanged();
+        void keychainAvailableChanged();
+        void passwordLoadingChanged();
         void themeModeChanged();
         /** Emitted after save() persisted the settings. */
         void saved();

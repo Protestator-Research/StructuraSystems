@@ -53,6 +53,8 @@ set(SOURCES
         ../resources/sysml.qrc
         src/Models/SettingsModel.cpp
         src/Models/SettingsModel.h
+        src/Services/CredentialStore.h
+        src/Services/CredentialStore.cpp
         src/Services/BECommunicationService.h
         src/Services/BECommunicationService.cpp
         src/Services/entities/DigitalTwin.h
@@ -151,7 +153,8 @@ target_link_libraries(StructuraSystems PUBLIC
         Qt6::Concurrent
         md4c::md4c
         sysmllib::sysmllib
-        yaml-cpp::yaml-cpp)
+        yaml-cpp::yaml-cpp
+        Qt6Keychain::Qt6Keychain)
 
 if (!UNIX)
 set_target_properties(StructuraSystems PROPERTIES
