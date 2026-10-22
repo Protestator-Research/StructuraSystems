@@ -51,6 +51,7 @@ Notes:
 
 - On Linux the recipe builds Qt (6.11) from source with `qtdeclarative` and `qtshadertools`, which the Qt Quick UI needs. **The first build takes a long time**; later builds use the Conan cache.
 - The generated environment (`source build/Debug/generators/conanrun.sh`) is required for configuring, building and running: the Qt host tools and the app are linked against shared Conan libraries (e.g. ICU).
+- The password is stored in the OS keychain via [QtKeychain](https://github.com/frankosterfeld/qtkeychain) (fetched by CMake at configure time, so the first configure needs network access). It uses the Credential Manager on Windows and the Keychain on macOS. **On Linux `libsecret-1-dev` (e.g. `sudo apt install libsecret-1-dev`) and D-Bus are required** (the Conan recipe builds Qt with `with_dbus`, which pulls in the D-Bus library), and a running Secret Service (GNOME Keyring, KWallet) at runtime.
 - The sources are compiled with `-Wall -Wextra -Wpedantic -Werror`.
 
 ## Run
@@ -60,7 +61,7 @@ source build/Debug/generators/conanrun.sh
 ./build/Debug/out/StructuraSystems
 ```
 
-On first start the working directory defaults to your documents folder; change it, the server address and the theme in the settings. Settings are stored with `QSettings` (organisation "Protestator-Research", application "Structura Systems"), the working directory below `[WORKSPACE]`, window state below `[Window]`.
+On first start the working directory defaults to your documents folder; change it, the server address and the theme in the settings. Settings are stored with `QSettings` (organisation "Protestator-Research", application "Structura Systems"), the working directory below `[WORKSPACE]`, window state below `[Window]`. Settings of the former organisation "Working Group Cyber Physical Systems" are copied automatically on the first start (existing values are kept) and then removed from the old location; a stored plaintext password is moved to the OS keychain when it is first needed.
 
 ## Project structure
 

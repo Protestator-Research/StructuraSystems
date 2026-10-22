@@ -9,6 +9,8 @@
 #include <QCoreApplication>
 #include <QUrl>
 
+#include "Models/SettingsMigration.h"
+
 int main(int argc, char *argv[]) {
     // Must be set before the application object exists, otherwise Qt Quick Controls ignores it.
     if (!qEnvironmentVariableIsSet("QT_QUICK_CONTROLS_MATERIAL_VARIANT"))
@@ -19,7 +21,10 @@ int main(int argc, char *argv[]) {
     QCoreApplication::setApplicationName("Structura Systems");
     QCoreApplication::setApplicationVersion("1.0");
     QCoreApplication::setOrganizationName("Protestator-Research");
-    QCoreApplication::setOrganizationDomain("https://www.protestator-research.com");
+    QCoreApplication::setOrganizationDomain("https://protestator-research.com");
+
+    // Takes over the settings of the former organization before the first QSettings is created.
+    StructuraSystems::Client::migrateLegacyOrganizationSettings();
 
     QGuiApplication::setWindowIcon(QIcon(":/icons/sience/icons/4847335-science-and-technology/png/030-chip.png"));
 

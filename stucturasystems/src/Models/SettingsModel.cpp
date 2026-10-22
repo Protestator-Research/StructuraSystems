@@ -154,7 +154,8 @@ namespace StructuraSystems::Client {
                 if (hasLegacy && !legacyPassword.empty()) {
                     Password = legacyPassword;
                     PasswordKnown = true;
-                    PasswordDirty = true; // Written to the keychain with the next save.
+                    // Not dirty: the keychain may hold a newer entry that is only unreadable right now, a stale
+                    // plaintext value must not overwrite it with the next save.
                 } else {
                     PasswordKnown = false;
                 }

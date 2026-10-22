@@ -53,6 +53,8 @@ set(SOURCES
         ../resources/sysml.qrc
         src/Models/SettingsModel.cpp
         src/Models/SettingsModel.h
+        src/Models/SettingsMigration.cpp
+        src/Models/SettingsMigration.h
         src/Services/CredentialStore.h
         src/Services/CredentialStore.cpp
         src/Services/BECommunicationService.h
