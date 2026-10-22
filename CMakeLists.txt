@@ -14,6 +14,37 @@ if(WIN32)
 endif(WIN32)
 
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Qml Quick QuickControls2 Concurrent)
+
+# QtKeychain stores the password in the OS keychain (Credential Manager, macOS Keychain, libsecret on Linux).
+# It is always built as a static library and linked into the application, so no extra DLL has to be deployed.
+include(FetchContent)
+set(BUILD_WITH_QT6 ON)
+set(BUILD_TRANSLATIONS OFF)
+set(BUILD_TEST_APPLICATION OFF)
+set(QTKEYCHAIN_BUILD_SHARED_BACKUP ${BUILD_SHARED_LIBS})
+set(BUILD_SHARED_LIBS OFF)
+if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.28)
+    # EXCLUDE_FROM_ALL also keeps the QtKeychain install rules out of our install step.
+    # SYSTEM (3.25+) silences warnings from its headers.
+    FetchContent_Declare(qtkeychain
+            GIT_REPOSITORY https://github.com/frankosterfeld/qtkeychain.git
+            GIT_TAG 0.15.0
+            GIT_SHALLOW TRUE
+            SYSTEM
+            EXCLUDE_FROM_ALL)
+else()
+    FetchContent_Declare(qtkeychain
+            GIT_REPOSITORY https://github.com/frankosterfeld/qtkeychain.git
+            GIT_TAG 0.15.0
+            GIT_SHALLOW TRUE)
+endif()
+FetchContent_MakeAvailable(qtkeychain)
+set(BUILD_SHARED_LIBS ${QTKEYCHAIN_BUILD_SHARED_BACKUP})
+unset(QTKEYCHAIN_BUILD_SHARED_BACKUP)
+if(NOT TARGET Qt6Keychain::Qt6Keychain)
+    add_library(Qt6Keychain::Qt6Keychain ALIAS qt6keychain)
+endif()
+
 find_package(md4c REQUIRED)
 find_package(sysmllib REQUIRED)
 find_package(yaml-cpp REQUIRED)
