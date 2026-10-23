@@ -27,10 +27,12 @@ class CppStructuraSystemsRecipe(ConanFile):
     exports_sources = "CMakeLists.txt", "structurasystems/*"
 
     def requirements(self):
+        self.requires("glib/2.85.3", override=True)
         self.requires("boost/[>=1.86.0 <2]")
         self.requires("libcurl/[>=8.4.0 <9]")
         self.requires("nlohmann_json/[>=3.11.3 <3.13]")
         self.requires("md4c/0.5.2")
+        self.requires("pcre2/10.44")
         self.requires("sysmllib/2610.1")
         self.requires("yaml-cpp/0.8.0")
         self.requires("openssl/3.6.3")
@@ -74,6 +76,11 @@ class CppStructuraSystemsRecipe(ConanFile):
             self.options["qt/*"].qtshadertools = True
             self.options["qt/*"].with_pq = False
             self.options["qt/*"].with_odbc = False
+            # QtKeychain needs Qt DBus on Linux (Secret Service / KWallet backend).
+            self.options["qt/*"].with_dbus = True
+            # QtKeychain's libsecret backend reports its results through GLib callbacks, which are only
+            # dispatched when Qt runs the GLib event loop.
+            self.options["qt/*"].with_glib = True
   
 
     
@@ -96,7 +103,7 @@ class CppStructuraSystemsRecipe(ConanFile):
 
     def build_requirements(self):
         if self.settings.os == "Linux":
-            self.tool_requires("qt/6.11.1", options={"qtdeclarative": True, "qtshadertools": True, "with_pq": False, "with_odbc": False})
+            self.tool_requires("qt/6.11.1", options={"qtdeclarative": True, "qtshadertools": True, "with_pq": False, "with_odbc": False, "with_dbus": True})
         
         self.tool_requires("cmake/[>=3.30.0 <5]")
 
