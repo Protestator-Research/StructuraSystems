@@ -535,6 +535,7 @@ Pane {
                 SysMLHighlighter {
                     textDocument: Theme.isCode(card.language) && card.body.length > 0 ? codeText.textDocument : null
                     darkTheme: Theme.dark
+                    language: card.language
                 }
                 TapHandler {
                     onDoubleTapped: card.startEdit()
@@ -590,6 +591,7 @@ Pane {
                     SysMLHighlighter {
                         textDocument: Theme.isCode(languageBox.currentText) ? area.textDocument : null
                         darkTheme: Theme.dark
+                        language: languageBox.currentText
                     }
 
                     Keys.onPressed: event => {
