@@ -85,6 +85,7 @@ Pane {
                 isOpenFunction: row => AppController.isLocalProjectOpen(row)
                 onProjectActivated: row => AppController.openLocalProject(row)
                 onDeleteRequested: (row, name) => deleteDialog.openFor(row, name)
+                onLevelRequested: (path, level) => levelDialog.openFor(path, level)
             }
 
             Label {
@@ -118,6 +119,8 @@ Pane {
             }
         }
     }
+
+    LibraryLevelDialog { id: levelDialog }
 
     ConfirmDeleteDialog {
         id: deleteDialog

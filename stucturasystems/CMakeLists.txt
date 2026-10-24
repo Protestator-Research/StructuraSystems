@@ -51,6 +51,14 @@ set(SOURCES
         src/Models/Parser/Markdown/CommonmarkParser/xml.c
         resources/Resources.qrc
         ../resources/sysml.qrc
+        src/Models/Libraries/CodeScanner.cpp
+        src/Models/Libraries/CodeScanner.h
+        src/Models/Libraries/DocumentWorkspace.cpp
+        src/Models/Libraries/DocumentWorkspace.h
+        src/Models/Libraries/LibraryWorkspace.cpp
+        src/Models/Libraries/LibraryWorkspace.h
+        src/Models/Libraries/WorkspaceConfig.cpp
+        src/Models/Libraries/WorkspaceConfig.h
         src/Models/SettingsModel.cpp
         src/Models/SettingsModel.h
         src/Models/SettingsMigration.cpp
@@ -82,6 +90,7 @@ qt_add_qml_module(StructuraSystems
             qml/components/EmptyState.qml
             qml/components/InsertDivider.qml
             qml/components/LanguageChip.qml
+            qml/components/LibrarySettings.qml
             qml/components/LineNumberGutter.qml
             qml/components/LanguageMenu.qml
             qml/components/NavigationRail.qml
@@ -106,6 +115,7 @@ qt_add_qml_module(StructuraSystems
             qml/dialogs/DetailsDialog.qml
             qml/dialogs/DiscardChangesDialog.qml
             qml/dialogs/DigitalTwinWizard.qml
+            qml/dialogs/LibraryLevelDialog.qml
             qml/dialogs/NewBranchDialog.qml
             qml/dialogs/NewProjectDialog.qml
             qml/dialogs/QuitDialog.qml
@@ -131,6 +141,8 @@ qt_add_qml_module(StructuraSystems
             src/ViewModels/ProblemListModel.h
             src/ViewModels/ProjectFilterModel.cpp
             src/ViewModels/ProjectFilterModel.h
+            src/ViewModels/LibraryController.cpp
+            src/ViewModels/LibraryController.h
             src/ViewModels/LocalProjectTreeModel.cpp
             src/ViewModels/LocalProjectTreeModel.h
             src/ViewModels/SettingsController.cpp

@@ -29,6 +29,9 @@ namespace KerML::Entities {
 }
 
 namespace StructuraSystems::Client {
+    class DocumentWorkspace;
+    class LibraryWorkspace;
+
     /**
      * Input of one parser run for a single textual element. Plain data, so it can be handed to a worker thread.
      */
@@ -44,6 +47,11 @@ namespace StructuraSystems::Client {
     struct ParseResult {
         QList<Problem> Problems;
         QHash<int, QList<ElementTreeNode>> ElementTrees;   ///< Root namespace and its owned elements per ParseInput::Row, only for error-free rows
+        /**
+         * The elements of the parsed texts. They are only counted and kept while the document is open; the model of a closed
+         * document is taken apart when its workspace is recycled, so it must not be walked after that. (The element trees
+         * above are plain data, made while the workspace was locked.)
+         */
         std::vector<std::shared_ptr<KerML::Entities::Element>> InstanceElements;
     };
 
@@ -137,8 +145,29 @@ namespace StructuraSystems::Client {
 
         /** Collects the textual SysML/KerML rows. Must be called on the GUI thread. */
         [[nodiscard]] QList<ParseInput> parseInputs() const;
-        /** Pure function, thread safe. Parses all inputs, parser exceptions are converted into problems. */
-        static ParseResult runParser(const QList<ParseInput> &inputs, const QString &documentTitle);
+        /**
+         * Thread safe. Parses all inputs, parser exceptions are converted into problems. The names are resolved against the
+         * standard library and, if the inputs refer to packages that are not defined in them, against the libraries the
+         * workspace finds in the opened folder (see DocumentWorkspace).
+         * @param workspace the workspace of the document (see workspace()), which keeps the loaded libraries between the runs.
+         *        Null: a workspace that is only used for this run.
+         */
+        static ParseResult runParser(const QList<ParseInput> &inputs, const QString &documentTitle,
+                                     std::shared_ptr<DocumentWorkspace> workspace = nullptr);
+        /** The name resolution state of this document. Pass it to runParser. */
+        [[nodiscard]] std::shared_ptr<DocumentWorkspace> workspace();
+        /**
+         * Lets the document use the local libraries of the opened folder.
+         * @param libraries index and levels of the libraries, null for none.
+         * @param ownFile path of the file of the document relative to the opened folder, empty if the document is not a file of
+         *        that folder. The file is not loaded as a library of the document itself.
+         */
+        void attachLibraries(std::shared_ptr<LibraryWorkspace> libraries, const QString &ownFile = QString());
+        [[nodiscard]] bool hasWorkspace() const;
+        /** Uses a workspace that was prepared (or recycled) elsewhere instead of creating one on the first parser run. */
+        void adoptWorkspace(std::shared_ptr<DocumentWorkspace> workspace);
+        /** Hands the workspace over (to be recycled when the document is closed). The document creates a new one if it is parsed again. */
+        [[nodiscard]] std::shared_ptr<DocumentWorkspace> releaseWorkspace();
         /** Stores the result of a parser run and updates the per row problem counts. GUI thread only. */
         void applyParseResult(ParseResult result);
         /** Synchronous convenience: parseInputs + runParser + applyParseResult. @return the problems found. */
@@ -208,6 +237,9 @@ namespace StructuraSystems::Client {
         std::shared_ptr<SysMLv2::REST::Commit> Commit;
         std::vector<std::shared_ptr<KerML::Entities::Element>> Elements;
         std::vector<Row> Rows;
+        std::shared_ptr<DocumentWorkspace> Workspace;
+        std::shared_ptr<LibraryWorkspace> Libraries;
+        QString OwnFile;
         std::vector<std::shared_ptr<KerML::Entities::Element>> InstanceElements;
         QList<Problem> ParserProblems;
         bool Modified = false;

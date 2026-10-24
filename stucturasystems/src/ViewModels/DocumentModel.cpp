@@ -31,6 +31,8 @@
 #include <sysmlv2/rest/entities/DataVersion.h>
 #include <sysmlv2/service/implementation/ElementNavigationService.h>
 
+#include "../Models/Libraries/DocumentWorkspace.h"
+#include "../Models/Libraries/LibraryWorkspace.h"
 #include "../Models/Parser/StructuraSystemsParser.h"
 #include "../Models/Parser/Markdown/CommonmarkParser/cmark.h"
 
@@ -630,43 +632,78 @@ namespace StructuraSystems::Client {
         }
     }
 
-    ParseResult DocumentModel::runParser(const QList<ParseInput> &inputs, const QString &documentTitle) {
+    ParseResult DocumentModel::runParser(const QList<ParseInput> &inputs, const QString &documentTitle,
+                                         std::shared_ptr<DocumentWorkspace> workspace) {
         ParseResult result;
-        for (const auto &input : inputs) {
-            try {
-                auto parsed = input.Language == "KerML"
-                              ? SysMLv2::Files::Parser::parseKerML(input.Body)
-                              : SysMLv2::Files::Parser::parseSysMLv2(input.Body);
+        if (workspace == nullptr)
+            workspace = std::make_shared<DocumentWorkspace>();
 
-                for (const auto &error : parsed.second) {
-                    Problem problem;
-                    problem.Message = QString::fromStdString(error->description());
-                    problem.Line = error->getLine();
-                    problem.Column = error->getColumn();
-                    problem.DocumentTitle = documentTitle;
-                    problem.Row = input.Row;
-                    problem.Severity = error->errorType() == SysMLv2::Files::ErrorType::WARNING ? 2 : 3;
-                    result.Problems.append(problem);
-                }
-                for (const auto &element : parsed.first)
+        std::vector<DocumentSource> sources;
+        for (const auto &input : inputs)
+            sources.push_back({input.Row, input.Language == "KerML", input.Body});
+
+        try {
+            // The element trees are made while the workspace is locked: afterwards another thread may recycle the workspace and
+            // take the model apart. Only plain data (and shared_ptrs, which are read on the GUI thread while the document is
+            // open) leave this function.
+            auto resolved = workspace->update(sources, documentTitle, [&result](const WorkspaceRow &row) {
+                for (const auto &element : row.Elements)
                     result.InstanceElements.push_back(element);
 
-                if (parsed.second.empty()) {
-                    const auto root = findRootElement(parsed.first);
+                if (!row.HasSyntaxErrors) {
+                    const std::shared_ptr<KerML::Entities::Element> root =
+                            row.Root != nullptr ? std::static_pointer_cast<KerML::Entities::Element>(row.Root) : findRootElement(row.Elements);
                     if (root != nullptr) {
                         std::unordered_set<const KerML::Entities::Element *> visited;
-                        appendElementTree(root, -1, visited, result.ElementTrees[input.Row]);
+                        appendElementTree(root, -1, visited, result.ElementTrees[row.Row]);
                     }
                 }
-            } catch (const std::exception &ex) {
+            });
+
+            for (const auto &diagnostic : std::as_const(resolved.Diagnostics)) {
                 Problem problem;
-                problem.Message = QString::fromUtf8(ex.what());
+                problem.Message = diagnostic.Message;
+                problem.Line = diagnostic.Line;
+                problem.Column = diagnostic.Column;
                 problem.DocumentTitle = documentTitle;
-                problem.Row = input.Row;
+                problem.Row = diagnostic.Row;
+                problem.Severity = diagnostic.Severity;
                 result.Problems.append(problem);
             }
+        } catch (const std::exception &ex) {
+            Problem problem;
+            problem.Message = QString::fromUtf8(ex.what());
+            problem.DocumentTitle = documentTitle;
+            result.Problems.append(problem);
         }
         return result;
+    }
+
+    std::shared_ptr<DocumentWorkspace> DocumentModel::workspace() {
+        if (Workspace == nullptr)
+            Workspace = std::make_shared<DocumentWorkspace>(Libraries, OwnFile);
+        return Workspace;
+    }
+
+    void DocumentModel::attachLibraries(std::shared_ptr<LibraryWorkspace> libraries, const QString &ownFile) {
+        Libraries = std::move(libraries);
+        OwnFile = ownFile;
+        if (Workspace != nullptr)
+            Workspace->setLibraries(Libraries, OwnFile);
+    }
+
+    bool DocumentModel::hasWorkspace() const {
+        return Workspace != nullptr;
+    }
+
+    void DocumentModel::adoptWorkspace(std::shared_ptr<DocumentWorkspace> workspace) {
+        Workspace = std::move(workspace);
+        if (Workspace != nullptr)
+            Workspace->setLibraries(Libraries, OwnFile);
+    }
+
+    std::shared_ptr<DocumentWorkspace> DocumentModel::releaseWorkspace() {
+        return std::exchange(Workspace, nullptr);
     }
 
     void DocumentModel::applyParseResult(ParseResult result) {
@@ -696,7 +733,7 @@ namespace StructuraSystems::Client {
     }
 
     QList<Problem> DocumentModel::parse() {
-        applyParseResult(runParser(parseInputs(), title()));
+        applyParseResult(runParser(parseInputs(), title(), workspace()));
         return ParserProblems;
     }
 

@@ -5,6 +5,7 @@
 #ifndef STRUCTURASYSTEMS_LOCALPROJECTTREEMODEL_H
 #define STRUCTURASYSTEMS_LOCALPROJECTTREEMODEL_H
 
+#include <functional>
 #include <memory>
 #include <vector>
 #include <QAbstractItemModel>
@@ -31,7 +32,9 @@ namespace StructuraSystems::Client {
             DescriptionRole,
             IsFolderRole,
             SourceRowRole,
-            PathRole
+            PathRole,
+            /** Level of the file as a library, -1 if it is no library (or not known yet). */
+            LibraryLevelRole
         };
         Q_ENUM(Roles)
 
@@ -51,6 +54,16 @@ namespace StructuraSystems::Client {
         /** Number of visible projects (folders are not counted). */
         [[nodiscard]] int count() const;
 
+        /**
+         * Sets the function that returns the library level of a project by its path (see LibraryLevelRole), -1 for no library.
+         * The function is called on the GUI thread and must not read any file.
+         */
+        void setLibraryLevelProvider(std::function<int(const QString &)> provider);
+
+    public slots:
+        /** Tells the views that the library levels may have changed. */
+        void refreshLibraryLevels();
+
     signals:
         void filterTextChanged();
         void countChanged();
@@ -67,6 +80,7 @@ namespace StructuraSystems::Client {
         };
 
         void rebuild();
+        void emitLibraryLevelChanged(const QModelIndex &parent);
         static void sortNode(Node &node);
         [[nodiscard]] Node *nodeAt(const QModelIndex &index) const;
 
@@ -74,6 +88,7 @@ namespace StructuraSystems::Client {
         std::unique_ptr<Node> Root;
         QString FilterText;
         int Count = 0;
+        std::function<int(const QString &)> LibraryLevel;
     };
 }
 

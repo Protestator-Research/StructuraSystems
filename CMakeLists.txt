@@ -4,7 +4,8 @@ project(StructuraSystems CXX C)
 
 include(CMakeDependentOption)
 
-option(RUN_TESTS "Build the tests" ON)
+# The tests are not part of the packaged build (conan create); turn them on for development: cmake -DRUN_TESTS=ON
+option(RUN_TESTS "Build the tests" OFF)
 
 if(APPLE)
     list(APPEND CMAKE_PREFIX_PATH "~/Qt/6.11.1/macos/")
@@ -37,6 +38,14 @@ if(STRUCTURA_QT_HOST_PATH)
 endif()
 
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Qml Quick QuickControls2 Concurrent)
+if(RUN_TESTS)
+    # Qt Test is optional: without it the tests are skipped, the application still builds.
+    find_package(Qt6 QUIET COMPONENTS Test)
+    if(NOT Qt6Test_FOUND)
+        message(WARNING "RUN_TESTS is ON but Qt6 Test was not found: the tests are not built.")
+        set(RUN_TESTS OFF)
+    endif()
+endif()
 
 # QtKeychain stores the password in the OS keychain (Credential Manager, macOS Keychain, libsecret on Linux).
 # It is always built as a static library and linked into the application, so no extra DLL has to be deployed.
@@ -93,3 +102,8 @@ set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/out)
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/out)
 
 add_subdirectory(./stucturasystems/)
+
+if(RUN_TESTS)
+    enable_testing()
+    add_subdirectory(./stucturasystems/tests)
+endif()

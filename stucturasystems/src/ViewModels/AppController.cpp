@@ -17,6 +17,7 @@
 #include <QFileInfo>
 #include <QFuture>
 #include <QTextStream>
+#include <QThreadPool>
 #include <QTimer>
 #include <QtConcurrent/QtConcurrent>
 
@@ -36,11 +37,13 @@
 #include "CommitHistoryModel.h"
 #include "DigitalTwinProjectModel.h"
 #include "DocumentModel.h"
+#include "LibraryController.h"
 #include "LocalProjectTreeModel.h"
 #include "OpenDocumentsModel.h"
 #include "ProblemListModel.h"
 #include "SettingsController.h"
 #include "../Models/ItemModels/ProjectItemModel.h"
+#include "../Models/Libraries/DocumentWorkspace.h"
 #include "../Models/Parser/StructuraSystemsParser.h"
 #include "../Services/BECommunicationService.h"
 #include "../Services/entities/DigitalTwin.h"
@@ -139,6 +142,7 @@ namespace StructuraSystems::Client {
         Settings(new SettingsController(this)),
         LocalProjects(new ProjectItemModel(this)),
         LocalProjectTree(new LocalProjectTreeModel(LocalProjects, this)),
+        Libraries(new LibraryController(this)),
         OnlineProjects(new ProjectItemModel(this)),
         DigitalTwinProjects(new DigitalTwinProjectModel(this)),
         Documents(new OpenDocumentsModel(this)),
@@ -147,13 +151,25 @@ namespace StructuraSystems::Client {
         CommitHistory(new CommitHistoryModel(this)),
         StatusText(tr("Ready")) {
         Settings->initWithDefaultsIfEmpty();
+        // Warm-ups and recycling of the document workspaces run one after another, never in parallel.
+        WorkspacePool.setMaxThreadCount(1);
         connect(Settings, &SettingsController::saved, this, &AppController::onSettingsSaved);
+
+        // The tree shows the level of the libraries; it has to follow the settings and the index.
+        LocalProjectTree->setLibraryLevelProvider([this](const QString &path) { return Libraries->levelOf(path); });
+        connect(Libraries, &LibraryController::changed, LocalProjectTree, &LocalProjectTreeModel::refreshLibraryLevels);
+        connect(Libraries, &LibraryController::notify, this, &AppController::notify);
 
         // Deferred, so that the QML side is already connected to notify() when the folder is loaded.
         QTimer::singleShot(0, this, &AppController::openWorkingDirectoryIfPresent);
     }
 
-    AppController::~AppController() = default;
+    AppController::~AppController() {
+        // Do not wait for a warm-up and do not take the workspaces apart on the way out: the process ends anyway.
+        DocumentWorkspace::beginShutdown();
+        WorkspacePool.clear();
+        WorkspacePool.waitForDone();
+    }
 
     bool AppController::connected() const { return Connected; }
     bool AppController::busy() const { return Busy; }
@@ -168,6 +184,7 @@ namespace StructuraSystems::Client {
     DocumentModel *AppController::currentDocument() const { return CurrentDocument; }
     ProblemListModel *AppController::problems() const { return Problems; }
     SettingsController *AppController::settings() const { return Settings; }
+    LibraryController *AppController::libraries() const { return Libraries; }
     BranchListModel *AppController::branches() const { return Branches; }
     CommitHistoryModel *AppController::commitHistory() const { return CommitHistory; }
     bool AppController::historyLoading() const { return HistoryLoading; }
@@ -288,6 +305,8 @@ namespace StructuraSystems::Client {
 
         const QDir directory(folder);
         const auto root = directory.absolutePath();
+        // Only the settings of the folder are read, the files are not touched before a document needs a library.
+        Libraries->setFolder(root);
 
         // Recursive, symbolic links are not followed. Hidden folders (for example .git) are skipped.
         QStringList files;
@@ -372,6 +391,14 @@ namespace StructuraSystems::Client {
     }
 
     void AppController::openDocument(const QString &key, DocumentModel *document) {
+        // The file of the document counts as its own only if it belongs to the opened folder (files opened from elsewhere
+        // may have the same name as a file of the folder).
+        QString ownFile;
+        if (document->isLocalFile() && QDir::cleanPath(LocalFolders.value(document->title())) == QDir::cleanPath(Libraries->workspace()->root()))
+            ownFile = document->title();
+        document->attachLibraries(Libraries->workspace(), ownFile);
+        // The next document will probably be parsed too; its workspace is made ready meanwhile.
+        prepareSpareWorkspace();
         connect(document, &DocumentModel::problemsChanged, this, [this, document]() {
             if (document == CurrentDocument)
                 refreshProblems();
@@ -385,6 +412,46 @@ namespace StructuraSystems::Client {
         connect(document, &DocumentModel::branchChanged, this, contextChanged);
         const int index = Documents->append(key, document);
         updateCurrentDocument(index);
+    }
+
+    std::shared_ptr<DocumentWorkspace> AppController::takeWorkspace() {
+        std::shared_ptr<DocumentWorkspace> workspace;
+        {
+            std::lock_guard lock(SpareMutex);
+            workspace = std::move(SpareWorkspace);
+            SpareWorkspace.reset();
+        }
+        if (workspace == nullptr)
+            workspace = std::make_shared<DocumentWorkspace>();
+        return workspace;
+    }
+
+    void AppController::prepareSpareWorkspace() {
+        std::lock_guard lock(SpareMutex);
+        if (SpareWorkspace != nullptr)
+            return;
+        // Parsing the standard library takes seconds. The first parser run of the document that gets this workspace waits for it
+        // if it is not ready yet.
+        SpareWorkspace = std::make_shared<DocumentWorkspace>();
+        const auto workspace = SpareWorkspace;
+        WorkspacePool.start([workspace]() { workspace->warmUp(); });
+    }
+
+    void AppController::recycleWorkspace(std::shared_ptr<DocumentWorkspace> workspace) {
+        if (workspace == nullptr)
+            return;
+        // Everything happens on the pool thread, including dropping the last reference of a workspace that is not needed:
+        // taking a model apart takes a moment and must not block the user interface.
+        WorkspacePool.start([this, workspace = std::move(workspace)]() mutable {
+            workspace->recycle();
+            {
+                std::lock_guard lock(SpareMutex);
+                if (SpareWorkspace == nullptr)
+                    SpareWorkspace = std::move(workspace);
+            }
+            // Outside the lock: disposing a surplus workspace must not block takeWorkspace() on the GUI thread.
+            workspace.reset();
+        });
     }
 
     void AppController::openLocalProject(int row) {
@@ -516,8 +583,11 @@ namespace StructuraSystems::Client {
         else if (index == CurrentIndex)
             newIndex = qMin(CurrentIndex, Documents->count() - 2);
 
+        const auto closing = Documents->at(index);
+        auto workspace = closing != nullptr ? closing->releaseWorkspace() : nullptr;
         Documents->remove(index);
         updateCurrentDocument(newIndex);
+        recycleWorkspace(std::move(workspace));
     }
 
     bool AppController::isLocalProjectOpen(int row) const {
@@ -595,10 +665,15 @@ namespace StructuraSystems::Client {
         }
 
         const auto title = document->title();
+        if (!document->hasWorkspace())
+            document->adoptWorkspace(takeWorkspace());
+        const auto workspace = document->workspace();
         QPointer<DocumentModel> guard(document);
         runAsync<ParseResult>(tr("Parsing %1").arg(title),
-            [inputs, title]() { return DocumentModel::runParser(inputs, title); },
+            [inputs, title, workspace]() { return DocumentModel::runParser(inputs, title, workspace); },
             [this, guard, title](ParseResult result) {
+                // The parser may have built the package index of the opened folder.
+                Libraries->indexUsed();
                 if (!guard)
                     return;
                 int errors = 0;

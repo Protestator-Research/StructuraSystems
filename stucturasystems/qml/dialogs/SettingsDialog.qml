@@ -5,7 +5,7 @@ import QtQuick.Dialogs
 import QtQuick.Layouts
 import StructuraSystems
 
-// Application settings: working directory, server connection and appearance.
+// Application settings: working directory, server connection, libraries and appearance.
 Dialog {
     id: dialog
 
@@ -35,6 +35,7 @@ Dialog {
         password.text = settings.password
         rememberPassword.checked = settings.rememberPassword
         theme.currentIndex = settings.themeMode
+        libraries.refresh()
     }
 
     FolderDialog {
@@ -126,6 +127,12 @@ Dialog {
             text: qsTr("The system keychain is not available. The password cannot be stored securely and is only kept until the application is closed.")
             font.pixelSize: 12
             color: Theme.textSecondary
+        }
+
+        SectionHeader { text: qsTr("Libraries"); iconSource: Theme.iconProject }
+        LibrarySettings {
+            id: libraries
+            Layout.fillWidth: true
         }
 
         SectionHeader { text: qsTr("Appearance"); iconSource: Theme.iconTheme }

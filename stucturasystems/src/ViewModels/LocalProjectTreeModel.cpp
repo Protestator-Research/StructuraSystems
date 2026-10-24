@@ -67,6 +67,7 @@ namespace StructuraSystems::Client {
             case IsFolderRole: return node->IsFolder;
             case SourceRowRole: return node->SourceRow;
             case PathRole: return node->Path;
+            case LibraryLevelRole: return node->IsFolder || !LibraryLevel ? -1 : LibraryLevel(node->Path);
             default: return {};
         }
     }
@@ -78,7 +79,8 @@ namespace StructuraSystems::Client {
             {DescriptionRole, "description"},
             {IsFolderRole, "isFolder"},
             {SourceRowRole, "sourceRow"},
-            {PathRole, "path"}
+            {PathRole, "path"},
+            {LibraryLevelRole, "libraryLevel"}
         };
     }
 
@@ -93,6 +95,23 @@ namespace StructuraSystems::Client {
     }
 
     int LocalProjectTreeModel::count() const { return Count; }
+
+    void LocalProjectTreeModel::setLibraryLevelProvider(std::function<int(const QString &)> provider) {
+        LibraryLevel = std::move(provider);
+    }
+
+    void LocalProjectTreeModel::refreshLibraryLevels() {
+        emitLibraryLevelChanged(QModelIndex());
+    }
+
+    void LocalProjectTreeModel::emitLibraryLevelChanged(const QModelIndex &parent) {
+        const int rows = rowCount(parent);
+        if (rows == 0)
+            return;
+        emit dataChanged(index(0, 0, parent), index(rows - 1, 0, parent), {LibraryLevelRole});
+        for (int row = 0; row < rows; ++row)
+            emitLibraryLevelChanged(index(row, 0, parent));
+    }
 
     void LocalProjectTreeModel::sortNode(Node &node) {
         std::stable_sort(node.Children.begin(), node.Children.end(), [](const auto &left, const auto &right) {
