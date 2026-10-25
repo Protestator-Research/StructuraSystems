@@ -27,6 +27,7 @@ namespace StructuraSystems::Client {
     void CodeWidget::decorateWidget() {
         ui->AddElementToolButton->setIcon(QIcon(":/icons/userinterface/Add"));
         ui->AddElementToolButton->setVisible(false);
+        ui->ErrorDockWidget_2->hide();
     }
 
     QWidget* CodeWidget::getScrollAreaWidget() {
@@ -57,5 +58,9 @@ namespace StructuraSystems::Client {
 
     std::vector<std::shared_ptr<KerML::Entities::Element>> CodeWidget::getSelectedElements() {
         return Model->getSelectedElements();
+    }
+
+    QWidget* CodeWidget::getErrorDockWidget_2() const {
+        return ui->ErrorDockWidget_2;
     }
 } // StructuraSystems::Client

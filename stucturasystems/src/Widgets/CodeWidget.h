@@ -37,6 +37,8 @@ namespace StructuraSystems::Client {
 
         QWidget* getScrollAreaWidget();
 
+        QWidget* getErrorDockWidget_2() const;
+
         CodeWidgetModel* getModel() const;
 
         void safeFile(std::string basePath);

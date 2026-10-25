@@ -18,6 +18,14 @@
   </property>
   <layout class="QVBoxLayout" name="verticalLayout">
    <item>
+    <widget class="QFrame" name="ErrorDockWidget_2">
+     <property name="frameShape">
+      <enum>QFrame::NoFrame</enum>
+     </property>
+     <layout class="QVBoxLayout" name="parserResultLayout"/>
+    </widget>
+   </item>
+   <item>
     <widget class="QScrollArea" name="CodeScrollWidgetArea">
      <property name="widgetResizable">
       <bool>true</bool>
