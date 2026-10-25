@@ -74,8 +74,17 @@ namespace StructuraSystems::Client {
             delete item;
         }    
         
-        if (Elements.empty() && (Commit != nullptr))
-            Elements = ElementService->getElements(project, commit);
+        if (Elements.empty() && commit != nullptr) {
+			if (_CommunicationService != nullptr) {
+				Elements = _CommunicationService->getAllElements(
+					commit->getId(),
+					project->getId()
+				);
+			}
+			else if (ElementService != nullptr) {
+				Elements = ElementService->getElements(project, commit);
+			}
+		}
 
         for (const auto &element: Elements) {
             auto type = element->getType();
