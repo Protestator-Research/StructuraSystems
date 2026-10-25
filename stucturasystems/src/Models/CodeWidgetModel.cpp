@@ -76,10 +76,7 @@ namespace StructuraSystems::Client {
         
         if (Elements.empty() && commit != nullptr) {
 			if (_CommunicationService != nullptr) {
-				Elements = _CommunicationService->getAllElements(
-					commit->getId(),
-					project->getId()
-				);
+				Elements = _CommunicationService->getAllElements(commit->getId(), project->getId());
 			}
 			else if (ElementService != nullptr) {
 				Elements = ElementService->getElements(project, commit);
