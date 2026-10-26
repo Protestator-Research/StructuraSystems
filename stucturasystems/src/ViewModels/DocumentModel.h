@@ -14,13 +14,13 @@
 #include <QVariantList>
 #include <QtQml/qqmlregistration.h>
 
+#include "../Services/CommitDelta.h"
 #include "ElementTreeModel.h"
 #include "ProblemListModel.h"
 
 namespace SysMLv2::REST {
     class Project;
     class Commit;
-    class CommitRequest;
 }
 
 namespace KerML::Entities {
@@ -176,9 +176,11 @@ namespace StructuraSystems::Client {
         [[nodiscard]] const std::vector<std::shared_ptr<KerML::Entities::Element>> &instanceElements() const;
 
         /**
-         * First half of a commit (GUI thread): builds the request containing all elements of the document.
+         * First half of a commit (GUI thread): the changes between the state of the branch on the server and this document.
+         * A commit only contains what is created, changed or deleted; see computeCommitDelta for the rules.
+         * @param base The elements at the head of the branch on the server, empty for a branch without commits.
          */
-        [[nodiscard]] std::shared_ptr<SysMLv2::REST::CommitRequest> buildCommitRequest(const QString &description) const;
+        [[nodiscard]] CommitDelta commitDelta(const std::vector<std::shared_ptr<KerML::Entities::Element>> &base) const;
 
         /** Second half of a commit (GUI thread): takes over the commit the backend returned. */
         void applyCommit(std::shared_ptr<SysMLv2::REST::Commit> commit);

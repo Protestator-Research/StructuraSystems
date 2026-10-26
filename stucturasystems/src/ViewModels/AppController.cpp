@@ -46,6 +46,7 @@
 #include "../Models/Libraries/DocumentWorkspace.h"
 #include "../Models/Parser/StructuraSystemsParser.h"
 #include "../Services/BECommunicationService.h"
+#include "../Services/CommitDelta.h"
 #include "../Services/entities/DigitalTwin.h"
 #include "../Services/entities/DigitalTwinRequest.h"
 
@@ -889,18 +890,14 @@ namespace StructuraSystems::Client {
                 OnlineProjectContent content;
                 content.Project = project;
 
-                auto branches = service->getAllBranchesForProjectWithID(project->getId());
-                std::shared_ptr<SysMLv2::REST::Branch> mainBranch;
-                for (const auto &branch : branches)
-                    if (branch != nullptr && project->getDefaultBranch() != nullptr && branch->getId() == project->getDefaultBranch()->getId())
-                        mainBranch = branch;
-                if (mainBranch == nullptr || mainBranch->getHead() == nullptr)
-                    throw std::runtime_error("The project has no default branch with a commit.");
-
-                content.BranchId = uuidText(mainBranch->getId());
-                content.BranchName = QString::fromStdString(mainBranch->getName());
-                content.Commit = service->getCommitWithId(project->getId(), mainBranch->getHead()->getId());
-                content.Elements = service->getAllElements(content.Commit->getId(), project->getId());
+                if (project->getDefaultBranch() == nullptr)
+                    throw std::runtime_error("The project has no default branch.");
+                // A new project has a branch without commits: its document is empty and gets the first commit later.
+                auto state = service->loadBranchState(project->getId(), project->getDefaultBranch()->getId());
+                content.BranchId = uuidText(state.Branch->getId());
+                content.BranchName = QString::fromStdString(state.Branch->getName());
+                content.Commit = std::move(state.Commit);
+                content.Elements = std::move(state.Elements);
                 return content;
             },
             [this, key](OnlineProjectContent content) {
@@ -935,24 +932,55 @@ namespace StructuraSystems::Client {
 
         const auto service = BackendConnection;
         const auto project = document->getProject();
-        const auto request = document->buildCommitRequest(message);
         // The commit goes to the branch of the document, the default branch of the project is the fallback.
         auto branchId = document->branchId();
         if (branchId.isEmpty() && project->getDefaultBranch() != nullptr)
             branchId = uuidText(project->getDefaultBranch()->getId());
+        if (branchId.isEmpty()) {
+            emitNotify(2, tr("The branch of this document is unknown. Refresh the history."));
+            return;
+        }
+        const auto documentBranchId = document->branchId();
         const auto branchIdText = branchId.toStdString();
         QPointer<DocumentModel> guard(document);
-        runAsync<std::shared_ptr<SysMLv2::REST::Commit>>(tr("Committing %1").arg(document->title()),
-            [service, project, request, branchIdText]() {
-                if (branchIdText.empty())
-                    return service->postCommitWithId(project->getId(), request);
-                return service->postCommitToBranch(project->getId(), boost::uuids::string_generator()(branchIdText), request);
+        // A commit only contains the changes against the head of the branch on the server. So the head is loaded first, and the
+        // delta is computed in the GUI thread, where the elements of the document are not changed concurrently.
+        runAsync<BranchState>(tr("Checking %1").arg(document->title()),
+            [service, project, branchIdText]() {
+                return service->loadBranchState(project->getId(), boost::uuids::string_generator()(branchIdText));
             },
-            [this, guard](std::shared_ptr<SysMLv2::REST::Commit> commit) {
-                if (guard)
-                    guard->applyCommit(std::move(commit));
-                emitNotify(1, tr("Commit created."));
-                loadHistory();
+            [this, guard, message, service, project, branchIdText, documentBranchId](BranchState state) {
+                if (!guard || guard->branchId() != documentBranchId)
+                    return;
+
+                // Other users could have committed since the document was loaded. Committing now would overwrite their work.
+                const auto headId = state.Commit != nullptr ? uuidText(state.Commit->getId()) : QString();
+                if (headId != guard->commitId()) {
+                    emitNotify(3, tr("The branch has new commits on the server."), tr("Reload the project before committing."));
+                    return;
+                }
+
+                const auto delta = guard->commitDelta(state.Elements);
+                if (delta.empty()) {
+                    emitNotify(0, tr("Nothing to commit."));
+                    return;
+                }
+                const auto request = buildCommitRequest(message.toStdString(), delta);
+                const auto branchName = QString::fromStdString(state.Branch->getName());
+                runAsync<std::shared_ptr<SysMLv2::REST::Commit>>(tr("Committing %1").arg(guard->title()),
+                    [service, project, request, branchIdText]() {
+                        return service->postCommitToBranch(project->getId(), boost::uuids::string_generator()(branchIdText), request);
+                    },
+                    [this, guard, branchIdText, branchName](std::shared_ptr<SysMLv2::REST::Commit> commit) {
+                        if (guard) {
+                            // A document without branch continues on the branch that received the commit.
+                            if (guard->branchId().isEmpty())
+                                guard->setBranch(QString::fromStdString(branchIdText), branchName);
+                            guard->applyCommit(std::move(commit));
+                        }
+                        emitNotify(1, tr("Commit created."));
+                        loadHistory();
+                    });
             });
     }
 
@@ -967,13 +995,31 @@ namespace StructuraSystems::Client {
 
         const auto service = BackendConnection;
         const auto project = document->getProject();
-        const auto request = document->buildCommitRequest(QStringLiteral("Upload from Local Project, by Structura Systems"));
+        // The project is new, so everything is created. A document without elements only creates the project: the server
+        // rejects a commit without changes.
+        const auto delta = document->commitDelta({});
+        const auto request = delta.empty() ? nullptr : buildCommitRequest("Upload from Local Project, by Structura Systems", delta);
+        auto projectName = project->getName();
+        if (projectName.empty())
+            projectName = document->title().toStdString();
         QPointer<DocumentModel> guard(document);
         runAsync<UploadResult>(tr("Uploading %1").arg(document->title()),
-            [service, project, request]() {
+            [service, project, projectName, request]() {
                 UploadResult result;
-                result.Project = service->postProject(project->getName(), project->getDescription(), "Main");
-                result.Commit = service->postCommitWithId(result.Project->getId(), request);
+                result.Project = service->postProject(projectName, project->getDescription(), "Main");
+                if (request != nullptr) {
+                    // The commit goes to the default branch of the new project, by its id.
+                    boost::uuids::uuid branchId{};
+                    if (result.Project->getDefaultBranch() != nullptr) {
+                        branchId = result.Project->getDefaultBranch()->getId();
+                    } else {
+                        const auto branches = service->getAllBranchesForProjectWithID(result.Project->getId());
+                        if (branches.empty() || branches.front() == nullptr)
+                            throw std::runtime_error("The new project has no branch.");
+                        branchId = branches.front()->getId();
+                    }
+                    result.Commit = service->postCommitToBranch(result.Project->getId(), branchId, request);
+                }
                 result.Projects = service->getAllProjects();
                 return result;
             },
@@ -1113,7 +1159,7 @@ namespace StructuraSystems::Client {
                         const auto milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(created->second.time_since_epoch());
                         info.Created = QDateTime::fromMSecsSinceEpoch(milliseconds.count());
                     }
-                    for (const auto &previous : commit->getPreviusCommits())
+                    for (const auto &previous : commit->getPreviousCommits())
                         if (previous != nullptr)
                             info.PreviousIds.append(uuidText(previous->getId()));
                     outcome.Value.Commits.append(info);
@@ -1185,18 +1231,16 @@ namespace StructuraSystems::Client {
             [service, projectId, branchIdText]() {
                 const auto id = boost::uuids::string_generator()(branchIdText);
                 // The head is read again, other users may have committed since the branch list was loaded.
-                for (const auto &branch : service->getAllBranchesForProjectWithID(projectId)) {
-                    if (branch == nullptr || branch->getId() != id)
-                        continue;
-                    if (branch->getHead() == nullptr)
-                        throw std::runtime_error("The branch " + branch->getName() + " has no commit yet.");
-                    auto content = downloadCommit(service, projectId, branch->getHead()->getId());
-                    content.BranchId = uuidText(branch->getId());
-                    content.BranchName = QString::fromStdString(branch->getName());
-                    content.BranchHeadCommitId = uuidText(branch->getHead()->getId());
-                    return content;
-                }
-                throw std::runtime_error("The branch does not exist on the server (anymore). Refresh the history.");
+                auto state = service->loadBranchState(projectId, id);
+                CommitContent content;
+                content.BranchId = uuidText(state.Branch->getId());
+                content.BranchName = QString::fromStdString(state.Branch->getName());
+                // A branch without commits shows an empty document.
+                if (state.Commit != nullptr)
+                    content.BranchHeadCommitId = uuidText(state.Commit->getId());
+                content.Commit = std::move(state.Commit);
+                content.Elements = std::move(state.Elements);
+                return content;
             },
             [this, guard](CommitContent content) {
                 if (!guard)

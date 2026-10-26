@@ -15,7 +15,6 @@
 
 #include <boost/uuid/uuid.hpp>
 #include <boost/uuid/uuid_io.hpp>
-#include <boost/uuid/random_generator.hpp>
 #include <yaml-cpp/yaml.h>
 #include <kerml/root/elements/Element.h>
 #include <kerml/root/elements/Relationship.h>
@@ -27,8 +26,6 @@
 #include <sysmlv2/rest/entities/JSONEntities.h>
 #include <sysmlv2/rest/entities/Project.h>
 #include <sysmlv2/rest/entities/Commit.h>
-#include <sysmlv2/rest/entities/CommitRequest.h>
-#include <sysmlv2/rest/entities/DataVersion.h>
 #include <sysmlv2/service/implementation/ElementNavigationService.h>
 
 #include "../Models/Libraries/DocumentWorkspace.h"
@@ -745,13 +742,8 @@ namespace StructuraSystems::Client {
         return InstanceElements;
     }
 
-    std::shared_ptr<SysMLv2::REST::CommitRequest> DocumentModel::buildCommitRequest(const QString &description) const {
-        std::vector<std::shared_ptr<SysMLv2::REST::DataVersion>> requestedChange;
-        for (const auto &element : Elements) {
-            auto dataVersion = std::make_shared<SysMLv2::REST::DataVersion>(boost::uuids::random_generator()(), element);
-            requestedChange.push_back(dataVersion);
-        }
-        return std::make_shared<SysMLv2::REST::CommitRequest>(description.toStdString(), requestedChange);
+    CommitDelta DocumentModel::commitDelta(const std::vector<std::shared_ptr<KerML::Entities::Element>> &base) const {
+        return computeCommitDelta(base, Elements);
     }
 
     void DocumentModel::applyCommit(std::shared_ptr<SysMLv2::REST::Commit> commit) {
