@@ -12,6 +12,7 @@
 #include <sysmlv2/service/implementation/ElementNavigationService.h>
 #include <sysmlv2/ParserError.h>
 #include <kerml/root/elements/Element.h>
+#include <QWidget>
 
 namespace SysMLv2::REST{
     class Project;
@@ -51,6 +52,8 @@ namespace StructuraSystems::Client {
 
         [[nodiscard]] std::vector<std::shared_ptr<KerML::Entities::Element>> getSelectedElements() const;
 
+        void pullFromBackend(CommunicationService* communicationService);
+
     signals:
         void tabEdited();
 
@@ -69,6 +72,8 @@ namespace StructuraSystems::Client {
         CommunicationService* _CommunicationService;
         std::vector<std::shared_ptr<SysMLv2::Files::ParserError>> ParserErrors;
         std::vector<std::shared_ptr<KerML::Entities::Element>> InstaceElements;
+        QWidget* _ParserResult = nullptr;
+        void showParserResult();
     };
 }
 
