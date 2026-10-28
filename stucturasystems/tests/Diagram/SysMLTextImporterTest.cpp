@@ -559,6 +559,35 @@ TEST_CASE("Importer: random models survive generate -> import -> generate") {
             }
         }
 
+        // "perform providePower.generateTorque;": an action of another action tree
+        for (const ElementId id: ids) {
+            if (!model.contains(id) || model.element(id).kind() != ElementKind::ActionPerformance ||
+                model.element(id).performStyle() != PerformStyle::ReferenceAction || random() % 2)
+                continue;
+            const std::string before = model.element(id).name();
+            try {
+                model.rename(id, before + ".step");
+                model.setPerformsPath(id, true);
+            } catch (const ModelError &) {
+                try {
+                    model.rename(id, before);
+                } catch (const ModelError &) {
+                }
+            }
+        }
+        // "part y subsets x;", "part def A specializes B;" instead of ":>"
+        for (const ElementId id: ids) {
+            if (!model.contains(id) || random() % 3 != 0)
+                continue;
+            const auto kind = model.element(id).kind();
+            try {
+                if (isUsageKind(kind) && kind != ElementKind::EnumerationLiteral && kind != ElementKind::ControlNode)
+                    model.setSpecializationKeyword(id, "subsets");
+                else if (isDefinitionKind(kind))
+                    model.setSpecializationKeyword(id, "specializes");
+            } catch (const ModelError &) {
+            }
+        }
         for (const auto &relationship: model.relationships())
             ++relationshipKinds[relationship.Kind];
         for (const ElementId id: ids) {
@@ -972,7 +1001,15 @@ action def UpdateSensors {
     SemanticModel model;
     const auto report = SysMLTextImporter::importText(text, model);
     CHECK(report.lossless());
-    CHECK_EQ(SysMLCodeGenerator().generate(model), text);
+    // the flow between the parameters is a relationship now (drawn): written after the actions of its body
+    std::string expected = text;
+    const std::string flow = "        flow from focus.image to shoot.image;\n";
+    expected.erase(expected.find(flow), flow.size());
+    const std::string afterSend = "        then send new Show(shoot.picture) via displayPort;\n";
+    expected.insert(expected.find(afterSend) + afterSend.size(), flow);
+    CHECK_EQ(SysMLCodeGenerator().generate(model), expected);
+    CHECK(std::any_of(model.relationships().begin(), model.relationships().end(),
+                      [](const Relationship &relationship) { return relationship.Kind == RelationshipKind::Flow; }));
 
     const ElementId charging = findElement(model, "charging", ElementKind::ActionUsage);
     CHECK(model.element(charging).actionForm() == ActionForm::Loop);
@@ -1804,4 +1841,148 @@ TEST_CASE("Importer: empty lines and the indentation of the text are kept") {
     // elements added in the diagram: no empty line
     model.addElement(ElementKind::PartDefinition, "C", RootId);
     CHECK(generator.generate(model).find("part def B;\npart def C;\n") != std::string::npos);
+}
+
+TEST_CASE("Importer: subsets, bindings between parts and ports, perform of a nested action") {
+    const std::string text = "package Slides {\n"
+                             "    part def Engine {\n"
+                             "        part cylinders : Cylinder[4..8];\n"
+                             "    }\n"
+                             "    part def Engine4Cyl specializes Engine {\n"
+                             "        part redefines cylinders[4];\n"
+                             "        part cylinder1[1] subsets cylinders;\n"
+                             "        part cylinder2[1] :> cylinders;\n"
+                             "    }\n"
+                             "    part def Cylinder;\n"
+                             "    part vehicleTrailerSystem {\n"
+                             "        part vehicle {\n"
+                             "            ref part hitchBall;\n"
+                             "            port p;\n"
+                             "        }\n"
+                             "        part trailerHitch {\n"
+                             "            part hitchBall;\n"
+                             "            port q;\n"
+                             "        }\n"
+                             "        bind vehicle.hitchBall = trailerHitch.hitchBall;\n"
+                             "        bind vehicle.p = trailerHitch.q;\n"
+                             "    }\n"
+                             "    part vehicle_b {\n"
+                             "        perform providePower;\n"
+                             "        part engine {\n"
+                             "            perform providePower.generateTorque;\n"
+                             "        }\n"
+                             "    }\n"
+                             "    action providePower {\n"
+                             "        action generateTorque;\n"
+                             "    }\n"
+                             "}\n";
+    SemanticModel model;
+    const auto report = SysMLTextImporter::importText(text, model);
+    CHECK(report.lossless());
+    CHECK_EQ(SysMLCodeGenerator().generate(model), text);
+    int textual = 0;
+    int bindings = 0;
+    for (ElementId id = 1; id < 60; ++id)
+        textual += model.contains(id) && model.element(id).kind() == ElementKind::Textual ? 1 : 0;
+    for (const auto &relationship: model.relationships())
+        bindings += relationship.Kind == RelationshipKind::Binding ? 1 : 0;
+    CHECK_EQ(textual, 0);
+    CHECK_EQ(bindings, 2);
+    const ElementId cylinder1 = findElement(model, "cylinder1", ElementKind::PartUsage);
+    CHECK_EQ(model.element(cylinder1).specializationKeyword(), std::string("subsets"));
+    const ElementId path = findElement(model, "providePower.generateTorque", ElementKind::ActionPerformance);
+    CHECK(model.element(path).performsPath());
+    CHECK_THROWS_AS(model.setTypeName(path, "Torque"), ModelError);
+    CHECK_THROWS_AS(model.rename(path, "provide power"), ModelError);
+}
+
+TEST_CASE("Importer: flows and connections to features of an end's definition (fuelTank.p1.fuel)") {
+    const std::string text = "item def Fuel;\n"
+                             "port def FuelOutPort {\n"
+                             "    out item fuel : Fuel;\n"
+                             "}\n"
+                             "part vehicle {\n"
+                             "    part fuelTank {\n"
+                             "        port p1 : FuelOutPort;\n"
+                             "    }\n"
+                             "    part engine {\n"
+                             "        port p2 : ~FuelOutPort;\n"
+                             "    }\n"
+                             "    flow of Fuel from fuelTank.p1.fuel to engine.p2.fuel;\n"
+                             "}\n";
+    SemanticModel model;
+    CHECK(SysMLTextImporter::importText(text, model).lossless());
+    CHECK_EQ(model.relationships().size(), std::size_t(1));
+    const auto &flow = model.relationships().front();
+    CHECK(flow.Kind == RelationshipKind::Flow);
+    CHECK_EQ(model.element(flow.Source).name(), std::string("p1"));
+    CHECK_EQ(flow.SourceFeature, std::string("fuel"));
+    CHECK_EQ(flow.TargetFeature, std::string("fuel"));
+    CHECK_EQ(SysMLCodeGenerator().generate(model), text);
+    CHECK_THROWS_AS(model.setEndFeatures(flow.Id, "fu el", ""), ModelError);
+    model.setEndFeatures(flow.Id, "", "");
+    CHECK(SysMLCodeGenerator().generate(model).find("flow of Fuel from fuelTank.p1 to engine.p2;") != std::string::npos);
+}
+
+TEST_CASE("Importer: input / output flows between action parameters and accept payloads (slides 57, 62)") {
+    SemanticModel model;
+    CHECK(SysMLTextImporter::importText(
+            "action startVehicle {\n"
+            "    action trigger1 accept vs : VehicleStart;\n"
+            "    action startEngine {\n"
+            "        in item vs : VehicleStart;\n"
+            "        out item es : EngineStatus;\n"
+            "    }\n"
+            "    action sendStatus {\n"
+            "        in es : EngineStatus;\n"
+            "    }\n"
+            "    flow of VehicleStart from trigger1.vs to startEngine.vs;\n"
+            "    flow of EngineStatus from startEngine.es to sendStatus.es;\n"
+            "}\n", model).lossless());
+    CHECK_EQ(model.relationships().size(), std::size_t(2));
+    for (ElementId id = 1; id < 40; ++id)
+        CHECK(!model.contains(id) || model.element(id).kind() != ElementKind::Textual);
+    const auto &first = model.relationships().front();
+    CHECK_EQ(model.element(first.Source).name(), std::string("trigger1"));
+    CHECK_EQ(first.SourceFeature, std::string("vs"));
+    CHECK(first.TargetFeature.empty());
+    const std::string text = SysMLCodeGenerator().generate(model);
+    CHECK(text.find("flow of VehicleStart from trigger1.vs to startEngine.vs;") != std::string::npos);
+    CHECK(text.find("flow of EngineStatus from startEngine.es to sendStatus.es;") != std::string::npos);
+}
+
+TEST_CASE("Importer: enumeration values with units (slide 31)") {
+    const std::string text = "enum def DiameterChoices :> ISQ::LengthValue {\n"
+                             "    enum = 60 [mm];\n"
+                             "    enum = 70 [mm];\n"
+                             "}\n";
+    SemanticModel model;
+    CHECK(SysMLTextImporter::importText(text, model).lossless());
+    const ElementId choices = model.children(RootId).front();
+    CHECK_EQ(model.children(choices).size(), std::size_t(2));
+    const ElementId first = model.children(choices).front();
+    CHECK(model.element(first).kind() == ElementKind::EnumerationLiteral);
+    CHECK_EQ(model.element(first).value(), std::string("60 [mm]"));
+    CHECK_EQ(SysMLCodeGenerator().generate(model), text);
+    CHECK_THROWS_AS(model.setValue(first, "=", ""), ModelError);
+    CHECK_THROWS_AS(model.setValue(first, ":=", "1"), ModelError);
+}
+
+TEST_CASE("Importer: succession flow (slide 57)") {
+    const std::string text = "action providePower {\n"
+                             "    action amplifyTorque {\n"
+                             "        out amplified : Torque;\n"
+                             "    }\n"
+                             "    action transferTorque {\n"
+                             "        in amplified : Torque;\n"
+                             "    }\n"
+                             "    succession flow of Torque from amplifyTorque.amplified to transferTorque.amplified;\n"
+                             "}\n";
+    SemanticModel model;
+    CHECK(SysMLTextImporter::importText(text, model).lossless());
+    CHECK_EQ(model.relationships().size(), std::size_t(1));
+    CHECK(model.relationships().front().SuccessionFlow);
+    CHECK_EQ(SysMLCodeGenerator().generate(model), text);
+    model.setSuccessionFlow(model.relationships().front().Id, false);
+    CHECK(SysMLCodeGenerator().generate(model).find("    flow of Torque from") != std::string::npos);
 }

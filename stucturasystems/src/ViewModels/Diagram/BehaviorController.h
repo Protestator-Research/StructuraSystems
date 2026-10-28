@@ -56,6 +56,9 @@ namespace StructuraSystems::Client {
         Q_PROPERTY(bool hasSelection READ hasSelection NOTIFY selectionChanged)
         Q_PROPERTY(qreal canvasWidth READ canvasWidth NOTIFY canvasSizeChanged)
         Q_PROPERTY(qreal canvasHeight READ canvasHeight NOTIFY canvasSizeChanged)
+        /// The frame around the nodes with the name of the context: "action transportPassenger".
+        Q_PROPERTY(QRectF frameRect READ frameRect NOTIFY frameChanged)
+        Q_PROPERTY(QString frameTitle READ frameTitle NOTIFY frameChanged)
 
     public:
         explicit BehaviorController(Diagram::SemanticModel &model, QObject *parent = nullptr);
@@ -70,6 +73,8 @@ namespace StructuraSystems::Client {
         [[nodiscard]] bool hasSelection() const { return !SelectedNodes.empty() || !SelectedEdges.empty(); }
         [[nodiscard]] qreal canvasWidth() const { return CanvasSize.width(); }
         [[nodiscard]] qreal canvasHeight() const { return CanvasSize.height(); }
+        [[nodiscard]] QRectF frameRect() const { return FrameRect; }
+        [[nodiscard]] QString frameTitle() const { return FrameTitle; }
 
         /// A palette entry (DiagramTypes::ToolActionUsage, ToolDecision, ..., ToolState, ToolInitial) dropped at (x, y).
         /// An action dropped onto a state becomes its "do action".
@@ -105,12 +110,20 @@ namespace StructuraSystems::Client {
         void contextsChanged();
         void selectionChanged();
         void canvasSizeChanged();
+        void frameChanged();
 
     private:
         [[nodiscard]] std::optional<Diagram::ElementId> context() const;
         [[nodiscard]] std::optional<Diagram::ElementId> toNode(const QString &id) const;
         [[nodiscard]] bool isNode(Diagram::ElementId id) const;
         [[nodiscard]] QSizeF sizeOf(const DiagramNode &node) const;
+        /// The node a nested state is drawn in (none for the nodes of the context itself).
+        [[nodiscard]] std::optional<Diagram::ElementId> parentNode(Diagram::ElementId id) const;
+        /// Positions of the nodes owned by 'owner' relative to the top left of their area; returns its size.
+        QSizeF layoutLevel(Diagram::ElementId owner, const std::vector<DiagramNode> &nodes, const std::vector<DiagramEdge> &edges,
+                           std::map<Diagram::ElementId, QPointF> &relative);
+        /// Rectangles from the positions: a state with nested states grows around them; the frame around all.
+        void applyRects();
         [[nodiscard]] std::string uniqueName(const std::string &base, Diagram::ElementId owner) const;
         void chooseContext();
         void updateContexts();
@@ -136,6 +149,8 @@ namespace StructuraSystems::Client {
         std::set<Diagram::ElementId> SelectedNodes;
         std::set<QString> SelectedEdges;
         QSizeF CanvasSize{1600, 1000};
+        QRectF FrameRect;
+        QString FrameTitle;
         bool SyncQueued = false;
         bool AutoLayout = true;
     };

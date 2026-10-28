@@ -22,6 +22,8 @@ Item {
     required property real nodeWidth
     required property real nodeHeight
     required property bool selected
+    /** Nesting depth: nested states lie on top of the state they are in. */
+    required property int depth
 
     property BehaviorController controller
     /** The BehaviorCanvas (arrows, menus, dialogs). */
@@ -34,7 +36,7 @@ Item {
     y: nodeY
     width: nodeWidth
     height: nodeHeight
-    z: 10
+    z: 10 + depth
 
     // ---------------------------------------------------------------- shapes
     // action / state: rounded box
@@ -68,25 +70,42 @@ Item {
                 color: Theme.textPrimary
             }
         }
-        Rectangle {
-            visible: node.compartments.length > 0
+        // "state actions" (entry / do / exit), "assert constraints": a line, the caption (16) and the entries (18 each)
+        Column {
             y: 40 + (node.keyword.length > 0 ? 6 : 0)
             width: parent.width
-            height: 1
-            color: Qt.alpha(node.lineColor, 0.5)
-        }
-        Column {
-            x: 10
-            y: 44 + (node.keyword.length > 0 ? 6 : 0)
             Repeater {
-                model: node.compartments.length > 0 ? node.compartments[0].entries : []
-                Label {
+                model: node.compartments
+                Column {
+                    id: compartment
                     required property var modelData
-                    height: 18
-                    text: modelData.text
-                    textFormat: Text.PlainText
-                    font.pixelSize: 12
-                    color: Theme.textPrimary
+                    width: node.width
+                    Rectangle {
+                        width: parent.width
+                        height: 1
+                        color: Qt.alpha(node.lineColor, 0.5)
+                    }
+                    Label {
+                        width: parent.width
+                        height: 15
+                        horizontalAlignment: Text.AlignHCenter
+                        text: compartment.modelData.title
+                        font.pixelSize: 10
+                        font.italic: true
+                        color: Theme.textSecondary
+                    }
+                    Repeater {
+                        model: compartment.modelData.entries
+                        Label {
+                            required property var modelData
+                            x: 10
+                            height: 18
+                            text: modelData.text
+                            textFormat: Text.PlainText
+                            font.pixelSize: 12
+                            color: Theme.textPrimary
+                        }
+                    }
                 }
             }
         }
@@ -131,7 +150,7 @@ Item {
         visible: !node.isBox && node.title.length > 0
         x: node.width + 6
         y: node.height / 2 - height / 2
-        text: node.keyword + " " + node.title
+        text: node.title
         font.pixelSize: 11
         color: Theme.textSecondary
     }

@@ -52,6 +52,8 @@ namespace StructuraSystems::Client {
         Q_PROPERTY(StructuraSystems::Client::UseCaseController *useCases READ useCases CONSTANT)
         /// Sequence view (lifelines, events, messages) of one interaction (occurrence definition or usage).
         Q_PROPERTY(StructuraSystems::Client::SequenceController *sequence READ sequence CONSTANT)
+        /// Interconnection view: a part with its parts, ports and connections nested inside it.
+        Q_PROPERTY(StructuraSystems::Client::DiagramController *interconnection READ interconnection CONSTANT)
         Q_PROPERTY(GenerationMode generationMode READ generationMode WRITE setGenerationMode NOTIFY generationModeChanged)
         Q_PROPERTY(BlockState blockState READ blockState NOTIFY blockStateChanged)
         Q_PROPERTY(bool pendingChanges READ hasPendingChanges NOTIFY pendingChangesChanged)
@@ -98,6 +100,7 @@ namespace StructuraSystems::Client {
         [[nodiscard]] BehaviorController *behavior() const { return Behavior; }
         [[nodiscard]] UseCaseController *useCases() const { return UseCases; }
         [[nodiscard]] SequenceController *sequence() const { return Sequence; }
+        [[nodiscard]] DiagramController *interconnection() const { return Interconnection; }
 
         [[nodiscard]] Diagram::SemanticModel &semanticModel() { return Model; }
         [[nodiscard]] const Diagram::SemanticModel &semanticModel() const { return Model; }
@@ -165,6 +168,7 @@ namespace StructuraSystems::Client {
         BehaviorController *Behavior = nullptr;
         UseCaseController *UseCases = nullptr;
         SequenceController *Sequence = nullptr;
+        DiagramController *Interconnection = nullptr;
         QPointer<QObject> Document;
         QString BlockElementId;
         bool Completing = false;

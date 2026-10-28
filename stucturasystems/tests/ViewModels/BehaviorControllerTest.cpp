@@ -166,15 +166,15 @@ TEST_CASE("Behavior: a state machine with initial state, transitions and entry/d
     CHECK(onNode->Kind == DiagramTypes::StateNode);
     CHECK_EQ(onNode->Compartments.size(), 1);
     const auto entries = onNode->Compartments.front().toMap().value("entries").toList();
-    CHECK_EQ(entries.at(0).toMap().value("text").toString(), QString("entry / warmUp"));
-    CHECK_EQ(entries.at(1).toMap().value("text").toString(), QString("do / run"));
+    CHECK_EQ(entries.at(0).toMap().value("text").toString(), QString("entry warmUp"));
+    CHECK_EQ(entries.at(1).toMap().value("text").toString(), QString("do run"));
     QString transition;
     for (const auto &edge: behavior.edges()->edges())
         if (edge.Kind == DiagramTypes::Transition)
             transition = edge.Label;
     CHECK_EQ(transition, QString("StartSignal [fuel > 0] / action ignite"));
-    // the entry action can be found in the state for editing
-    const QString warmUp = behavior.entryAt(key(on), onNode->Rect.center().x(), onNode->Rect.top() + 40 + 4 + 9);
+    // the entry action can be found in the state for editing (header 40, keyword 6, caption 16)
+    const QString warmUp = behavior.entryAt(key(on), onNode->Rect.center().x(), onNode->Rect.top() + 40 + 6 + 16 + 9);
     CHECK_EQ(warmUp, key(*find(model, on, "warmUp")));
 
     // new state, transition back, an exit action dropped onto the state
@@ -294,7 +294,7 @@ TEST_CASE("Behavior: parallel states, do and entry actions with a form") {
     CHECK(behavior.stateMachine());
     CHECK_EQ(behavior.nodes()->count(), 2); // normal, maintenance ("do" is not a node)
     const ElementId maintenance = *find(model, health, "maintenance");
-    CHECK_EQ(DiagramNodeModel::entryCount(*behavior.nodes()->find(maintenance), ""), 1);
+    CHECK_EQ(DiagramNodeModel::entryCount(*behavior.nodes()->find(maintenance), "state actions"), 1);
     QStringList labels;
     for (const auto &edge: behavior.edges()->edges())
         labels.append(edge.Label);
@@ -333,4 +333,75 @@ TEST_CASE("Behavior: positions are kept per action and restored") {
     restored.restoreLayout(layout);
     restored.setContextId(key(again.children(RootId)[0]));
     CHECK(restored.nodeRect(key(*find(again, again.children(RootId)[0], "a"))).topLeft() == QPointF(300, 250));
+}
+
+TEST_CASE("Behavior: nested and parallel states inside their state, keywords and the frame (slides 64, 65)") {
+    SemanticModel model;
+    CHECK(SysMLTextImporter::importText(
+            "state vehicleStates parallel {\n"
+            "    state operatingStates {\n"
+            "        entry;\n"
+            "        then off;\n"
+            "        state off;\n"
+            "        state on {\n"
+            "            entry action performSelfTest;\n"
+            "            assert constraint { electricalPower <= 500 }\n"
+            "        }\n"
+            "        transition first off then on;\n"
+            "    }\n"
+            "    state healthStates {\n"
+            "        state normal;\n"
+            "    }\n"
+            "}\n", model).lossless());
+    BehaviorController behavior(model);
+    const ElementId machine = model.children(RootId).front();
+    behavior.setContextId(key(machine));
+    CHECK_EQ(behavior.frameTitle(), QString("state vehicleStates «parallel»"));
+    const ElementId operating = *find(model, machine, "operatingStates");
+    const ElementId health = *find(model, machine, "healthStates");
+    const ElementId on = *find(model, operating, "on");
+    const ElementId normal = *find(model, health, "normal");
+    // operatingStates, healthStates and their nested states (entry, off, on, normal)
+    CHECK_EQ(behavior.nodes()->count(), 6);
+    const QRectF operatingRect = behavior.nodes()->find(operating)->Rect;
+    const QRectF healthRect = behavior.nodes()->find(health)->Rect;
+    CHECK(operatingRect.contains(behavior.nodes()->find(on)->Rect));
+    CHECK(healthRect.contains(behavior.nodes()->find(normal)->Rect));
+    CHECK(!operatingRect.intersects(healthRect));
+    CHECK(std::abs(operatingRect.top() - healthRect.top()) < 1); // parallel: side by side
+    CHECK(behavior.frameRect().contains(operatingRect.united(healthRect)));
+    CHECK_EQ(behavior.nodes()->find(on)->Keyword, QString("«state»"));
+    CHECK_EQ(DiagramNodeModel::entryCount(*behavior.nodes()->find(on), "state actions"), 1);
+    CHECK_EQ(DiagramNodeModel::entryCount(*behavior.nodes()->find(on), "assert constraints"), 1);
+    // moving a state moves its nested states
+    const QRectF before = behavior.nodes()->find(on)->Rect;
+    behavior.moveNode(key(operating), operatingRect.x() + 50, operatingRect.y() + 30);
+    const QRectF after = behavior.nodes()->find(on)->Rect;
+    CHECK(std::abs(after.x() - before.x() - 50) < 0.5);
+    CHECK(std::abs(after.y() - before.y() - 30) < 0.5);
+}
+
+TEST_CASE("Behavior: input / output flows between actions (slide 57)") {
+    SemanticModel model;
+    CHECK(SysMLTextImporter::importText(
+            "action providePower {\n"
+            "    action generateTorque {\n"
+            "        out torque : Torque;\n"
+            "    }\n"
+            "    action amplifyTorque {\n"
+            "        in torque : Torque;\n"
+            "    }\n"
+            "    flow of Torque from generateTorque.torque to amplifyTorque.torque;\n"
+            "    first generateTorque then amplifyTorque;\n"
+            "}\n", model).lossless());
+    BehaviorController behavior(model);
+    int flows = 0;
+    for (const auto &edge: behavior.edges()->edges()) {
+        if (edge.Kind != DiagramTypes::Flow)
+            continue;
+        ++flows;
+        CHECK_EQ(edge.Label, QString(": Torque"));
+        CHECK_EQ(model.element(edge.Source).name(), std::string("generateTorque"));
+    }
+    CHECK_EQ(flows, 1);
 }

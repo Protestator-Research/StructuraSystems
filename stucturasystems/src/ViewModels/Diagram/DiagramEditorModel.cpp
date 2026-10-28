@@ -34,6 +34,8 @@ namespace StructuraSystems::Client {
         connect(UseCases, &UseCaseController::statusMessage, this, &DiagramEditorModel::statusMessage);
         Sequence = new SequenceController(Model, this);
         connect(Sequence, &SequenceController::statusMessage, this, &DiagramEditorModel::statusMessage);
+        Interconnection = new DiagramController(Model, this, true);
+        connect(Interconnection, &DiagramController::statusMessage, this, &DiagramEditorModel::statusMessage);
         // moved nodes: their positions are written with the block (layout line), a moment after the last move
         LayoutTimer.setSingleShot(true);
         LayoutTimer.setInterval(700);
@@ -57,7 +59,9 @@ namespace StructuraSystems::Client {
 
     DiagramEditorModel::~DiagramEditorModel() {
         Model.removeListener(ListenerToken);
-        delete Sequence; // all listen to Model, which is destroyed before the QObject children
+        delete Interconnection; // all listen to Model, which is destroyed before the QObject children
+        Interconnection = nullptr;
+        delete Sequence;
         Sequence = nullptr;
         delete UseCases;
         UseCases = nullptr;
@@ -152,6 +156,7 @@ namespace StructuraSystems::Client {
         Parametric->layoutAll();
         Behavior->layoutAll();
         UseCases->layoutAll();
+        Interconnection->layoutAll();
         // the positions stored with a generated block
         if (body && GeneratedBlockGuard::isGeneratedBlock(*body)) {
             const auto layout = QJsonDocument::fromJson(

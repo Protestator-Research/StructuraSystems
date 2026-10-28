@@ -183,7 +183,7 @@ namespace StructuraSystems::Client::EdgeRouting {
         if (count < 2)
             return 0;
         // the same side for both directions: measured along the line from the smaller to the larger id
-        const qreal offset = (qreal(index) - qreal(count - 1) / 2.0) * 12.0;
+        const qreal offset = (qreal(index) - qreal(count - 1) / 2.0) * 18.0;
         return edge.Source < edge.Target ? offset : -offset;
     }
 

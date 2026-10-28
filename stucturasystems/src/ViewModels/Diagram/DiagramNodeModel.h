@@ -33,11 +33,14 @@ namespace StructuraSystems::Client {
         QRectF Rect;       ///< canvas coordinates
         int Depth = 0;     ///< ownership depth, used for the stacking order
         bool Selected = false;
+        bool Dashed = false; ///< a reference ("ref part", "ref item"): drawn with a dashed border
+        bool Container = false; ///< interconnection view: a part drawn around its parts (sized by the layout)
 
         [[nodiscard]] bool sameContent(const DiagramNode &other) const {
             return Kind == other.Kind && Keyword == other.Keyword && Title == other.Title &&
                    Compartments == other.Compartments && Depth == other.Depth && InPins == other.InPins &&
-                   OutPins == other.OutPins;
+                   OutPins == other.OutPins && Dashed == other.Dashed &&
+                   Container == other.Container;
         }
     };
 
@@ -61,7 +64,9 @@ namespace StructuraSystems::Client {
             DepthRole,
             SelectedRole,
             InPinsRole,
-            OutPinsRole
+            OutPinsRole,
+            DashedRole,
+            ContainerRole
         };
         Q_ENUM(Roles)
 

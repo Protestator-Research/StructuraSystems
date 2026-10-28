@@ -300,7 +300,18 @@ namespace StructuraSystems::Client {
                 std::vector<QPointF> path;
                 const bool roundShapes = source->Kind == DiagramTypes::UseCaseNode || source->Kind == DiagramTypes::ActorNode ||
                                          target->Kind == DiagramTypes::UseCaseNode || target->Kind == DiagramTypes::ActorNode;
-                if (Routing && !roundShapes) {
+                const bool tree = edge.Kind == DiagramTypes::Composition || edge.Kind == DiagramTypes::Aggregation ||
+                                  edge.Kind == DiagramTypes::Temporal;
+                if (tree && Routing && target->Rect.top() > source->Rect.bottom() + 16) {
+                    // decomposition tree: down from the owner, across, down to the part (shared by its siblings)
+                    const qreal middle = (source->Rect.bottom() + target->Rect.top()) / 2.0;
+                    const qreal sourceX = source->Rect.center().x();
+                    const qreal targetX = target->Rect.center().x();
+                    path = {QPointF(sourceX, source->Rect.bottom()), QPointF(sourceX, middle), QPointF(targetX, middle),
+                            QPointF(targetX, target->Rect.top())};
+                    if (std::abs(sourceX - targetX) < 0.5)
+                        path = {path.front(), path.back()};
+                } else if (Routing && !roundShapes) {
                     path = EdgeRouting::routeOf(*Nodes, Edges->edges(), edge);
                 } else {
                     QLineF line(outline(*source, shape(*target).center()), outline(*target, shape(*source).center()));
@@ -326,20 +337,30 @@ namespace StructuraSystems::Client {
                 QPointF lineEnd = end;
                 QPolygonF marker;
                 bool filled = true;
-                bool openArrow = false; // «satisfy», «verify», «include», dependency: dashed with an open arrow head
-                bool openHead = false;  // message, «allocate»: a solid line with an open arrow head
+                bool openArrow = false; // «satisfy», «verify», «include», «import», dependency, succession: dashed, open head
+                bool openHead = false;  // message, «allocate», transition, perform: a solid line with an open arrow head
+                bool flowArrow = false; // flow: a filled triangle in the middle of the line
                 switch (edge.Kind) {
                     case DiagramTypes::Composition:
-                        marker = diamond(start, afterStart); // the diamond sits at the owner
+                    case DiagramTypes::Aggregation:
+                        marker = diamond(start, afterStart); // the diamond sits at the owner (hollow for "ref")
+                        filled = edge.Kind == DiagramTypes::Composition;
                         if (!marker.isEmpty())
                             lineStart = marker[2];
                         break;
                     case DiagramTypes::Flow:
+                        flowArrow = true;
+                        break;
                     case DiagramTypes::Succession:
+                        openArrow = true;
+                        break;
                     case DiagramTypes::Transition:
-                        marker = arrowHead(end, beforeEnd);
+                    case DiagramTypes::Performs:
+                        openHead = true;
                         break;
                     case DiagramTypes::Specialization:
+                    case DiagramTypes::DefinedBy:
+                    case DiagramTypes::Redefinition:
                         marker = arrowHead(end, beforeEnd);
                         filled = false;
                         if (!marker.isEmpty())
@@ -350,6 +371,7 @@ namespace StructuraSystems::Client {
                     case DiagramTypes::Include:
                     case DiagramTypes::Frame:
                     case DiagramTypes::Dependency:
+                    case DiagramTypes::Import:
                         openArrow = true;
                         break;
                     case DiagramTypes::Message:
@@ -410,16 +432,45 @@ namespace StructuraSystems::Client {
                                                                   -std::sin(qDegreesToRadians(angle))) * 7));
                     painter->setBrush(Qt::NoBrush);
                 }
-                if (edge.Kind == DiagramTypes::Interface) {
-                    // ball and socket in the middle
+                if (flowArrow) {
+                    // the item flows: a filled triangle in the middle, pointing to the target
                     const QPointF middle = (segmentStart + segmentEnd) / 2.0;
                     const QLineF line(segmentStart, segmentEnd);
-                    const qreal angle = line.angle();
-                    painter->setBrush(QBrush(BackgroundColor));
-                    painter->drawEllipse(middle, 4.5, 4.5);
-                    painter->setBrush(Qt::NoBrush);
-                    const QRectF socket(middle.x() - 8, middle.y() - 8, 16, 16);
-                    painter->drawArc(socket, int((angle + 90) * 16), 180 * 16);
+                    if (line.length() > 1e-6) {
+                        const QPointF direction = (segmentEnd - segmentStart) / line.length();
+                        const QPolygonF triangle = arrowHead(middle + direction * (MarkerLength / 2.0),
+                                                             middle - direction * MarkerLength);
+                        painter->setBrush(QBrush(color));
+                        painter->drawPolygon(triangle);
+                        painter->setBrush(Qt::NoBrush);
+                    }
+                }
+                {
+                    // ':' (defined by), '::' (perform = reference subsetting) and the bar of a redefinition,
+                    // just behind the arrow head, across the line
+                    const QLineF last(end, beforeEnd);
+                    if (last.length() > 1e-6 && (edge.Kind == DiagramTypes::DefinedBy || edge.Kind == DiagramTypes::Performs ||
+                                                 edge.Kind == DiagramTypes::Redefinition)) {
+                        const QPointF direction = (beforeEnd - end) / last.length();
+                        const QPointF normal(-direction.y(), direction.x());
+                        const QPointF base = end + direction * (MarkerLength + 6);
+                        painter->setBrush(QBrush(color));
+                        if (edge.Kind == DiagramTypes::Redefinition) {
+                            painter->setPen(QPen(color, 2.6));
+                            painter->drawLine(base + normal * 7, base - normal * 7);
+                            painter->setPen(QPen(color, edge.Selected ? 2.2 : 1.4));
+                        } else {
+                            painter->setPen(Qt::NoPen);
+                            const int pairs = edge.Kind == DiagramTypes::Performs ? 2 : 1;
+                            for (int pair = 0; pair < pairs; ++pair) {
+                                const QPointF at = base + direction * (pair * 6.0);
+                                painter->drawEllipse(at + normal * 4, 1.8, 1.8);
+                                painter->drawEllipse(at - normal * 4, 1.8, 1.8);
+                            }
+                            painter->setPen(QPen(color, edge.Selected ? 2.2 : 1.4));
+                        }
+                        painter->setBrush(Qt::NoBrush);
+                    }
                 }
                 if (!edge.Label.isEmpty()) {
                     QFont font = painter->font();

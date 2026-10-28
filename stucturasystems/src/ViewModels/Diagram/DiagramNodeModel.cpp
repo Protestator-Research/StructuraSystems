@@ -46,6 +46,10 @@ namespace StructuraSystems::Client {
                 return node.InPins;
             case OutPinsRole:
                 return node.OutPins;
+            case DashedRole:
+                return node.Dashed;
+            case ContainerRole:
+                return node.Container;
             default:
                 return {};
         }
@@ -65,7 +69,9 @@ namespace StructuraSystems::Client {
             {DepthRole, "depth"},
             {SelectedRole, "selected"},
             {InPinsRole, "inPins"},
-            {OutPinsRole, "outPins"}
+            {OutPinsRole, "outPins"},
+            {DashedRole, "dashed"},
+            {ContainerRole, "container"}
         };
     }
 
@@ -114,9 +120,11 @@ namespace StructuraSystems::Client {
         existing.Depth = node.Depth;
         existing.InPins = node.InPins;
         existing.OutPins = node.OutPins;
+        existing.Dashed = node.Dashed;
+        existing.Container = node.Container;
         const auto changed = index(row);
         emit dataChanged(changed, changed, {NodeKindRole, KeywordRole, TitleRole, CompartmentsRole, DepthRole,
-                                            InPinsRole, OutPinsRole});
+                                            InPinsRole, OutPinsRole, DashedRole, ContainerRole});
     }
 
     void DiagramNodeModel::setRect(int row, const QRectF &rect) {

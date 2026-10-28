@@ -24,6 +24,10 @@ Item {
     required property real nodeHeight
     required property int depth
     required property bool selected
+    /** A reference ("ref part"): a dashed border. */
+    required property bool dashed
+    /** Interconnection view: a part drawn around its parts (its size comes from the layout). */
+    required property bool container
 
     property DiagramController controller
     /** The DiagramCanvas (arrow drawing, menus, edit dialog). */
@@ -33,6 +37,8 @@ Item {
 
     readonly property bool isFrame: nodeKind === DiagramTypes.PackageNode
     readonly property bool isPort: nodeKind === DiagramTypes.PortNode
+    /** An imported library package (ISQ, ScalarValues): a dashed package symbol. */
+    readonly property bool isLibrary: nodeKind === DiagramTypes.LibraryNode
     readonly property bool isDefinition: nodeKind === DiagramTypes.PartDefinitionNode
                                          || nodeKind === DiagramTypes.DefinitionNode
                                          || nodeKind === DiagramTypes.TextualNode
@@ -77,15 +83,16 @@ Item {
     }
 
     function reportSize() {
-        if (!isFrame && !isPort && controller)
+        if (!isFrame && !isPort && !container && controller)
             controller.setNodeSize(elementId, width, height)
     }
 
     x: nodeX
     y: nodeY
-    width: isFrame || isPort ? nodeWidth : Math.max(140, partContent.contentWidth + 2 * padding)
+    width: isFrame || isPort || container ? nodeWidth : Math.max(140, partContent.contentWidth + 2 * padding)
     // tall enough for its ports on the left and right border
-    height: isFrame || isPort ? nodeHeight
+    height: isFrame || isPort || container ? nodeHeight
+                              : isLibrary ? 66
                               : Math.max(partContent.implicitHeight + padding,
                                          controller && controller.modelRevision >= 0 ? controller.minimumNodeHeight(elementId) : 0)
     z: isFrame ? depth : isPort ? 3000 + depth : 1000 + depth
@@ -172,12 +179,40 @@ Item {
     Rectangle {
         id: partBox
 
-        visible: !node.isFrame && !node.isPort
+        visible: !node.isFrame && !node.isPort && !node.isLibrary
         anchors.fill: parent
         radius: node.isDefinition ? 2 : 10
         color: Theme.card
-        border.width: node.selected ? 2 : 1.2
+        border.width: node.dashed ? 0 : node.selected ? 2 : 1.2
         border.color: node.lineColor
+
+        // dashed border of a reference
+        Canvas {
+            id: dashedBorder
+
+            visible: node.dashed
+            anchors.fill: parent
+            onPaint: {
+                const context = getContext("2d")
+                context.reset()
+                context.strokeStyle = node.lineColor
+                context.lineWidth = node.selected ? 2 : 1.2
+                context.setLineDash([5, 3])
+                const inset = context.lineWidth / 2
+                const r = partBox.radius
+                context.beginPath()
+                context.roundedRect(inset, inset, width - 2 * inset, height - 2 * inset, r, r)
+                context.stroke()
+            }
+            onWidthChanged: requestPaint()
+            onHeightChanged: requestPaint()
+            onVisibleChanged: requestPaint()
+            Connections {
+                target: node
+                function onLineColorChanged() { dashedBorder.requestPaint() }
+                function onSelectedChanged() { dashedBorder.requestPaint() }
+            }
+        }
 
         Column {
             id: partContent
@@ -321,6 +356,77 @@ Item {
         background: Rectangle {
             color: Qt.alpha(Theme.card, 0.85)
             radius: 2
+        }
+    }
+
+    // ---------------------------------------------------------------- imported library package (dashed)
+    Item {
+        id: library
+
+        visible: node.isLibrary
+        anchors.fill: parent
+
+        Canvas {
+            id: libraryShape
+
+            anchors.fill: parent
+            onPaint: {
+                const context = getContext("2d")
+                context.reset()
+                context.strokeStyle = node.lineColor
+                context.lineWidth = node.selected ? 2 : 1.2
+                context.fillStyle = Theme.card
+                context.setLineDash([5, 3])
+                const inset = context.lineWidth / 2
+                const tab = Math.min(width * 0.45, 70)
+                // tab on top, body below
+                context.beginPath()
+                context.moveTo(inset, 16)
+                context.lineTo(inset, inset)
+                context.lineTo(tab, inset)
+                context.lineTo(tab, 16)
+                context.moveTo(inset, 16)
+                context.lineTo(width - inset, 16)
+                context.lineTo(width - inset, height - inset)
+                context.lineTo(inset, height - inset)
+                context.closePath()
+                context.fill()
+                context.stroke()
+            }
+            onWidthChanged: requestPaint()
+            onHeightChanged: requestPaint()
+            Connections {
+                target: node
+                function onLineColorChanged() { libraryShape.requestPaint() }
+                function onSelectedChanged() { libraryShape.requestPaint() }
+            }
+            Connections {
+                target: Theme
+                function onDarkChanged() { libraryShape.requestPaint() }
+            }
+        }
+        Column {
+            y: 22
+            width: parent.width
+            Label {
+                width: parent.width
+                horizontalAlignment: Text.AlignHCenter
+                text: node.keyword
+                font.pixelSize: 12
+                color: Theme.textSecondary
+            }
+            Label {
+                width: parent.width
+                horizontalAlignment: Text.AlignHCenter
+                text: node.title
+                font.pixelSize: 14
+                font.weight: Font.DemiBold
+                color: Theme.textPrimary
+            }
+        }
+        Grip {
+            owner: node
+            anchors.fill: parent
         }
     }
 

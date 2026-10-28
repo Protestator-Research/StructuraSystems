@@ -28,6 +28,8 @@ namespace StructuraSystems::Client {
         constexpr qreal HeaderStep = 58.0;  ///< vertical distance of the header rows of nested lifelines
         constexpr qreal RowHeight = 50.0;
         constexpr qreal EventSize = 14.0;
+        constexpr qreal PerformWidth = 130.0;
+        constexpr qreal PerformHeight = 34.0;
         constexpr qreal EdgeHitDistance = 6.0;
         /// Ids of nodes that are no element: the header of a part with lifelines below it, and the end of a
         /// message between whole lifelines (no event).
@@ -54,9 +56,7 @@ namespace StructuraSystems::Client {
             std::string keyword = Diagram::defaultKeyword(element.kind());
             if (element.declaredKeyword() && !element.declaredKeyword()->empty())
                 keyword = *element.declaredKeyword();
-            const auto &prefixes = element.prefixes();
-            if (std::find(prefixes.begin(), prefixes.end(), "ref") != prefixes.end())
-                keyword = "ref " + keyword;
+            // «part» as on the slides, also for "ref part" (the lifelines of an interaction are mostly references)
             return QStringLiteral("«") + q(keyword) + QStringLiteral("»");
         }
     }
@@ -184,10 +184,13 @@ namespace StructuraSystems::Client {
         };
         std::vector<Group> groups;
         int maxDepth = 0;
+        // events and the actions the lifeline performs («perform» boxes), in textual order
         const auto eventsOf = [&](ElementId owner) {
             std::vector<ElementId> events;
             for (const ElementId child: Model.children(owner)) {
-                if (Model.element(child).kind() == ElementKind::EventOccurrence)
+                const auto &element = Model.element(child);
+                if (element.kind() == ElementKind::EventOccurrence || element.kind() == ElementKind::ActionPerformance ||
+                    (element.kind() == ElementKind::ActionUsage && element.declaredKeyword() == "perform action"))
                     events.push_back(child);
             }
             return events;
@@ -333,6 +336,20 @@ namespace StructuraSystems::Client {
                 nodes.push_back(node);
                 for (const ElementId event: lane.Events) {
                     const auto &eventElement = Model.element(event);
+                    if (eventElement.kind() != ElementKind::EventOccurrence) {
+                        // «perform» startEngine: a box on the lifeline
+                        DiagramNode box;
+                        box.Id = event;
+                        box.Kind = DiagramTypes::ActionNode;
+                        box.Keyword = eventElement.kind() == ElementKind::ActionPerformance ? QStringLiteral("«perform»")
+                                                                                            : QStringLiteral("«perform action»");
+                        box.Title = headerTitle(eventElement);
+                        box.Rect = QRectF(lane.CenterX - PerformWidth / 2, rowY(EventRows[event]) - PerformHeight / 2,
+                                          PerformWidth, PerformHeight);
+                        box.Depth = 40;
+                        nodes.push_back(box);
+                        continue;
+                    }
                     DiagramNode dot;
                     dot.Id = event;
                     dot.Kind = DiagramTypes::EventNode;
@@ -361,21 +378,23 @@ namespace StructuraSystems::Client {
                 edge.Source = end(message->Source, 0);
                 edge.Target = end(message->Target, 1);
                 edge.Key = QStringLiteral("r:%1").arg(message->Id);
+                // "vs : VehicleStart", ": EngineStatus"
                 QString label = q(message->Name);
                 if (!message->TypeName.empty())
-                    label += (label.isEmpty() ? QString() : QStringLiteral(" ")) + QStringLiteral("of ") + q(message->TypeName);
+                    label += (label.isEmpty() ? QString() : QStringLiteral(" ")) + QStringLiteral(": ") + q(message->TypeName);
                 edge.Label = (message->Sequenced ? QStringLiteral("then ") : QString()) + label;
                 edges.push_back(edge);
             }
             for (const auto *succession: successions) {
+                // along one lifeline the order of the events says it all: no arrow; between lifelines a dashed one
+                if (laneOfEvent[succession->Source] == laneOfEvent[succession->Target])
+                    continue;
                 DiagramEdge edge;
                 edge.Kind = DiagramTypes::Succession;
                 edge.Source = succession->Source;
                 edge.Target = succession->Target;
                 edge.Key = QStringLiteral("r:%1").arg(succession->Id);
-                // along one lifeline the arrow says it all; between lifelines: "then"
-                const bool along = laneOfEvent[succession->Source] == laneOfEvent[succession->Target];
-                edge.Label = !succession->Name.empty() ? q(succession->Name) : along ? QString() : QStringLiteral("then");
+                edge.Label = !succession->Name.empty() ? q(succession->Name) : QStringLiteral("then");
                 edges.push_back(edge);
             }
         }

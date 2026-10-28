@@ -175,6 +175,64 @@ FocusScope {
                 }
             }
 
+            // frame of the action / state shown: "action transportPassenger"
+            Item {
+                id: contextFrame
+
+                readonly property rect area: canvas.controller.frameRect
+                readonly property real tabWidth: Math.min(width, frameTitle.implicitWidth + 28)
+
+                visible: canvas.controller.frameTitle.length > 0
+                x: area.x
+                y: area.y
+                width: area.width
+                height: area.height
+
+                Rectangle {
+                    anchors.fill: parent
+                    color: "transparent"
+                    border.width: 1.2
+                    border.color: Theme.textPrimary
+                }
+                Canvas {
+                    id: frameTab
+
+                    width: contextFrame.tabWidth
+                    height: 24
+                    onPaint: {
+                        const context = getContext("2d")
+                        context.reset()
+                        context.strokeStyle = Theme.textPrimary
+                        context.lineWidth = 1.2
+                        context.fillStyle = Theme.card
+                        context.beginPath()
+                        context.moveTo(0.6, 0.6)
+                        context.lineTo(width - 0.6, 0.6)
+                        context.lineTo(width - 0.6, height - 8)
+                        context.lineTo(width - 8, height - 0.6)
+                        context.lineTo(0.6, height - 0.6)
+                        context.closePath()
+                        context.fill()
+                        context.stroke()
+                    }
+                    onWidthChanged: requestPaint()
+                    Connections {
+                        target: Theme
+                        function onDarkChanged() { frameTab.requestPaint() }
+                    }
+                }
+                Label {
+                    id: frameTitle
+                    x: 8
+                    height: 24
+                    verticalAlignment: Text.AlignVCenter
+                    text: canvas.controller.frameTitle
+                    font.pixelSize: 13
+                    font.weight: Font.Medium
+                    color: Theme.textPrimary
+                }
+            }
+
             Repeater {
                 model: canvas.controller.nodes
 

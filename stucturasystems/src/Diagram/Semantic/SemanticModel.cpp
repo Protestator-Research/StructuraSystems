@@ -6,8 +6,23 @@
 #include "RelationshipRules.h"
 
 #include <algorithm>
+#include <cctype>
 
 namespace StructuraSystems::Diagram {
+
+    namespace {
+        /// "providePower.generateTorque": segments of letters, digits and '_' separated by single dots.
+        bool isDottedPath(const std::string &text) {
+            if (text.empty() || text.front() == '.' || text.back() == '.')
+                return false;
+            for (std::size_t i = 0; i < text.size(); ++i) {
+                const char c = text[i];
+                if (!(std::isalnum(static_cast<unsigned char>(c)) || c == '_' || (c == '.' && text[i + 1] != '.')))
+                    return false;
+            }
+            return true;
+        }
+    }
 
     namespace {
         /// Last segment of a reference as written ("a::'b c'.d" -> "d", "'x y'" -> "x y").
@@ -61,6 +76,8 @@ namespace StructuraSystems::Diagram {
     // --- elements -----------------------------------------------------------------------
 
     ElementId SemanticModel::addElement(ElementKind kind, const std::string &name, ElementId owner) {
+        if (owner != RootId && contains(owner) && element(owner).PerformPath)
+            throw ModelError("\"perform a.b;\" has no body");
         if (name.empty() && kind != ElementKind::Textual && !mayBeUnnamed(kind))
             throw ModelError("Element name must not be empty");
         if (!name.empty() && isAnonymousKind(kind))
@@ -124,10 +141,14 @@ namespace StructuraSystems::Diagram {
         auto &target = mutableElement(id);
         if (name.empty() && target.Kind != ElementKind::Textual && !mayBeUnnamed(target.Kind))
             throw ModelError("Element name must not be empty");
+        if (name.empty() && target.Kind == ElementKind::EnumerationLiteral && target.Value.empty())
+            throw ModelError("An enumeration value needs a name or a value (\"enum = 60 [mm];\")");
         if (!name.empty() && isAnonymousKind(target.Kind))
             throw ModelError(toString(target.Kind) + " has no name");
         if (target.Name == name)
             return;
+        if (target.PerformPath && !isDottedPath(name))
+            throw ModelError("'" + name + "' is not a path like providePower.generateTorque");
         if (name.empty()) {
             const auto inside = [&](ElementId end) { return end == id || isAncestor(id, end); };
             for (const auto &relationship: Relationships) {
@@ -147,6 +168,8 @@ namespace StructuraSystems::Diagram {
 
     void SemanticModel::setTypeName(ElementId id, const std::string &typeName) {
         auto &target = mutableElement(id);
+        if (target.PerformPath && !typeName.empty())
+            throw ModelError("\"perform a.b;\" has nothing but the path of the performed action");
         if (target.Kind == ElementKind::Package || isDefinitionKind(target.Kind) || target.Kind == ElementKind::Textual ||
             target.Kind == ElementKind::EnumerationLiteral || isTargetKind(target.Kind))
             throw ModelError(toString(target.Kind) + " cannot be typed");
@@ -156,6 +179,8 @@ namespace StructuraSystems::Diagram {
 
     void SemanticModel::setMultiplicity(ElementId id, std::optional<Multiplicity> multiplicity) {
         auto &target = mutableElement(id);
+        if (target.PerformPath && multiplicity.has_value())
+            throw ModelError("\"perform a.b;\" has nothing but the path of the performed action");
         if (target.Kind != ElementKind::PartUsage && target.Kind != ElementKind::Attribute &&
             target.Kind != ElementKind::ConstraintUsage && target.Kind != ElementKind::CalcUsage &&
             target.Kind != ElementKind::ItemUsage && target.Kind != ElementKind::PortUsage &&
@@ -174,8 +199,31 @@ namespace StructuraSystems::Diagram {
         notify(ModelChange::Type::ElementChanged, id);
     }
 
+    void SemanticModel::setPerformsPath(ElementId id, bool path) {
+        auto &target = mutableElement(id);
+        if (path) {
+            if (target.Kind != ElementKind::ActionPerformance || target.Perform != PerformStyle::ReferenceAction)
+                throw ModelError("Only \"perform a.b;\" names the performed action by its path");
+            if (!isDottedPath(target.Name))
+                throw ModelError("'" + target.Name + "' is not a path like providePower.generateTorque");
+            if (!target.TypeName.empty() || target.MultiplicityValue || !target.Prefixes.empty() || !target.Value.empty() ||
+                !target.Redefinitions.empty() || !target.ExternalSpecializations.empty() || !children(id).empty())
+                throw ModelError("\"perform a.b;\" has nothing but the path of the performed action");
+            for (const auto &relationship: Relationships) {
+                if (relationship.Source == id || relationship.Target == id)
+                    throw ModelError("\"perform a.b;\" cannot be connected");
+            }
+        }
+        if (target.PerformPath == path)
+            return;
+        target.PerformPath = path;
+        notify(ModelChange::Type::ElementChanged, id);
+    }
+
     void SemanticModel::setPrefixes(ElementId id, std::vector<std::string> prefixes) {
         auto &target = mutableElement(id);
+        if (target.PerformPath && !prefixes.empty())
+            throw ModelError("\"perform a.b;\" has nothing but the path of the performed action");
         if (target.Kind == ElementKind::Textual)
             throw ModelError("Textual elements keep their prefixes in their text");
         for (const auto &prefix: prefixes) {
@@ -190,9 +238,16 @@ namespace StructuraSystems::Diagram {
 
     void SemanticModel::setValue(ElementId id, const std::string &op, const std::string &expression) {
         auto &target = mutableElement(id);
+        if (target.PerformPath && !expression.empty())
+            throw ModelError("\"perform a.b;\" has nothing but the path of the performed action");
         if (target.Kind != ElementKind::Attribute && target.Kind != ElementKind::PartUsage &&
-            target.Kind != ElementKind::Subject && target.Kind != ElementKind::OccurrenceUsage)
+            target.Kind != ElementKind::Subject && target.Kind != ElementKind::OccurrenceUsage &&
+            target.Kind != ElementKind::EnumerationLiteral)
             throw ModelError(toString(target.Kind) + " cannot have a value");
+        if (target.Kind == ElementKind::EnumerationLiteral && expression.empty() && target.Name.empty())
+            throw ModelError("An enumeration value needs a name or a value (\"enum = 60 [mm];\")");
+        if (target.Kind == ElementKind::EnumerationLiteral && !expression.empty() && !op.empty() && op != "=")
+            throw ModelError("An enumeration value is bound with '=' (\"enum = 60 [mm];\")");
         const std::string newOperator = expression.empty() ? std::string() : (op.empty() ? std::string("=") : op);
         if (target.ValueOperator == newOperator && target.Value == expression)
             return;
@@ -203,11 +258,26 @@ namespace StructuraSystems::Diagram {
 
     void SemanticModel::setExternalSpecializations(ElementId id, std::vector<std::string> references) {
         auto &target = mutableElement(id);
+        if (target.PerformPath && !references.empty())
+            throw ModelError("\"perform a.b;\" has nothing but the path of the performed action");
         if (target.Kind == ElementKind::Textual || target.Kind == ElementKind::Package)
             throw ModelError(toString(target.Kind) + " cannot specialize");
         if (target.ExternalSpecializations == references)
             return;
         target.ExternalSpecializations = std::move(references);
+        notify(ModelChange::Type::ElementChanged, id);
+    }
+
+    void SemanticModel::setSpecializationKeyword(ElementId id, const std::string &keyword) {
+        auto &target = mutableElement(id);
+        if (!keyword.empty() && keyword != ":>" &&
+            !(keyword == "subsets" && isUsageKind(target.Kind)) &&
+            !(keyword == "specializes" && isDefinitionKind(target.Kind)))
+            throw ModelError("'" + keyword + "' cannot be written for " + toString(target.Kind));
+        const std::string value = keyword == ":>" ? std::string() : keyword;
+        if (target.SpecializationKeyword == value)
+            return;
+        target.SpecializationKeyword = value;
         notify(ModelChange::Type::ElementChanged, id);
     }
 
@@ -300,6 +370,8 @@ namespace StructuraSystems::Diagram {
     void SemanticModel::setRedefinitions(ElementId id, const std::string &keyword, std::vector<std::string> references,
                                          bool nameFromRedefinition) {
         auto &target = mutableElement(id);
+        if (target.PerformPath && !references.empty())
+            throw ModelError("\"perform a.b;\" has nothing but the path of the performed action");
         if (!references.empty() && (!isUsageKind(target.Kind) || target.Kind == ElementKind::EnumerationLiteral ||
                                     target.Kind == ElementKind::ControlNode || target.Kind == ElementKind::MetadataUsage))
             throw ModelError(toString(target.Kind) + " cannot redefine");
@@ -612,7 +684,7 @@ namespace StructuraSystems::Diagram {
         if (const auto rule = RelationshipRules::canRelate(*this, kind, source, target); !rule)
             throw ModelError(rule.Reason);
         const RelationshipId id = NextRelationshipId++;
-        Relationships.push_back(Relationship{id, kind, source, target, {}, {}, {}, {}, {}, false, std::nullopt, {}, std::nullopt});
+        Relationships.push_back(Relationship{id, kind, source, target, {}, {}, {}, {}, {}, false, std::nullopt, {}, std::nullopt, {}, {}, false});
         notify(ModelChange::Type::RelationshipAdded, id);
         return id;
     }
@@ -772,6 +844,39 @@ namespace StructuraSystems::Diagram {
         if (it->Definition == definition)
             return;
         it->Definition = definition;
+        notify(ModelChange::Type::RelationshipChanged, id);
+    }
+
+    void SemanticModel::setEndFeatures(RelationshipId id, const std::string &sourceFeature, const std::string &targetFeature) {
+        auto it = std::find_if(Relationships.begin(), Relationships.end(),
+                               [id](const Relationship &relationship) { return relationship.Id == id; });
+        if (it == Relationships.end())
+            throw ModelError("Unknown relationship id " + std::to_string(id));
+        const bool connecting = it->Kind == RelationshipKind::Connection || it->Kind == RelationshipKind::Flow ||
+                                it->Kind == RelationshipKind::Interface || it->Kind == RelationshipKind::Binding;
+        if (!connecting && (!sourceFeature.empty() || !targetFeature.empty()))
+            throw ModelError("Only connections, flows, interfaces and bindings have end features");
+        for (const std::string *feature: {&sourceFeature, &targetFeature}) {
+            if (!feature->empty() && !isDottedPath(*feature))
+                throw ModelError("Invalid end feature '" + *feature + "'");
+        }
+        if (it->SourceFeature == sourceFeature && it->TargetFeature == targetFeature)
+            return;
+        it->SourceFeature = sourceFeature;
+        it->TargetFeature = targetFeature;
+        notify(ModelChange::Type::RelationshipChanged, id);
+    }
+
+    void SemanticModel::setSuccessionFlow(RelationshipId id, bool successionFlow) {
+        auto it = std::find_if(Relationships.begin(), Relationships.end(),
+                               [id](const Relationship &relationship) { return relationship.Id == id; });
+        if (it == Relationships.end())
+            throw ModelError("Unknown relationship id " + std::to_string(id));
+        if (it->Kind != RelationshipKind::Flow && successionFlow)
+            throw ModelError("Only a flow can be a succession flow");
+        if (it->SuccessionFlow == successionFlow)
+            return;
+        it->SuccessionFlow = successionFlow;
         notify(ModelChange::Type::RelationshipChanged, id);
     }
 

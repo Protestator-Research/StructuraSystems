@@ -56,12 +56,16 @@ namespace StructuraSystems::Diagram {
         void setTypeName(ElementId id, const std::string &typeName);
         void setMultiplicity(ElementId id, std::optional<Multiplicity> multiplicity);
         void setPerformStyle(ElementId id, PerformStyle style);
+        /// "perform a.b;": the name of a reference perform is the dotted path of the performed action.
+        void setPerformsPath(ElementId id, bool path);
         /// Words before the keyword, e.g. {"derived", "#measurable"} (each a non-empty single word).
         void setPrefixes(ElementId id, std::vector<std::string> prefixes);
         /// Value of a part or attribute; empty expression removes it. op: "=", ":=", "default", "default =", ...
         void setValue(ElementId id, const std::string &op, const std::string &expression);
         /// References after ":>" that are not elements of the model (written as they are).
         void setExternalSpecializations(ElementId id, std::vector<std::string> references);
+        /// ":>" (empty), "subsets" for a usage or "specializes" for a definition.
+        void setSpecializationKeyword(ElementId id, const std::string &keyword);
         /// Constraint/calc only: body expression (empty removes it).
         void setExpression(ElementId id, const std::string &expression);
         /// Keyword as written instead of the default one of the kind (std::nullopt = default), e.g. "function",
@@ -125,6 +129,10 @@ namespace StructuraSystems::Diagram {
                                 const std::string &effect);
         /// Flow only: flow definition after ':' ("flow : FuelFlow of Fuel from a to b;"), empty = none.
         void setFlowDefinition(RelationshipId id, const std::string &definition);
+        /// Connection, flow, interface, binding: the features of the ends meant ("fuel", "a.b"; empty = the end).
+        void setEndFeatures(RelationshipId id, const std::string &sourceFeature, const std::string &targetFeature);
+        /// Flow only: written as "succession flow ..." (after the source ends, before the target starts).
+        void setSuccessionFlow(RelationshipId id, bool successionFlow);
         /// Message only: written as "then message ..." (true) or "message ..." (false).
         void setSequenced(RelationshipId id, bool sequenced);
         /// Allocation only: the allocation this one refines (written in its body); std::nullopt = top level.

@@ -52,9 +52,15 @@ namespace StructuraSystems::Client {
         Q_PROPERTY(int geometryRevision READ geometryRevision NOTIFY geometryRevisionChanged)
         /// Counts the updates from the model (not the moves): for bindings that depend on the elements only.
         Q_PROPERTY(int modelRevision READ modelRevision NOTIFY modelRevisionChanged)
+        /// Interconnection view: one part (or part definition) with its parts, items and ports nested inside it and
+        /// the connections, flows, interfaces and bindings between them (no composition arrows).
+        Q_PROPERTY(bool interconnection READ interconnection CONSTANT)
+        /// Interconnection view: the parts that can be shown, [{id, title}], and the one shown.
+        Q_PROPERTY(QVariantList contexts READ contexts NOTIFY contextsChanged)
+        Q_PROPERTY(QString contextId READ contextId WRITE setContextId NOTIFY contextChanged)
 
     public:
-        explicit DiagramController(Diagram::SemanticModel &model, QObject *parent = nullptr);
+        explicit DiagramController(Diagram::SemanticModel &model, QObject *parent = nullptr, bool interconnection = false);
         ~DiagramController() override;
 
         [[nodiscard]] DiagramNodeModel *nodes() const { return Nodes; }
@@ -68,6 +74,10 @@ namespace StructuraSystems::Client {
         [[nodiscard]] qreal canvasHeight() const { return CanvasSize.height(); }
         [[nodiscard]] int elementCount() const { return int(Model.elementCount()); }
         [[nodiscard]] int geometryRevision() const { return GeometryRevision; }
+        [[nodiscard]] bool interconnection() const { return Interconnection; }
+        [[nodiscard]] QVariantList contexts() const { return Contexts; }
+        [[nodiscard]] QString contextId() const;
+        void setContextId(const QString &id);
         [[nodiscard]] int modelRevision() const { return ModelRevision; }
 
         // ---- adding --------------------------------------------------------------------------------
@@ -187,6 +197,8 @@ namespace StructuraSystems::Client {
         void elementCountChanged();
         void geometryRevisionChanged();
         void modelRevisionChanged();
+        void contextsChanged();
+        void contextChanged();
 
     private:
         [[nodiscard]] std::optional<Diagram::ElementId> toId(const QString &id) const;
@@ -229,6 +241,12 @@ namespace StructuraSystems::Client {
         void place(Diagram::ElementId id, const QPointF &topLeft, const std::map<Diagram::ElementId, QSizeF> &extents,
                    const std::map<Diagram::ElementId, std::vector<QPointF>> &framePositions);
         [[nodiscard]] std::vector<Diagram::ElementId> nodeChildren(Diagram::ElementId owner) const;
+        /// Shown as a node: in the interconnection view the parts, items and ports in the part shown.
+        [[nodiscard]] bool shownAsNode(Diagram::ElementId id) const;
+        /// A part drawn around its parts (interconnection view) or a package frame.
+        [[nodiscard]] static bool isContainer(const DiagramNode &node);
+        [[nodiscard]] std::optional<Diagram::ElementId> interconnectionContext() const;
+        void updateContexts();
         [[nodiscard]] QVariantList suggestionsFor(Diagram::ElementKind usage, const QString &text) const;
         [[nodiscard]] QVariantMap statusFor(Diagram::ElementKind usage, const QString &text) const;
         /// A simple type name that is neither defined in the model nor a library type.
@@ -241,6 +259,9 @@ namespace StructuraSystems::Client {
         Diagram::SemanticModel::ListenerToken ListenerToken = 0;
         DiagramNodeModel *Nodes;
         DiagramEdgeModel *Edges;
+        bool Interconnection = false;
+        std::optional<Diagram::ElementId> ContextElement;
+        QVariantList Contexts;
 
         std::map<Diagram::ElementId, QPointF> PendingPositions;
         std::set<Diagram::ElementId> SelectedNodes;

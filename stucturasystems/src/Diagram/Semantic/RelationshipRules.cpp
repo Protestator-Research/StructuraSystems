@@ -57,14 +57,16 @@ namespace StructuraSystems::Diagram {
         // requirements, use cases and verifications (usages) on the top level, in packages and parts
         const bool caseUsage = childKind == ElementKind::RequirementUsage || childKind == ElementKind::UseCaseUsage ||
                                childKind == ElementKind::VerificationUsage || childKind == ElementKind::AnalysisUsage;
-            // metadata ("@Safety;", "metadata m about a;"), imports and aliases: in any namespace
+        // metadata ("@Safety;", "metadata m about a;"), imports and aliases: in any namespace
         const bool annotation = childKind == ElementKind::MetadataUsage || childKind == ElementKind::Textual;
         const bool namespaceMember = childKind == ElementKind::Import || childKind == ElementKind::Alias;
         // filters and views on package level
         const bool packageMember = childKind == ElementKind::Filter || childKind == ElementKind::ViewUsage;
+        // items on package level too ("item marketSurvey;" as supplier of a dependency)
+        const bool item = childKind == ElementKind::ItemUsage;
         if (ownerId == RootId) {
             if (definition || behavior || caseUsage || isPartLike(childKind) || isConstraintOrCalc(childKind) ||
-                annotation || namespaceMember || packageMember)
+                annotation || namespaceMember || packageMember || item)
                 return RuleResult::ok();
             return RuleResult::denied(toString(childKind) + " needs a part or part definition as owner");
         }
@@ -100,9 +102,9 @@ namespace StructuraSystems::Diagram {
         switch (ownerKind) {
             case ElementKind::Package:
                 if (definition || behavior || caseUsage || isPartLike(childKind) || isConstraintOrCalc(childKind) || text ||
-                    packageMember)
+                    packageMember || item)
                     return RuleResult::ok();
-                return RuleResult::denied("A package can only own packages, definitions, parts, constraints and calculations");
+                return RuleResult::denied("A package can only own packages, definitions, parts, items, constraints and calculations");
             case ElementKind::PartDefinition:
             case ElementKind::PartUsage:
                 if (childKind == ElementKind::PartUsage || childKind == ElementKind::Attribute ||
@@ -265,6 +267,8 @@ namespace StructuraSystems::Diagram {
             return RuleResult::denied("Source or target does not exist");
         if (source == target && kind != RelationshipKind::Transition)
             return RuleResult::denied("Source and target must be different elements");
+        if (model.element(source).performsPath() || model.element(target).performsPath())
+            return RuleResult::denied("\"perform a.b;\" refers to an action elsewhere and cannot be connected");
         // unnamed elements cannot be referenced (the source of verify / include is the body they are written in):
         // every element on the way from the innermost common owner to an end needs a name (all of them for a
         // specialization, written with its qualified name). A succession within one body is written right after
@@ -302,14 +306,22 @@ namespace StructuraSystems::Diagram {
             case RelationshipKind::Connection:
             case RelationshipKind::Flow:
             case RelationshipKind::Interface: {
+                // a flow also between the parameters of actions ("flow of Fuel from a.fuelOut to b.fuelIn;",
+                // "flow from trigger1.vs to startEngine.vs" with vs the payload of an accept action)
                 const auto connectable = [&](ElementKind end) {
-                    return kind == RelationshipKind::Interface ? end == ElementKind::PortUsage
-                                                               : end == ElementKind::PartUsage || end == ElementKind::PortUsage;
+                    if (kind == RelationshipKind::Interface)
+                        return end == ElementKind::PortUsage;
+                    if (kind == RelationshipKind::Flow && (end == ElementKind::ItemUsage || end == ElementKind::Attribute ||
+                                                           end == ElementKind::ActionUsage))
+                        return true;
+                    return end == ElementKind::PartUsage || end == ElementKind::PortUsage;
                 };
                 if (!connectable(sourceKind) || !connectable(targetKind))
                     return RuleResult::denied(kind == RelationshipKind::Interface
                                               ? std::string("An interface is only possible between two ports")
-                                              : toString(kind) + " is only possible between parts and ports");
+                                              : kind == RelationshipKind::Flow
+                                                ? std::string("A flow is only possible between parts, ports, items and parameters")
+                                                : toString(kind) + " is only possible between parts and ports");
                 if (model.isAncestor(source, target) || model.isAncestor(target, source))
                     return RuleResult::denied(toString(kind) + " between a part and its own sub-part is not supported");
                 if (relationshipExists(model, kind, source, target, kind != RelationshipKind::Flow))
@@ -431,12 +443,27 @@ namespace StructuraSystems::Diagram {
                     return RuleResult::denied("Include already exists");
                 return RuleResult::ok();
 
-            case RelationshipKind::Binding:
-                if (sourceKind != ElementKind::Attribute || targetKind != ElementKind::Attribute)
-                    return RuleResult::denied("Binding is only possible between two attributes or parameters");
+            case RelationshipKind::Binding: {
+                // equal at all times: two attributes (parameters), two ports, or two parts / items / occurrences
+                const auto family = [](ElementKind kind) {
+                    if (kind == ElementKind::Attribute)
+                        return 1;
+                    if (kind == ElementKind::PortUsage)
+                        return 2;
+                    if (kind == ElementKind::PartUsage || kind == ElementKind::ItemUsage ||
+                        kind == ElementKind::OccurrenceUsage)
+                        return 3;
+                    return 0;
+                };
+                if (family(sourceKind) == 0 || family(sourceKind) != family(targetKind))
+                    return RuleResult::denied("Binding is possible between two attributes (parameters), two ports or two "
+                                              "parts / items");
+                if (model.isAncestor(source, target) || model.isAncestor(target, source))
+                    return RuleResult::denied("A feature cannot be bound to its own owner or one of its features");
                 if (relationshipExists(model, kind, source, target, true))
                     return RuleResult::denied("Binding already exists");
                 return RuleResult::ok();
+            }
         }
         return RuleResult::denied("Unknown relationship kind");
     }

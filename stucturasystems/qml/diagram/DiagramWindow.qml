@@ -21,10 +21,12 @@ ApplicationWindow {
     readonly property BehaviorController behavior: editorModel.behavior
     readonly property UseCaseController useCases: editorModel.useCases
     readonly property SequenceController sequence: editorModel.sequence
-    /** 0 structure, 1 parametric view, 2 behavior view, 3 use case view, 4 sequence view */
+    readonly property DiagramController interconnection: editorModel.interconnection
+    /** 0 structure, 1 parametric view, 2 behavior view, 3 use case view, 4 sequence view, 5 interconnection view */
     property int view: 0
     readonly property Item activeCanvas: view === 0 ? canvas : view === 1 ? parametricCanvas
-                                         : view === 2 ? behaviorCanvas : view === 3 ? useCaseCanvas : sequenceCanvas
+                                         : view === 2 ? behaviorCanvas : view === 3 ? useCaseCanvas
+                                         : view === 4 ? sequenceCanvas : interconnectionCanvas
 
     /** Emitted when the window was closed; the main window destroys it then. */
     signal finished
@@ -166,7 +168,8 @@ ApplicationWindow {
 
             SegmentedControl {
                 objectName: "viewSwitch"
-                model: [qsTr("Structure"), qsTr("Parametric"), qsTr("Behavior"), qsTr("Use Cases"), qsTr("Sequence")]
+                model: [qsTr("Structure"), qsTr("Parametric"), qsTr("Behavior"), qsTr("Use Cases"), qsTr("Sequence"),
+                        qsTr("Interconnection")]
                 currentIndex: window.view
                 onActivated: index => window.view = index
             }
@@ -255,6 +258,28 @@ ApplicationWindow {
                 onActivated: index => window.sequence.contextId = window.sequence.contexts[index].id
                 ToolTip.visible: hovered
                 ToolTip.text: qsTr("Interaction (occurrence definition) whose lifelines and messages are shown")
+                ToolTip.delay: 700
+            }
+
+            ComboBox {
+                id: interconnectionBox
+                objectName: "interconnectionContextBox"
+                visible: window.view === 5
+                Layout.preferredWidth: 200
+                model: window.interconnection.contexts
+                textRole: "title"
+                valueRole: "id"
+                currentIndex: {
+                    const list = window.interconnection.contexts
+                    for (let i = 0; i < list.length; ++i) {
+                        if (list[i].id === window.interconnection.contextId)
+                            return i
+                    }
+                    return -1
+                }
+                onActivated: index => window.interconnection.contextId = window.interconnection.contexts[index].id
+                ToolTip.visible: hovered
+                ToolTip.text: qsTr("Part whose parts, ports and connections are shown inside it")
                 ToolTip.delay: 700
             }
 
@@ -350,6 +375,10 @@ ApplicationWindow {
                         structure: window.controller
                         onStatusMessage: message => window.showStatus(message)
                     }
+                    DiagramCanvas {
+                        id: interconnectionCanvas
+                        controller: window.interconnection
+                    }
                 }
                 Rectangle {
                     Layout.fillHeight: true
@@ -359,7 +388,7 @@ ApplicationWindow {
                 ToolPalette {
                     Layout.fillHeight: true
                     Layout.preferredWidth: 224
-                    controller: window.controller
+                    controller: window.view === 5 ? window.interconnection : window.controller
                     parametric: window.view === 1
                     behavior: window.view === 2
                     useCase: window.view === 3

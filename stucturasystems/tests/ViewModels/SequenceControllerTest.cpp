@@ -82,7 +82,7 @@ TEST_CASE("Sequence: lifelines, nested lifelines, events and messages of an inte
         thens += edge.Kind == DiagramTypes::Succession ? 1 : 0;
     }
     CHECK_EQ(messages, 3);
-    CHECK_EQ(thens, 2);
+    CHECK_EQ(thens, 0); // the two "then" lie along one lifeline: shown by the order of the events, no arrow
 
     const ElementId driver = *find(model, interaction, "driver");
     const ElementId vehicle = *find(model, interaction, "vehicle");
@@ -272,4 +272,49 @@ TEST_CASE("Structure view: occurrences, events, allocations and dependencies") {
     // an event dropped onto a part
     CHECK(!view.addElement(DiagramTypes::ToolEvent, target.center().x(), target.center().y()).isEmpty());
     CHECK(generated(allocations).find("event occurrence event1;") != std::string::npos);
+}
+
+TEST_CASE("Sequence: «perform» on a lifeline, message labels with name and type (slide 68)") {
+    SemanticModel model;
+    CHECK(SysMLTextImporter::importText(
+            "item def VehicleStart;\n"
+            "item def EngineStatus;\n"
+            "action startEngine;\n"
+            "occurrence def StartVehicle {\n"
+            "    ref part driver {\n"
+            "        event occurrence vsSent;\n"
+            "        then event occurrence esReceived;\n"
+            "    }\n"
+            "    ref part vehicle_b {\n"
+            "        event occurrence vsReceived;\n"
+            "        perform startEngine;\n"
+            "        event occurrence esSent;\n"
+            "    }\n"
+            "    message vs of VehicleStart from driver.vsSent to vehicle_b.vsReceived;\n"
+            "    message of EngineStatus from vehicle_b.esSent to driver.esReceived;\n"
+            "}\n", model).lossless());
+    SequenceController sequence(model);
+    const ElementId interaction = model.children(RootId).at(3);
+    sequence.setContextId(key(interaction));
+    QStringList labels;
+    for (const auto &edge: sequence.edges()->edges())
+        if (edge.Kind == DiagramTypes::Message)
+            labels.append(edge.Label);
+    CHECK(labels.contains("vs : VehicleStart"));
+    CHECK(labels.contains(": EngineStatus"));
+    const ElementId vehicle = *find(model, interaction, "vehicle_b");
+    const DiagramNode *perform = nullptr;
+    for (const auto &node: sequence.nodes()->nodes())
+        if (node.Kind == DiagramTypes::ActionNode)
+            perform = &node;
+    CHECK(perform != nullptr);
+    if (!perform)
+        return;
+    CHECK_EQ(perform->Keyword, QString("«perform»"));
+    CHECK_EQ(perform->Title, QString("startEngine"));
+    CHECK_EQ(sequence.nodes()->find(vehicle)->Keyword, QString("«part»"));
+    // between the two events of its lifeline
+    const auto y = [&](const std::string &event) { return sequence.nodeRect(key(*find(model, vehicle, event))).center().y(); };
+    CHECK(y("vsReceived") < perform->Rect.center().y());
+    CHECK(perform->Rect.center().y() < y("esSent"));
 }

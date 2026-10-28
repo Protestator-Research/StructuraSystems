@@ -231,8 +231,9 @@ namespace StructuraSystems::Diagram {
     /// Elements that may be unnamed: "require constraint { ... }", "assume constraint { ... }", "objective { ... }",
     /// actions such as "then send s to t;", "assign x := 1;", "if c { ... }", control nodes such as "then fork;".
     [[nodiscard]] inline bool mayBeUnnamed(ElementKind kind) {
+        // an enumeration value with units may be unnamed: "enum = 60 [mm];"
         return kind == ElementKind::ConstraintUsage || kind == ElementKind::RequirementUsage ||
-               kind == ElementKind::ActionUsage || kind == ElementKind::ControlNode ||
+               kind == ElementKind::ActionUsage || kind == ElementKind::ControlNode || kind == ElementKind::EnumerationLiteral ||
                kind == ElementKind::MetadataUsage || isAnonymousKind(kind);
     }
 
@@ -326,6 +327,8 @@ namespace StructuraSystems::Diagram {
         [[nodiscard]] const std::string &typeName() const { return TypeName; }
         [[nodiscard]] const std::optional<Multiplicity> &multiplicity() const { return MultiplicityValue; }
         [[nodiscard]] PerformStyle performStyle() const { return Perform; }
+        /// "perform providePower.generateTorque;": the name is the path of the performed action, written as it is.
+        [[nodiscard]] bool performsPath() const { return PerformPath; }
 
         /// Words written before the declaration keyword, in their order, e.g. {"derived", "#measurable"}.
         [[nodiscard]] const std::vector<std::string> &prefixes() const { return Prefixes; }
@@ -346,6 +349,8 @@ namespace StructuraSystems::Diagram {
         [[nodiscard]] const std::optional<std::string> &declaredKeyword() const { return DeclaredKeyword; }
         /// Specializations whose target is not part of the model (e.g. a library type), as written after ":>".
         [[nodiscard]] const std::vector<std::string> &externalSpecializations() const { return ExternalSpecializations; }
+        /// Word written for the specializations: empty = ":>", or "subsets" (a usage) / "specializes" (a definition).
+        [[nodiscard]] const std::string &specializationKeyword() const { return SpecializationKeyword; }
         /// Short name (id) as written between < >, e.g. "'R1'" or "R1" (empty = none).
         [[nodiscard]] const std::string &shortName() const { return ShortName; }
         /// Written after the multiplicity: "ordered", "nonunique" or "ordered nonunique" (empty = none).
@@ -393,12 +398,14 @@ namespace StructuraSystems::Diagram {
         std::string TypeName;
         std::optional<Multiplicity> MultiplicityValue;
         PerformStyle Perform = PerformStyle::DeclareAction;
+        bool PerformPath = false;
         std::vector<std::string> Prefixes;
         std::string ValueOperator;
         std::string Value;
         std::string Text;
         std::string Keyword;
         std::vector<std::string> ExternalSpecializations;
+        std::string SpecializationKeyword;
         std::string Expression;
         std::optional<std::string> DeclaredKeyword;
         std::string ShortName;
@@ -442,6 +449,12 @@ namespace StructuraSystems::Diagram {
         /// Message / allocation / dependency: the body it is declared in (RootId = top level);
         /// std::nullopt = the innermost element owning both ends (as for all other relationships)
         std::optional<ElementId> Context;
+        /// Connection / flow / interface / binding: a feature of the end that it does not own itself, e.g. "fuel"
+        /// in "flow of Fuel from fuelTank.p1.fuel to ..." (fuel comes from the port definition of p1); empty = the end.
+        std::string SourceFeature;
+        std::string TargetFeature;
+        /// Flow only: "succession flow ..." - the transfer happens after the source ends, before the target starts.
+        bool SuccessionFlow = false;
     };
 
     [[nodiscard]] std::string toString(ElementKind kind);

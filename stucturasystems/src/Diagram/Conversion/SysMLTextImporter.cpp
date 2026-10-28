@@ -1259,7 +1259,10 @@ namespace StructuraSystems::Diagram {
                 const std::string shortName = Dialect == SysMLTextImporter::Dialect::SysML ? readShortName() : std::string();
                 const std::string name = readName();
                 std::vector<Reference> specializations;
+                std::string specializationKeyword; // "specializes" instead of ":>"
                 while (!name.empty() && (isSymbol(":>") || isWord("specializes") || isWord("subclassifies"))) {
+                    if (specializations.empty() && isWord("specializes"))
+                        specializationKeyword = "specializes";
                     take();
                     for (auto &reference: readReferenceList())
                         specializations.push_back(std::move(reference));
@@ -1286,6 +1289,8 @@ namespace StructuraSystems::Diagram {
                     Model.setParallel(*id, true);
                 if (declaredKeyword)
                     Model.setDeclaredKeyword(*id, declaredKeyword); // "concern def", "viewpoint def"
+                if (!specializationKeyword.empty() && isDefinitionKind(kind))
+                    Model.setSpecializationKeyword(*id, specializationKeyword);
                 applyShortName(*id, shortName, line);
                 for (auto &reference: specializations)
                     Pendings.push_back({Pending::Type::Specialization, *id, owner, std::move(reference.Path), {}, line,
@@ -1300,7 +1305,34 @@ namespace StructuraSystems::Diagram {
                     take();
                     style = PerformStyle::DeclareAction;
                 }
-                if (style == PerformStyle::ReferenceAction && isNameToken() && (isSymbol(".", 1) || isSymbol("::", 1))) {
+                if (style == PerformStyle::ReferenceAction && isNameToken() && isSymbol(".", 1)) {
+                    // "perform providePower.generateTorque;" - an action of another action tree
+                    std::string path;
+                    while (isNameToken() && peek().Type == TokenType::Identifier) {
+                        path += take().Text;
+                        if (!isSymbol(".") || !isNameToken(1))
+                            break;
+                        path += take().Text;
+                    }
+                    if (!isSymbol(";") || !prefixes.empty()) {
+                        fallBackToText(owner, begin, line);
+                        return;
+                    }
+                    const auto id = add(ElementKind::ActionPerformance, path, owner);
+                    if (!id) {
+                        fallBackToText(owner, begin, line);
+                        return;
+                    }
+                    try {
+                        Model.setPerformStyle(*id, PerformStyle::ReferenceAction);
+                        Model.setPerformsPath(*id, true);
+                    } catch (const std::exception &exception) {
+                        lost(std::string(exception.what()) + " (" + path + ")", line);
+                    }
+                    finishDeclaration(*id);
+                    return;
+                }
+                if (style == PerformStyle::ReferenceAction && isNameToken() && isSymbol("::", 1)) {
                     fallBackToText(owner, begin, line);
                     return;
                 }
@@ -1371,7 +1403,7 @@ namespace StructuraSystems::Diagram {
                 }
                 // "objective { ... }", "requirement : R;", "if c { ... }", "send s to t;" without a name
                 if (name.empty() && !(kind == ElementKind::RequirementUsage && shortName.empty()) &&
-                    kind != ElementKind::ActionUsage) {
+                    kind != ElementKind::ActionUsage && !(kind == ElementKind::EnumerationLiteral && isSymbol("="))) {
                     fallBackToText(owner, begin, line);
                     return;
                 }
@@ -1379,6 +1411,7 @@ namespace StructuraSystems::Diagram {
                 std::string typeName;
                 std::optional<Multiplicity> multiplicity;
                 std::vector<Reference> specializations;
+                std::string specializationKeyword; // "subsets" instead of ":>"
                 std::string valueOperator;
                 std::string value;
                 std::string qualifiers; // ordered, nonunique
@@ -1396,7 +1429,9 @@ namespace StructuraSystems::Diagram {
                         bool valid = false;
                         multiplicity = readMultiplicity(valid);
                         plain = valid;
-                    } else if (isSymbol(":>")) {
+                    } else if (isSymbol(":>") || (isWord("subsets") && specializations.empty())) {
+                        if (isWord("subsets"))
+                            specializationKeyword = "subsets";
                         take();
                         for (auto &reference: readReferenceList())
                             specializations.push_back(std::move(reference));
@@ -1458,14 +1493,16 @@ namespace StructuraSystems::Diagram {
                                                  kind == ElementKind::ItemUsage || kind == ElementKind::PortUsage ||
                                                  kind == ElementKind::Subject || kind == ElementKind::Actor ||
                                                  kind == ElementKind::OccurrenceUsage;
+                // "enum = 60 [mm];" in an enum def with units
                 const bool valueAllowed = kind == ElementKind::Attribute || kind == ElementKind::PartUsage ||
-                                          kind == ElementKind::Subject || kind == ElementKind::OccurrenceUsage;
+                                          kind == ElementKind::Subject || kind == ElementKind::OccurrenceUsage ||
+                                          (kind == ElementKind::EnumerationLiteral && (valueOperator.empty() || valueOperator == "="));
                 const bool redefinitionAllowed = kind != ElementKind::EnumerationLiteral && kind != ElementKind::ControlNode;
                 if (!plain || (!qualifiers.empty() && !multiplicityAllowed) ||
                     (!bodyAllowed && hasBody) || (multiplicity && !multiplicityAllowed) || (!value.empty() && !valueAllowed) ||
                     ((kind == ElementKind::ActionUsage || kind == ElementKind::StateUsage) && !value.empty()) ||
                     (kind == ElementKind::EnumerationLiteral &&
-                     (!value.empty() || !typeName.empty() || multiplicity || !specializations.empty())) ||
+                     (!typeName.empty() || multiplicity || !specializations.empty())) ||
                     (kind == ElementKind::ActionPerformance && (multiplicity || !value.empty())) ||
                     (!redefinitions.empty() && !redefinitionAllowed) ||
                     (form != ActionForm::Plain && (multiplicity || !redefinitions.empty())) ||
@@ -1504,6 +1541,8 @@ namespace StructuraSystems::Diagram {
                         Model.setActionForm(*id, form, clause);
                     if (namedInBody)
                         Model.setNamedInBody(*id, true);
+                    if (!specializationKeyword.empty())
+                        Model.setSpecializationKeyword(*id, specializationKeyword);
                 } catch (const std::exception &exception) {
                     lost(std::string(exception.what()) + " (" + name + ")", line);
                 }
@@ -1630,6 +1669,7 @@ namespace StructuraSystems::Diagram {
                 std::string typeName;
                 std::optional<Multiplicity> multiplicity;
                 std::vector<Reference> specializations;
+                std::string specializationKeyword; // "subsets" / "specializes" instead of ":>"
                 // "require constraint { ... }" / "assume constraint { ... }" are usually unnamed
                 const bool unnamedAllowed = declaredKeyword == "require constraint" || declaredKeyword == "assume constraint" ||
                                             declaredKeyword == "assert constraint";
@@ -1645,10 +1685,15 @@ namespace StructuraSystems::Diagram {
                         plain = valid;
                     } else if (!definition && sysml && redefinitions.empty() && (isSymbol(":>>") || isWord("redefines"))) {
                         plain = readRedefinitions();
-                    } else if (isSymbol(":>") || (definition && (isWord("specializes") || isWord("subclassifies")))) {
+                    } else if (isSymbol(":>") || (definition && (isWord("specializes") || isWord("subclassifies"))) ||
+                               (!definition && sysml && isWord("subsets"))) {
+                        if (specializations.empty() && (isWord("specializes") || isWord("subsets")))
+                            specializationKeyword = peek().Text;
+                        else if (isWord("subclassifies"))
+                            plain = false; // KerML: kept as written
                         take();
                         const auto list = readReferenceList();
-                        plain = !list.empty();
+                        plain = plain && !list.empty();
                         for (const auto &reference: list)
                             specializations.push_back(reference);
                     } else {
@@ -1675,6 +1720,8 @@ namespace StructuraSystems::Diagram {
                         Model.setDeclaredKeyword(*id, declaredKeyword);
                     if (!redefinitions.empty())
                         Model.setRedefinitions(*id, redefinitionKeyword, redefinitions, nameFromRedefinition);
+                    if (!specializationKeyword.empty())
+                        Model.setSpecializationKeyword(*id, specializationKeyword);
                 } catch (const std::exception &exception) {
                     lost(std::string(exception.what()) + " (" + name + ")", line);
                 }
@@ -1891,6 +1938,13 @@ namespace StructuraSystems::Diagram {
                     take();
                     if (const auto entry = implicitControl(owner, "entry"))
                         Previous[owner] = *entry;
+                    return true;
+                }
+                if (keyword == "succession" && isWord("flow", 1)) {
+                    // "succession flow of T from a.x to b.y;"
+                    take();
+                    take();
+                    parseFlow(owner, begin, line, true);
                     return true;
                 }
                 if (keyword == "first" || keyword == "succession") {
@@ -2510,7 +2564,7 @@ namespace StructuraSystems::Diagram {
             }
 
             /// flow [name] [: Definition] [of Type] from a to b;
-            void parseFlow(ElementId owner, std::size_t begin, std::size_t line) {
+            void parseFlow(ElementId owner, std::size_t begin, std::size_t line, bool successionFlow = false) {
                 std::string name;
                 std::string typeName;
                 std::string definition;
@@ -2545,9 +2599,10 @@ namespace StructuraSystems::Diagram {
                     return;
                 }
                 take();
+                // Text marks a succession flow
                 Pendings.push_back({Pending::Type::Flow, RootId, owner, std::move(source), std::move(target), line,
-                                    std::string(), begin, LastEnd, name, typeName, {}, {}, {}, std::nullopt, std::nullopt,
-                                    definition});
+                                    successionFlow ? std::string("succession") : std::string(), begin, LastEnd, name, typeName,
+                                    {}, {}, {}, std::nullopt, std::nullopt, definition});
                 reserve();
             }
 
@@ -2652,13 +2707,44 @@ namespace StructuraSystems::Diagram {
                     const Accept isEnd = [&](ElementId id) {
                         const ElementKind kind = Model.element(id).kind();
                         if (binding)
-                            return kind == ElementKind::Attribute;
+                            return kind == ElementKind::Attribute || kind == ElementKind::PortUsage ||
+                                   kind == ElementKind::PartUsage || kind == ElementKind::ItemUsage ||
+                                   kind == ElementKind::OccurrenceUsage;
                         if (pending.Kind == Pending::Type::Interface)
                             return kind == ElementKind::PortUsage;
+                        if (pending.Kind == Pending::Type::Flow && (kind == ElementKind::ItemUsage || kind == ElementKind::Attribute))
+                            return true; // parameters of actions
                         return kind == ElementKind::PartUsage || kind == ElementKind::PortUsage;
                     };
-                    const auto source = resolve(pending.Scope, pending.First, false, isEnd);
-                    const auto target = resolve(pending.Scope, pending.Second, false, isEnd);
+                    // an end found as written, or a feature the end does not own ("p1.fuel": fuel of p1's definition)
+                    const auto endOf = [&](const std::vector<std::string> &path, std::string &feature) -> std::optional<ElementId> {
+                        feature.clear();
+                        if (const auto found = resolve(pending.Scope, path, false, isEnd))
+                            return found;
+                        for (std::size_t length = path.size() - 1; length >= 1 && path.size() > 1; --length) {
+                            const std::vector<std::string> prefix(path.begin(), path.begin() + std::ptrdiff_t(length));
+                            // the end, or (flow) an action whose payload / parameter is meant ("trigger1.vs")
+                            const Accept endOrAction = [&](ElementId id) {
+                                return isEnd(id) || (pending.Kind == Pending::Type::Flow &&
+                                                     Model.element(id).kind() == ElementKind::ActionUsage);
+                            };
+                            const auto found = resolve(pending.Scope, prefix, false, endOrAction);
+                            if (!found)
+                                continue;
+                            // only features it does not own: a name it owns would have been found above
+                            if (Model.element(*found).typeName().empty() &&
+                                Model.element(*found).kind() != ElementKind::ActionUsage)
+                                return std::nullopt;
+                            for (std::size_t i = length; i < path.size(); ++i)
+                                feature += (feature.empty() ? "" : ".") + path[i];
+                            return found;
+                        }
+                        return std::nullopt;
+                    };
+                    std::string sourceFeature;
+                    std::string targetFeature;
+                    const auto source = endOf(pending.First, sourceFeature);
+                    const auto target = endOf(pending.Second, targetFeature);
                     const RelationshipKind kind = binding ? RelationshipKind::Binding
                                                   : pending.Kind == Pending::Type::Connection ? RelationshipKind::Connection
                                                   : pending.Kind == Pending::Type::Interface ? RelationshipKind::Interface
@@ -2668,7 +2754,8 @@ namespace StructuraSystems::Diagram {
                     }
                     release(pending);
                     addRelationship(kind, *source, *target, label, pending.Line, pending.Name, pending.TypeName,
-                                    pending.Definition);
+                                    pending.Definition, sourceFeature, targetFeature,
+                                    kind == RelationshipKind::Flow && pending.Text == "succession");
                 }
                 for (auto &[id, references]: External) {
                     try {
@@ -2840,13 +2927,18 @@ namespace StructuraSystems::Diagram {
 
             void addRelationship(RelationshipKind kind, ElementId source, ElementId target, const std::string &label,
                                  std::size_t line, const std::string &name = {}, const std::string &typeName = {},
-                                 const std::string &definition = {}) {
+                                 const std::string &definition = {}, const std::string &sourceFeature = {},
+                                 const std::string &targetFeature = {}, bool successionFlow = false) {
                 try {
                     const auto id = Model.addRelationship(kind, source, target);
                     if (!name.empty() || !typeName.empty())
                         Model.setRelationshipLabel(id, name, typeName);
                     if (!definition.empty())
                         Model.setFlowDefinition(id, definition);
+                    if (!sourceFeature.empty() || !targetFeature.empty())
+                        Model.setEndFeatures(id, sourceFeature, targetFeature);
+                    if (successionFlow)
+                        Model.setSuccessionFlow(id, true);
                     ++Report.ImportedRelationships;
                 } catch (const std::exception &exception) {
                     lost(label + " (" + exception.what() + ")", line);

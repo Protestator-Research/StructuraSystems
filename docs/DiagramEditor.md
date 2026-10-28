@@ -20,7 +20,35 @@ One window per document. The window is closed together with its document.
 | Parametric | values, calculations and constraints of one part with their bindings | values, calc / constraint definitions, lines between pins |
 | Behavior | the flow of one action (actions, control nodes, send / accept / assign / terminate, if / while / loop / for) or the states of one state machine | palette tiles, arrows (succession, transition with trigger, guard and effect) |
 | Use cases | use cases, actors, the subject as system boundary, «include» | palette tiles, lines |
-| Sequence | the lifelines, events and messages of one interaction (occurrence definition) | lifelines, drag from lifeline to lifeline |
+| Sequence | the lifelines, events, «perform» boxes and messages of one interaction (occurrence definition) | lifelines, drag from lifeline to lifeline |
+| Interconnection | one part (or part definition) with its parts, items and ports nested inside it, and the connections, flows, interfaces and bindings between them | palette tiles (dropped into a part), arrows between ports / parts |
+
+### Notation (as in *Intro to the SysML v2 Language – Graphical Notation*)
+
+| Drawn | Meaning | Text |
+| --- | --- | --- |
+| dashed line, open head, `«import» *` / `«import» **` / `«import»` | import between two packages shown | `private import Definitions::*;` |
+| dashed package with `«import» *` | import of a library package (ISQ, ScalarValues) | `private import ISQ::*;` |
+| hollow triangle with `:` | usage defined by a definition | `part engine : Engine;` |
+| hollow triangle | specialization / subsetting | `part def B :> A;`, `part c subsets b;` |
+| hollow triangle with a bar | redefinition | `part :>> leftFront;` |
+| open head with `::` | a part performs an action | `perform providePower;` |
+| filled diamond / hollow diamond, right-angled tree | composition / reference (`ref part`, dashed node) | |
+| half disc | timeslice / snapshot of an occurrence | `timeslice t1 { ... }` |
+| filled triangle in the middle, `name : Item` | flow | `flow of Fuel from a.p1 to b.p2;` |
+| line with `: Type` | interface / connection | `interface : I connect a to b;` |
+| line with `=` | binding | `bind a = b;` |
+| dashed line, open head | succession (behavior), «satisfy», «verify», dependency | `first a then b;` |
+| solid line, open head | transition, message, «allocate» | `transition first a then b;` |
+
+Inherited features are listed automatically with `^` (`^mass`, `^providePower`, `^{fuel.fuelMass <= fuelMassMax}`);
+redefined ones are listed under their own entry (`mass :>> mass = 1500 [kg]`). Compartments follow the slides:
+*attributes*, *ports*, *directed features* (port definitions), *parameters* (actions, calculations with `return`),
+*perform actions*, *exhibit states*, *state actions* (`entry` / `do` / `exit`), *assert constraints*, *constraints*
+(requirements: `require {...}`, `assume {...}`), *enums*, *expression*.
+
+The behavior view draws a frame with the name of the action or state shown, nested states inside their state (a
+parallel state's states side by side) and input / output flows between actions.
 
 Double-click a node, an entry or an arrow to edit it (name, id, type, multiplicity, value, prefixes, redefinitions,
 what an action does, documentation, ...). Del removes the selection.

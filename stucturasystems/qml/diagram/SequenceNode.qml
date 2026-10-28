@@ -29,6 +29,8 @@ Item {
     readonly property bool isLifeline: nodeKind === DiagramTypes.LifelineNode
     readonly property bool isGroup: nodeKind === DiagramTypes.LifelineGroupNode
     readonly property bool isEvent: nodeKind === DiagramTypes.EventNode
+    /** «perform» startEngine: an action the lifeline performs, a box on its line. */
+    readonly property bool isPerform: nodeKind === DiagramTypes.ActionNode
     /** The end of a message between whole lifelines: nothing to show. */
     readonly property bool isEnd: isEvent && nodeWidth < 8
     readonly property real headerHeight: 44
@@ -37,7 +39,7 @@ Item {
     y: nodeY
     width: nodeWidth
     height: nodeHeight
-    z: isEvent ? 20 : isGroup ? 5 : 2
+    z: isEvent ? 20 : isPerform ? 15 : isGroup ? 5 : 2
     visible: !isEnd
 
     // ---------------------------------------------------------------- shapes
@@ -119,6 +121,49 @@ Item {
         text: node.title
         font.pixelSize: 11
         color: Theme.textSecondary
+    }
+
+    Rectangle {
+        visible: node.isPerform
+        anchors.fill: parent
+        radius: 8
+        color: Theme.card
+        border.width: node.selected ? 2 : 1.2
+        border.color: node.lineColor
+        Column {
+            anchors.centerIn: parent
+            width: parent.width - 10
+            Label {
+                width: parent.width
+                horizontalAlignment: Text.AlignHCenter
+                text: node.keyword
+                font.pixelSize: 10
+                color: Theme.textSecondary
+            }
+            Label {
+                width: parent.width
+                horizontalAlignment: Text.AlignHCenter
+                text: node.title
+                font.pixelSize: 12
+                font.weight: Font.DemiBold
+                color: Theme.textPrimary
+                elide: Text.ElideRight
+            }
+        }
+        MouseArea {
+            anchors.fill: parent
+            acceptedButtons: Qt.LeftButton | Qt.RightButton
+            onPressed: mouse => {
+                node.canvas.forceActiveFocus()
+                node.controller.select(node.elementId, (mouse.modifiers & Qt.ControlModifier) !== 0)
+                if (mouse.button === Qt.RightButton)
+                    node.canvas.openNodeMenu(node.elementId)
+            }
+            onDoubleClicked: mouse => {
+                if (mouse.button === Qt.LeftButton)
+                    node.canvas.editElement(node.elementId)
+            }
+        }
     }
 
     // ---------------------------------------------------------------- mouse

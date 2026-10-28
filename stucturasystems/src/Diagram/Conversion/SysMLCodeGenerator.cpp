@@ -408,8 +408,11 @@ namespace StructuraSystems::Diagram {
     void SysMLCodeGenerator::generateRelationship(const SemanticModel &model, const Relationship &relationship,
                                                   ElementId owner, std::size_t depth, std::string &out) const {
         {
-            const std::string source = referenceFrom(model, owner, relationship.Source);
-            const std::string target = referenceFrom(model, owner, relationship.Target);
+            // "fuelTank.p1.fuel": a feature of the end it does not own (from its definition)
+            const std::string source = referenceFrom(model, owner, relationship.Source) +
+                                       (relationship.SourceFeature.empty() ? std::string() : "." + relationship.SourceFeature);
+            const std::string target = referenceFrom(model, owner, relationship.Target) +
+                                       (relationship.TargetFeature.empty() ? std::string() : "." + relationship.TargetFeature);
             // optional name and type: "connection c : Pipe connect", "flow f of Fuel from", "interface : I connect"
             std::string label;
             if (!relationship.Name.empty())
@@ -434,7 +437,8 @@ namespace StructuraSystems::Diagram {
                         label += " : " + relationship.Definition;
                     if (!relationship.TypeName.empty())
                         label += " of " + relationship.TypeName;
-                    out += indent(depth) + "flow" + label + " from " + source + " to " + target + ";\n";
+                    out += indent(depth) + (relationship.SuccessionFlow ? "succession flow" : "flow") + label + " from " + source +
+                           " to " + target + ";\n";
                     break;
                 case RelationshipKind::Succession:
                     // named, or between events of different lifelines (other unnamed ones follow their source)
@@ -512,6 +516,8 @@ namespace StructuraSystems::Diagram {
                 word("<" + element.shortName() + ">");
             if (element.nameFromRedefinition())
                 word(redefinitions()); // "part redefines cyl[4]", ":>> mass = 2000.0"
+            else if (element.performsPath())
+                word(element.name()); // "perform providePower.generateTorque"
             else if (!element.name().empty())
                 word(formatName(element.name()));
         };
@@ -525,14 +531,16 @@ namespace StructuraSystems::Diagram {
                 text += " " + element.multiplicityQualifiers();
 
             std::string specializations;
+            const std::string first = " " + (element.specializationKeyword().empty() ? std::string(":>")
+                                                                                   : element.specializationKeyword()) + " ";
             for (const auto &relationship: model.relationships()) {
                 if (relationship.Kind != RelationshipKind::Specialization || relationship.Source != id)
                     continue;
-                specializations += specializations.empty() ? " :> " : ", ";
+                specializations += specializations.empty() ? first : ", ";
                 specializations += specializationReference(model, id, relationship.Target);
             }
             for (const auto &reference: element.externalSpecializations()) {
-                specializations += specializations.empty() ? " :> " : ", ";
+                specializations += specializations.empty() ? first : ", ";
                 specializations += reference;
             }
             text += specializations;

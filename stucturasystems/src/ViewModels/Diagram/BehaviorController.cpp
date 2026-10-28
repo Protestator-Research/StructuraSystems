@@ -10,6 +10,7 @@
 #include <QMetaObject>
 
 #include <Diagram/Conversion/SysMLCodeGenerator.h>
+#include <Diagram/Conversion/SysMLTextImporter.h>
 #include <Diagram/Semantic/RelationshipRules.h>
 
 #include <algorithm>
@@ -24,11 +25,14 @@ namespace StructuraSystems::Client {
     using Diagram::RootId;
 
     namespace {
-        constexpr qreal Margin = 40.0;
-        constexpr qreal RowHeight = 120.0;
+        constexpr qreal Margin = 60.0;          ///< room for the frame title above the nodes
+        constexpr qreal RowGap = 60.0;          ///< between the rows of nodes
         constexpr qreal ColumnGap = 60.0;
         constexpr qreal HeaderHeight = 40.0;
         constexpr qreal EntryHeight = 18.0;
+        constexpr qreal CaptionHeight = 16.0;   ///< "state actions", "assert constraints"
+        constexpr qreal Inset = 16.0;           ///< nested states inside their state
+        constexpr qreal FramePadding = 24.0;
         constexpr qreal EdgeHitDistance = 6.0;
 
         QString q(const std::string &text) {
@@ -189,7 +193,23 @@ namespace StructuraSystems::Client {
         if (!start || !Model.contains(id))
             return false;
         const auto &element = Model.element(id);
-        return element.owner() == *start && Diagram::isSuccessionEnd(element.kind()) && !isStateAction(element);
+        if (!Diagram::isSuccessionEnd(element.kind()) || isStateAction(element))
+            return false;
+        // the nodes of the context, and the states nested in its states (drawn inside them)
+        if (element.owner() == *start)
+            return true;
+        const ElementId owner = element.owner();
+        return owner != RootId && Model.element(owner).kind() == ElementKind::StateUsage && isNode(owner);
+    }
+
+    std::optional<ElementId> BehaviorController::parentNode(ElementId id) const {
+        const auto start = context();
+        if (!start || !Model.contains(id))
+            return std::nullopt;
+        const ElementId owner = Model.element(id).owner();
+        if (owner == *start || owner == RootId)
+            return std::nullopt;
+        return owner;
     }
 
     // --- graph ---------------------------------------------------------------------------------------
@@ -226,7 +246,8 @@ namespace StructuraSystems::Client {
             }
         }
         width = std::clamp<qreal>(width, 120, 360);
-        const qreal height = HeaderHeight + (node.Keyword.isEmpty() ? 0 : 6) + (entries > 0 ? entries * EntryHeight + 8 : 0);
+        const qreal height = HeaderHeight + (node.Keyword.isEmpty() ? 0 : 6) +
+                             (entries > 0 ? entries * EntryHeight + qreal(node.Compartments.size()) * CaptionHeight + 8 : 0);
         return {std::round(width), height};
     }
 
@@ -238,66 +259,114 @@ namespace StructuraSystems::Client {
         std::vector<DiagramNode> nodes;
         std::vector<DiagramEdge> edges;
         if (const auto start = context()) {
-            for (const ElementId child: Model.children(*start)) {
-                if (!isNode(child))
-                    continue;
-                const auto &element = Model.element(child);
-                DiagramNode node;
-                node.Id = child;
-                switch (element.kind()) {
-                    case ElementKind::ControlNode: {
-                        const std::string keyword = keywordOf(element);
-                        node.Kind = keyword == "decide" || keyword == "merge" ? DiagramTypes::DecisionNode
-                                    : keyword == "fork" || keyword == "join" ? DiagramTypes::ForkNode
-                                    : keyword == "done" ? DiagramTypes::DoneNode
-                                    : DiagramTypes::StartNode;
-                        node.Keyword = q(keyword);
-                        node.Title = Diagram::isImplicitControlKeyword(keyword) ? QString() : q(element.name());
-                        break;
-                    }
-                    case ElementKind::StateUsage: {
-                        node.Kind = DiagramTypes::StateNode;
-                        node.Title = usageTitle(element);
-                        if (element.declaredKeyword())
-                            node.Keyword = QStringLiteral("«") + q(*element.declaredKeyword()) + QStringLiteral("»");
-                        if (element.isParallel()) // its states are concurrent
-                            node.Keyword = (node.Keyword + QStringLiteral(" «parallel»")).trimmed();
-                        QVariantList entries;
-                        for (const ElementId action: element.ownedElements()) {
-                            const auto &actionElement = Model.element(action);
-                            if (!isStateAction(actionElement))
-                                continue;
-                            const std::string keyword = *actionElement.declaredKeyword();
-                            const QString form = formText(actionElement);
-                            entries.append(QVariantMap{{QStringLiteral("entryId"), QString::number(action)},
-                                                       {QStringLiteral("text"), q(keyword.substr(0, keyword.find(' '))) +
-                                                                                QStringLiteral(" / ") +
-                                                                                (form.isEmpty() ? usageTitle(actionElement) : form)},
-                                                       {QStringLiteral("tooltip"), QString()}});
+            const auto entryOf = [](ElementId id, const QString &text) {
+                return QVariantMap{{QStringLiteral("entryId"), QString::number(id)}, {QStringLiteral("text"), text},
+                                   {QStringLiteral("tooltip"), QString()}};
+            };
+            std::function<void(ElementId, int)> collect = [&](ElementId owner, int depth) {
+                for (const ElementId child: Model.children(owner)) {
+                    if (!isNode(child))
+                        continue;
+                    const auto &element = Model.element(child);
+                    DiagramNode node;
+                    node.Id = child;
+                    node.Depth = depth;
+                    switch (element.kind()) {
+                        case ElementKind::ControlNode: {
+                            const std::string keyword = keywordOf(element);
+                            node.Kind = keyword == "decide" || keyword == "merge" ? DiagramTypes::DecisionNode
+                                        : keyword == "fork" || keyword == "join" ? DiagramTypes::ForkNode
+                                        : keyword == "done" ? DiagramTypes::DoneNode
+                                        : DiagramTypes::StartNode;
+                            node.Keyword = q(keyword);
+                            node.Title = Diagram::isImplicitControlKeyword(keyword) ? QString() : q(element.name());
+                            break;
                         }
-                        if (!entries.isEmpty())
-                            node.Compartments.append(QVariantMap{{QStringLiteral("title"), QString()},
-                                                                 {QStringLiteral("entries"), entries}});
-                        break;
-                    }
-                    default:
-                        node.Kind = DiagramTypes::ActionNode;
-                        node.Title = usageTitle(element);
-                        if (element.kind() == ElementKind::ActionPerformance)
-                            node.Keyword = QStringLiteral("«perform»");
-                        else if (element.declaredKeyword())
-                            node.Keyword = QStringLiteral("«") + q(*element.declaredKeyword()) + QStringLiteral("»");
-                        if (const QString form = formText(element); !form.isEmpty()) {
-                            // «send» new Show(p) to screen, «if» x > 0, «loop» charging until c
-                            const QString keyword = form.section(QLatin1Char(' '), 0, 0);
-                            const QString rest = form.section(QLatin1Char(' '), 1);
-                            node.Keyword = QStringLiteral("«") + keyword + QStringLiteral("»");
-                            node.Title = element.name().empty() ? rest : usageTitle(element) +
-                                                                         (rest.isEmpty() ? QString() : QStringLiteral(": ") + rest);
+                        case ElementKind::StateUsage: {
+                            node.Kind = DiagramTypes::StateNode;
+                            node.Title = usageTitle(element);
+                            // «state», «exhibit state»; «parallel» for concurrent nested states
+                            node.Keyword = QStringLiteral("«") + q(element.declaredKeyword().value_or("state")) + QStringLiteral("»");
+                            if (element.isParallel())
+                                node.Keyword += QStringLiteral(" «parallel»");
+                            QVariantList actions;
+                            QVariantList constraints;
+                            for (const ElementId owned: element.ownedElements()) {
+                                const auto &ownedElement = Model.element(owned);
+                                if (isStateAction(ownedElement)) {
+                                    // "entry performSelfTest", "exit send engineStartStatus to driver"
+                                    const std::string keyword = *ownedElement.declaredKeyword();
+                                    const QString form = formText(ownedElement);
+                                    actions.append(entryOf(owned, q(keyword.substr(0, keyword.find(' '))) + QLatin1Char(' ') +
+                                                                  (form.isEmpty() ? usageTitle(ownedElement) : form)));
+                                } else if (ownedElement.kind() == ElementKind::ConstraintUsage &&
+                                           ownedElement.declaredKeyword().value_or("") == "assert constraint") {
+                                    // "{electricalPower <= 500 [W]}"
+                                    QString text = usageTitle(ownedElement);
+                                    if (!ownedElement.expression().empty())
+                                        text = (text.isEmpty() ? QString() : text + QLatin1Char(' ')) + QStringLiteral("{") +
+                                               q(Diagram::SysMLTextImporter::oneLine(ownedElement.expression())) + QStringLiteral("}");
+                                    constraints.append(entryOf(owned, text));
+                                }
+                            }
+                            if (!actions.isEmpty())
+                                node.Compartments.append(QVariantMap{{QStringLiteral("title"), QStringLiteral("state actions")},
+                                                                     {QStringLiteral("entries"), actions}});
+                            if (!constraints.isEmpty())
+                                node.Compartments.append(QVariantMap{{QStringLiteral("title"), QStringLiteral("assert constraints")},
+                                                                     {QStringLiteral("entries"), constraints}});
+                            break;
                         }
-                        break;
+                        default:
+                            node.Kind = DiagramTypes::ActionNode;
+                            node.Title = usageTitle(element);
+                            // «action», «perform», «perform action», «accept», «send», ...
+                            if (element.kind() == ElementKind::ActionPerformance)
+                                node.Keyword = QStringLiteral("«perform»");
+                            else
+                                node.Keyword = QStringLiteral("«") + q(element.declaredKeyword().value_or("action")) + QStringLiteral("»");
+                            if (const QString form = formText(element); !form.isEmpty()) {
+                                // «send» new Show(p) to screen, «if» x > 0, «loop» charging until c
+                                const QString keyword = form.section(QLatin1Char(' '), 0, 0);
+                                const QString rest = form.section(QLatin1Char(' '), 1);
+                                node.Keyword = QStringLiteral("«") + keyword + QStringLiteral("»");
+                                node.Title = element.name().empty() ? rest : usageTitle(element) +
+                                                                             (rest.isEmpty() ? QString() : QStringLiteral(": ") + rest);
+                            }
+                            break;
+                    }
+                    nodes.push_back(node);
+                    if (element.kind() == ElementKind::StateUsage)
+                        collect(child, depth + 1);
                 }
-                nodes.push_back(node);
+            };
+            collect(*start, 0);
+            // input / output flows between the parameters of the actions shown (slide 57): an arrow between the actions
+            const auto nodeOf = [&](ElementId end) -> std::optional<ElementId> {
+                for (ElementId current = end; current != RootId && Model.contains(current); current = Model.element(current).owner()) {
+                    if (isNode(current))
+                        return current;
+                }
+                return std::nullopt;
+            };
+            for (const auto &relationship: Model.relationships()) {
+                if (relationship.Kind != RelationshipKind::Flow)
+                    continue;
+                const auto source = nodeOf(relationship.Source);
+                const auto target = nodeOf(relationship.Target);
+                if (!source || !target || *source == *target)
+                    continue;
+                DiagramEdge edge;
+                edge.Kind = DiagramTypes::Flow;
+                edge.Source = *source;
+                edge.Target = *target;
+                edge.Key = QStringLiteral("r:%1").arg(relationship.Id);
+                edge.Selected = SelectedEdges.count(edge.Key) > 0;
+                QString label = q(relationship.Name);
+                if (!relationship.TypeName.empty())
+                    label += QStringLiteral(" : ") + q(relationship.TypeName);
+                edge.Label = label.trimmed();
+                edges.push_back(edge);
             }
             for (const auto &relationship: Model.relationships()) {
                 if ((relationship.Kind != RelationshipKind::Succession && relationship.Kind != RelationshipKind::Transition) ||
@@ -331,69 +400,36 @@ namespace StructuraSystems::Client {
         for (auto it = SelectedNodes.begin(); it != SelectedNodes.end();)
             it = wanted.count(*it) ? std::next(it) : SelectedNodes.erase(it);
 
-        // positions: rows from the start downwards (breadth first along the arrows)
+        // positions: rows from the start downwards (breadth first along the arrows), nested states inside their state
         const bool missing = std::any_of(nodes.begin(), nodes.end(), [&](const DiagramNode &node) {
             return Positions.count(node.Id) == 0;
         });
-        if (missing && AutoLayout) {
-            std::map<ElementId, int> level;
-            std::map<ElementId, int> incoming;
-            for (const auto &edge: edges)
-                ++incoming[edge.Target];
-            std::deque<ElementId> open;
-            const auto startFrom = [&](ElementId id) {
-                if (level.count(id))
-                    return;
-                level[id] = 0;
-                open.push_back(id);
-                while (!open.empty()) {
-                    const ElementId current = open.front();
-                    open.pop_front();
-                    for (const auto &edge: edges) {
-                        if (edge.Source == current && level.count(edge.Target) == 0) {
-                            level[edge.Target] = level[current] + 1;
-                            open.push_back(edge.Target);
-                        }
-                    }
-                }
-            };
+        if (missing && AutoLayout && context()) {
+            std::map<ElementId, QPointF> relative;
+            layoutLevel(*context(), nodes, edges, relative);
+            // absolute: parents first (the nodes are collected parents before their nested states)
             for (const auto &node: nodes) {
-                if (node.Kind == DiagramTypes::StartNode)
-                    startFrom(node.Id);
-            }
-            for (const auto &node: nodes) {
-                if (incoming[node.Id] == 0)
-                    startFrom(node.Id);
-            }
-            for (const auto &node: nodes)
-                startFrom(node.Id);
-            std::map<int, std::vector<const DiagramNode *>> rows;
-            for (const auto &node: nodes)
-                rows[level[node.Id]].push_back(&node);
-            qreal widest = 0;
-            for (const auto &[row, members]: rows) {
-                qreal width = 0;
-                for (const auto *node: members)
-                    width += sizeOf(*node).width() + ColumnGap;
-                widest = std::max(widest, width);
-            }
-            for (const auto &[row, members]: rows) {
-                qreal width = 0;
-                for (const auto *node: members)
-                    width += sizeOf(*node).width() + ColumnGap;
-                qreal x = Margin + (widest - width) / 2;
-                for (const auto *node: members) {
-                    const QSizeF size = sizeOf(*node);
-                    Positions[node->Id] = QPointF(x, Margin + row * RowHeight + (60 - std::min<qreal>(size.height(), 60)) / 2);
-                    x += size.width() + ColumnGap;
+                const auto parent = parentNode(node.Id);
+                if (!parent) {
+                    Positions[node.Id] = relative[node.Id] + QPointF(Margin, Margin);
+                    continue;
                 }
+                const auto own = std::find_if(nodes.begin(), nodes.end(), [&](const DiagramNode &other) { return other.Id == *parent; });
+                const qreal header = own != nodes.end() ? sizeOf(*own).height() : HeaderHeight;
+                Positions[node.Id] = Positions[*parent] + QPointF(Inset, header + 10) + relative[node.Id];
             }
         } else if (missing) {
             const QRectF bounds = contentBounds();
             qreal x = bounds.isNull() ? Margin : bounds.right() + ColumnGap;
+            std::map<ElementId, int> nested;
             for (const auto &node: nodes) {
                 if (Positions.count(node.Id))
                     continue;
+                if (const auto parent = parentNode(node.Id); parent && Positions.count(*parent)) {
+                    const int index = nested[*parent]++;
+                    Positions[node.Id] = Positions[*parent] + QPointF(Inset + index * 30, HeaderHeight + 16 + index * 30);
+                    continue;
+                }
                 Positions[node.Id] = QPointF(x, Margin);
                 x += sizeOf(node).width() + ColumnGap;
             }
@@ -405,13 +441,13 @@ namespace StructuraSystems::Client {
             const int row = Nodes->indexOf(node.Id);
             if (row >= 0) {
                 Nodes->updateContent(row, node);
-                Nodes->setRect(row, rect);
                 Nodes->setSelected(row, node.Selected);
             } else {
                 node.Rect = rect;
                 Nodes->append(node);
             }
         }
+        applyRects();
         for (auto it = SelectedEdges.begin(); it != SelectedEdges.end();) {
             const bool exists = std::any_of(edges.begin(), edges.end(), [&](const DiagramEdge &edge) { return edge.Key == *it; });
             it = exists ? std::next(it) : SelectedEdges.erase(it);
@@ -419,6 +455,151 @@ namespace StructuraSystems::Client {
         Edges->setEdges(std::move(edges));
         updateCanvasSize();
         emit selectionChanged();
+    }
+
+    QSizeF BehaviorController::layoutLevel(ElementId owner, const std::vector<DiagramNode> &nodes,
+                                           const std::vector<DiagramEdge> &edges, std::map<ElementId, QPointF> &relative) {
+        std::vector<const DiagramNode *> members;
+        for (const auto &node: nodes) {
+            const auto parent = parentNode(node.Id);
+            if ((parent ? *parent : *context()) == owner)
+                members.push_back(&node);
+        }
+        // sizes: a state with nested states around their area
+        std::map<ElementId, QSizeF> sizes;
+        for (const auto *member: members) {
+            const QSizeF own = sizeOf(*member);
+            const bool composite = std::any_of(nodes.begin(), nodes.end(), [&](const DiagramNode &other) {
+                return parentNode(other.Id) == member->Id;
+            });
+            if (!composite) {
+                sizes[member->Id] = own;
+                continue;
+            }
+            const QSizeF inner = layoutLevel(member->Id, nodes, edges, relative);
+            sizes[member->Id] = QSizeF(std::max(own.width(), inner.width() + 2 * Inset), own.height() + 10 + inner.height() + Inset);
+        }
+        // levels along the arrows between the members; the states of a parallel state side by side
+        std::map<ElementId, int> level;
+        const bool parallel = owner != *context() && Model.element(owner).isParallel();
+        if (parallel) {
+            for (const auto *member: members)
+                level[member->Id] = 0;
+        } else {
+            std::set<ElementId> inLevel;
+            for (const auto *member: members)
+                inLevel.insert(member->Id);
+            std::map<ElementId, int> incoming;
+            for (const auto &edge: edges) {
+                if (inLevel.count(edge.Source) && inLevel.count(edge.Target))
+                    ++incoming[edge.Target];
+            }
+            std::deque<ElementId> open;
+            const auto startFrom = [&](ElementId id) {
+                if (level.count(id))
+                    return;
+                level[id] = 0;
+                open.push_back(id);
+                while (!open.empty()) {
+                    const ElementId current = open.front();
+                    open.pop_front();
+                    for (const auto &edge: edges) {
+                        if (edge.Source == current && inLevel.count(edge.Target) && level.count(edge.Target) == 0) {
+                            level[edge.Target] = level[current] + 1;
+                            open.push_back(edge.Target);
+                        }
+                    }
+                }
+            };
+            for (const auto *member: members) {
+                if (member->Kind == DiagramTypes::StartNode)
+                    startFrom(member->Id);
+            }
+            for (const auto *member: members) {
+                if (incoming[member->Id] == 0)
+                    startFrom(member->Id);
+            }
+            for (const auto *member: members)
+                startFrom(member->Id);
+        }
+        std::map<int, std::vector<const DiagramNode *>> rows;
+        for (const auto *member: members)
+            rows[level[member->Id]].push_back(member);
+        qreal widest = 0;
+        for (const auto &[row, inRow]: rows) {
+            qreal width = -ColumnGap;
+            for (const auto *node: inRow)
+                width += sizes[node->Id].width() + ColumnGap;
+            widest = std::max(widest, width);
+        }
+        qreal y = 0;
+        for (const auto &[row, inRow]: rows) {
+            qreal width = -ColumnGap;
+            qreal height = 0;
+            for (const auto *node: inRow) {
+                width += sizes[node->Id].width() + ColumnGap;
+                height = std::max(height, sizes[node->Id].height());
+            }
+            height = std::max<qreal>(height, 60);
+            qreal x = (widest - width) / 2;
+            for (const auto *node: inRow) {
+                const QSizeF size = sizes[node->Id];
+                // small nodes (control nodes, simple actions) centered in their row
+                relative[node->Id] = QPointF(x, y + (size.height() < 60 ? (60 - size.height()) / 2 : 0));
+                x += size.width() + ColumnGap;
+            }
+            y += height + RowGap;
+        }
+        return {std::max<qreal>(widest, 0), std::max<qreal>(y - RowGap, 0)};
+    }
+
+    void BehaviorController::applyRects() {
+        // nested states first: their state grows around them
+        std::vector<const DiagramNode *> order;
+        for (const auto &node: Nodes->nodes())
+            order.push_back(&node);
+        std::stable_sort(order.begin(), order.end(), [](const DiagramNode *a, const DiagramNode *b) { return a->Depth > b->Depth; });
+        std::map<ElementId, QRectF> rects;
+        for (const auto *node: order) {
+            const QPointF position = Positions.count(node->Id) ? Positions[node->Id] : node->Rect.topLeft();
+            QSizeF size = sizeOf(*node);
+            QRectF inner;
+            for (const auto &[id, rect]: rects) {
+                if (parentNode(id) == node->Id)
+                    inner = inner.isNull() ? rect : inner.united(rect);
+            }
+            if (!inner.isNull()) {
+                size.setWidth(std::max(size.width(), inner.right() + Inset - position.x()));
+                size.setHeight(std::max(size.height(), inner.bottom() + Inset - position.y()));
+            }
+            rects[node->Id] = QRectF(position, size);
+        }
+        QRectF bounds;
+        for (const auto &[id, rect]: rects) {
+            const int row = Nodes->indexOf(id);
+            if (row >= 0)
+                Nodes->setRect(row, rect);
+            bounds = bounds.isNull() ? rect : bounds.united(rect);
+        }
+        // the frame of the context: "action transportPassenger", "state vehicleStates"
+        QRectF frame;
+        QString title;
+        if (const auto start = context()) {
+            const auto &element = Model.element(*start);
+            title = q(keywordOf(element)) + QLatin1Char(' ') + q(element.name());
+            if (!element.typeName().empty())
+                title += QStringLiteral(" : ") + q(element.typeName());
+            if (element.isParallel())
+                title += QStringLiteral(" «parallel»");
+            frame = bounds.isNull() ? QRectF(Margin - FramePadding, Margin - FramePadding - 20, 320, 200)
+                                    : bounds.adjusted(-FramePadding, -FramePadding - 20, FramePadding, FramePadding);
+            frame.setWidth(std::max(frame.width(), title.size() * 8.0 + 60));
+        }
+        if (frame != FrameRect || title != FrameTitle) {
+            FrameRect = frame;
+            FrameTitle = title;
+            emit frameChanged();
+        }
     }
 
     void BehaviorController::updateCanvasSize() {
@@ -551,13 +732,18 @@ namespace StructuraSystems::Client {
         const auto *found = Nodes->find(*id);
         if (found->Kind != DiagramTypes::StateNode || found->Compartments.isEmpty())
             return {};
-        const auto entries = found->Compartments.front().toMap().value(QStringLiteral("entries")).toList();
-        const qreal top = found->Rect.top() + HeaderHeight + (found->Keyword.isEmpty() ? 0 : 6) + 4;
-        const int index = int(std::floor((y - top) / EntryHeight));
+        // as BehaviorNode draws them: per compartment a line with its caption, then the entries
         Q_UNUSED(x)
-        if (index < 0 || index >= entries.size())
-            return {};
-        return entries.at(index).toMap().value(QStringLiteral("entryId")).toString();
+        qreal top = found->Rect.top() + HeaderHeight + (found->Keyword.isEmpty() ? 0 : 6);
+        for (const auto &compartment: found->Compartments) {
+            const auto entries = compartment.toMap().value(QStringLiteral("entries")).toList();
+            top += CaptionHeight;
+            const int index = int(std::floor((y - top) / EntryHeight));
+            if (y >= top && index < entries.size())
+                return entries.at(index).toMap().value(QStringLiteral("entryId")).toString();
+            top += qreal(entries.size()) * EntryHeight;
+        }
+        return {};
     }
 
     // --- selection and moving ------------------------------------------------------------------------
@@ -604,9 +790,28 @@ namespace StructuraSystems::Client {
             return;
         AutoLayout = false;
         emit layoutEdited();
-        Positions[*id] = QPointF(std::max<qreal>(0, x), std::max<qreal>(0, y));
-        const int row = Nodes->indexOf(*id);
-        Nodes->setRect(row, QRectF(Positions[*id], Nodes->nodes()[std::size_t(row)].Rect.size()));
+        QPointF wanted(std::max<qreal>(0, x), std::max<qreal>(0, y));
+        // a nested state stays inside its state (which grows to the right and downwards)
+        if (const auto parent = parentNode(*id); parent && Positions.count(*parent)) {
+            const auto *parentNodeData = Nodes->find(*parent);
+            const qreal header = parentNodeData ? sizeOf(*parentNodeData).height() : HeaderHeight;
+            wanted.setX(std::max(wanted.x(), Positions[*parent].x() + 4));
+            wanted.setY(std::max(wanted.y(), Positions[*parent].y() + header));
+        }
+        const QPointF delta = wanted - (Positions.count(*id) ? Positions[*id] : wanted);
+        Positions[*id] = wanted;
+        // the states nested in it move along
+        for (auto &[other, position]: Positions) {
+            if (other == *id || !Model.contains(other))
+                continue;
+            for (auto parent = parentNode(other); parent; parent = parentNode(*parent)) {
+                if (*parent == *id) {
+                    position += delta;
+                    break;
+                }
+            }
+        }
+        applyRects();
     }
 
     // --- editing -------------------------------------------------------------------------------------

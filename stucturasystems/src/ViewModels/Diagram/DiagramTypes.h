@@ -115,7 +115,12 @@ namespace StructuraSystems::Client::DiagramTypes {
         Allocation, ///< «allocate»: allocate a to b (open arrow)
         Dependency, ///< dependency from a to b (dashed, open arrow)
         Temporal,   ///< a snapshot / time slice of its owner: a line with a half disc at the owner
-        Frame       ///< «frame»: requirement (viewpoint) -> concern (dashed)
+        Frame,      ///< «frame»: requirement (viewpoint) -> concern (dashed)
+        Import,     ///< «import» (*, **): package -> imported package or element (dashed, open arrow)
+        DefinedBy,  ///< usage -> its definition (": Type"): hollow triangle with ':'
+        Redefinition, ///< feature -> the inherited feature it redefines (":>>"): hollow triangle with a bar
+        Performs,   ///< part -> the action it performs ("perform a;", "::>"): open arrow with '::'
+        Aggregation ///< "ref part" / "ref item" of its owner: a hollow diamond at the owner
     };
     Q_ENUM_NS(EdgeKind)
 
@@ -164,7 +169,8 @@ namespace StructuraSystems::Client::DiagramTypes {
         BoundaryNode,   ///< use case view: the subject (system boundary around its use cases)
         LifelineNode,   ///< sequence view: a part (or item, occurrence) with its header and dashed line
         LifelineGroupNode, ///< sequence view: header of a part whose parts are the lifelines below it
-        EventNode       ///< sequence view: an event occurrence on its lifeline (or where a message starts / ends)
+        EventNode,      ///< sequence view: an event occurrence on its lifeline (or where a message starts / ends)
+        LibraryNode     ///< an imported package that is not in the diagram (ISQ, ScalarValues): a dashed package
     };
     Q_ENUM_NS(NodeKind)
 }

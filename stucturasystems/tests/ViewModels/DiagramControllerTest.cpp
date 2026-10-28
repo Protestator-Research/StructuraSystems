@@ -340,7 +340,7 @@ TEST_CASE("Controller: constraints, calculations, metadata and derived values ar
     const DiagramNode &part = controller.nodes()->nodes().at(0);
     CHECK_EQ(entryTexts(part, "attributes"), QStringList({QString("«measurable» VariableA : Integer"),
                                                           QString("«measurable» /PercentA : Rational = decodeFuelTrim(VariableA)")}));
-    CHECK_EQ(entryTexts(part, "constraints"), QStringList({QString("assert ByteRange { VariableA >= 0 and VariableA <= 255 }")}));
+    CHECK_EQ(entryTexts(part, "assert constraints"), QStringList({QString("ByteRange { VariableA >= 0 and VariableA <= 255 }")}));
     CHECK_EQ(entryTexts(part, "calcs"), QStringList({QString("decodeFuelTrim(raw : Integer) : Rational = raw * 100.0 / 128.0 - 100.0")}));
     CHECK(entryTexts(part, "other").isEmpty()); // the comment is kept in the code, not shown
 
@@ -349,7 +349,7 @@ TEST_CASE("Controller: constraints, calculations, metadata and derived values ar
     CHECK_EQ(definition.Keyword, QString("«constraint def»"));
     CHECK_EQ(definition.Title, QString("NonNegativeReal"));
     CHECK_EQ(entryTexts(definition, "parameters"), QStringList({QString("in x : Real")}));
-    CHECK_EQ(entryTexts(definition, "constraint"), QStringList({QString("{ x >= 0.0 }")}));
+    CHECK_EQ(entryTexts(definition, "expression"), QStringList({QString("x >= 0.0")}));
 }
 
 TEST_CASE("Controller: constraint and calc definitions are nodes with the compartments of the standard") {
@@ -374,13 +374,15 @@ TEST_CASE("Controller: constraint and calc definitions are nodes with the compar
     const DiagramNode &decode = controller.nodes()->nodes().at(1);
     CHECK(decode.Kind == DiagramTypes::CalcDefinitionNode);
     CHECK_EQ(decode.Keyword, QString("«function»"));
-    CHECK_EQ(entryTexts(decode, "parameters"), QStringList({QString("in raw : Integer")}));
-    CHECK_EQ(entryTexts(decode, "result"), QStringList({QString("trimPercent : Rational = raw * 100.0 / 128.0 - 100.0")}));
+    // the result is the last parameter, "return ..." (no compartment of its own)
+    CHECK_EQ(entryTexts(decode, "parameters"), QStringList({QString("in raw : Integer"),
+                                                            QString("return trimPercent : Rational = raw * 100.0 / 128.0 - 100.0")}));
+    CHECK(entryTexts(decode, "result").isEmpty());
 
     const DiagramNode &twice = controller.nodes()->nodes().at(2);
     CHECK_EQ(twice.Keyword, QString("«calc def»"));
     CHECK_EQ(entryTexts(twice, "attributes"), QStringList({QString("factor : Real = 2")}));
-    CHECK_EQ(entryTexts(twice, "result"), QStringList({QString("x * factor")}));
+    CHECK_EQ(entryTexts(twice, "expression"), QStringList({QString("x * factor")}));
 
     const DiagramNode &limit = controller.nodes()->nodes().at(3);
     CHECK(limit.Kind == DiagramTypes::ConstraintNode);
@@ -427,7 +429,7 @@ TEST_CASE("Controller: constraints and calculations from the palette, editing ex
     const QString function = controller.addElementAtSelection(DiagramTypes::ToolCalc, 0, 0);
     CHECK(!constraint.isEmpty());
     CHECK(!function.isEmpty());
-    CHECK_EQ(entryTexts(controller.nodes()->nodes().front(), "constraints"), QStringList({QString("assert constraint1 { true }")}));
+    CHECK_EQ(entryTexts(controller.nodes()->nodes().front(), "assert constraints"), QStringList({QString("constraint1 { true }")}));
     CHECK_EQ(entryTexts(controller.nodes()->nodes().front(), "calcs"), QStringList({QString("calc1(x : Real) : Real = x")}));
 
     const QVariantMap details = controller.elementDetails(constraint);
@@ -504,10 +506,10 @@ TEST_CASE("Controller: definitions as nodes, ports on the border of their part, 
     const auto *portDef = controller.nodes()->find(model.children(RootId).at(0));
     CHECK(portDef->Kind == DiagramTypes::DefinitionNode);
     CHECK_EQ(portDef->Keyword, QString("«port def»"));
-    CHECK_EQ(entryTexts(*portDef, "items"), QStringList({QString("out fuel : Fuel")}));
-    CHECK_EQ(entryTexts(*controller.nodes()->find(model.children(RootId).at(1)), "values"),
+    CHECK_EQ(entryTexts(*portDef, "directed features"), QStringList({QString("out item fuel : Fuel")}));
+    CHECK_EQ(entryTexts(*controller.nodes()->find(model.children(RootId).at(1)), "enums"),
              QStringList({QString("off"), QString("running")}));
-    CHECK_EQ(entryTexts(*controller.nodes()->find(model.children(RootId).at(2)), "ends"),
+    CHECK_EQ(entryTexts(*controller.nodes()->find(model.children(RootId).at(2)), "ports"),
              QStringList({QString("end supplier : FuelPort"), QString("end consumer : ~FuelPort")}));
 
     const ElementId tank = model.children(RootId).at(3);
@@ -525,7 +527,7 @@ TEST_CASE("Controller: definitions as nodes, ports on the border of their part, 
     CHECK_EQ(controller.edges()->count(), 1);
     const DiagramEdge edge = controller.edges()->edges().front(); // a copy: the list is replaced on changes
     CHECK(edge.Kind == DiagramTypes::Interface);
-    CHECK_EQ(edge.Label, QString("«interface» : FuelInterface"));
+    CHECK_EQ(edge.Label, QString(": FuelInterface"));
 
     // the part takes its ports along; a port slides along the border
     controller.moveNode(QString::number(tank), tankNode->Rect.x() + 100, tankNode->Rect.y() + 50);
@@ -551,7 +553,7 @@ TEST_CASE("Controller: definitions as nodes, ports on the border of their part, 
     CHECK(controller.createEdge(DiagramTypes::Flow, QString::number(fuelOut), QString::number(fuelIn)));
     const QString flow = controller.edges()->edges().front().Key;
     CHECK(controller.updateEdge(flow, {{"name", ""}, {"typeName", "Fuel"}}).isEmpty());
-    CHECK_EQ(controller.edges()->edges().front().Label, QString("of Fuel"));
+    CHECK_EQ(controller.edges()->edges().front().Label, QString(": Fuel"));
     CHECK(SysMLCodeGenerator().generate(model).find("flow of Fuel from tank.fuelOut to engine.fuelIn;") != std::string::npos);
 }
 
@@ -608,9 +610,13 @@ TEST_CASE("Controller: action and state definitions with their actions and state
     CHECK(!controller.addElementAtSelection(DiagramTypes::ToolAction, 0, 0).isEmpty()); // perform action
     CHECK(controller.updateElement(exhibited, {{"name", "states"}, {"typeName", "States1"}, {"multiplicity", ""},
                                                {"prefixes", ""}}).isEmpty());
-    CHECK_EQ(entryTexts(*controller.nodes()->find(idOf(action)), "actions"), QStringList({QString("action action1")}));
+    // an action of an action definition: a node of its own below it (action tree, composition)
+    CHECK(entryTexts(*controller.nodes()->find(idOf(action)), "actions").isEmpty());
+    const auto actionChild = model.children(idOf(action)).front();
+    CHECK(controller.nodes()->find(actionChild) != nullptr);
+    CHECK(controller.edges()->find(QStringLiteral("c:") + QString::number(actionChild)) != nullptr);
     CHECK_EQ(entryTexts(*controller.nodes()->find(idOf(states)), "states"), QStringList({QString("state1")}));
-    CHECK_EQ(entryTexts(*controller.nodes()->find(idOf(part)), "states"), QStringList({QString("states : States1")}));
+    CHECK_EQ(entryTexts(*controller.nodes()->find(idOf(part)), "exhibit states"), QStringList({QString("states : States1")}));
     const std::string text = SysMLCodeGenerator().generate(model);
     CHECK(text.find("action def Action1 {\n    action action1;\n}") != std::string::npos);
     CHECK(text.find("    exhibit state states : States1;\n    perform action action1;\n") != std::string::npos);
@@ -660,7 +666,7 @@ TEST_CASE("Controller: requirements with text, subject, stakeholders and require
     CHECK(SysMLTextImporter::importText(text, again).lossless());
     CHECK_EQ(SysMLCodeGenerator().generate(again), text);
 
-    // the node: title with id, compartments doc, subject, stakeholders, assume
+    // the node: title with id, compartments doc, subject, stakeholders, constraints (assume)
     controller.syncNow();
     const auto *node = controller.nodes()->find(idOf(definition));
     CHECK(node->Kind == DiagramTypes::RequirementNode);
@@ -668,7 +674,7 @@ TEST_CASE("Controller: requirements with text, subject, stakeholders and require
     QStringList titles;
     for (const auto &compartment: node->Compartments)
         titles.append(compartment.toMap().value("title").toString());
-    CHECK_EQ(titles, QStringList({"doc", "subject", "stakeholders", "assume"}));
+    CHECK_EQ(titles, QStringList({"doc", "subject", "stakeholders", "constraints"}));
     // a plain constraint in a part may not become "require constraint"
     const QString part = dropPart(controller, 600, 100);
     const QString assertion = controller.addElement(DiagramTypes::ToolConstraint, controller.nodeRect(part).center().x(),
@@ -730,9 +736,12 @@ TEST_CASE("Controller: satisfy, verify and sub-requirements drawn as arrows") {
     // the verification shows its objective; deleting the arrow removes the verify again
     const auto *test = controller.nodes()->find(idOf(id("MassTest")));
     CHECK(test->Kind == DiagramTypes::CaseNode);
+    QStringList verifies; // deleting changes the edges: collect the keys first
     for (const auto &edge: controller.edges()->edges())
         if (edge.Kind == DiagramTypes::Verify)
-            controller.deleteEdge(edge.Key);
+            verifies.append(edge.Key);
+    for (const QString &verifyKey: verifies)
+        controller.deleteEdge(verifyKey);
     CHECK(SysMLCodeGenerator().generate(model).find("verify") == std::string::npos);
     // the arrow presets include satisfy and verify (and interface is no longer clamped away)
     controller.setArrowDefault(DiagramTypes::AlwaysInterface);
@@ -863,7 +872,7 @@ TEST_CASE("Structure view: redefinitions, connection and flow definitions") {
     for (const auto &compartment: smallNode->Compartments)
         for (const auto &entry: compartment.toMap().value("entries").toList())
             texts.append(entry.toMap().value("text").toString());
-    CHECK(texts.contains(":>> mass = 120.0"));
+    CHECK(texts.contains("mass :>> mass = 120.0"));
     const ElementId vehicle = model.children(RootId)[2];
     const ElementId smallEngine = model.children(vehicle).front();
     CHECK_EQ(structure.nodes()->find(smallEngine)->Title, QString("smallEng : SmallEngine redefines eng"));
@@ -1236,4 +1245,282 @@ TEST_CASE("Controller: ports that do not fit on the side continue along the bott
     for (std::size_t i = 0; i < 3; ++i)
         CHECK(controller.nodeRect(key(ports[i])).center().x() == grown.right());
     CHECK(controller.nodeRect(key(ports[3])).center().y() == grown.top());
+}
+
+namespace {
+    const DiagramEdge *edgeOfKind(const DiagramController &controller, int kind) {
+        for (const auto &edge: controller.edges()->edges()) {
+            if (edge.Kind == kind)
+                return &edge;
+        }
+        return nullptr;
+    }
+}
+
+TEST_CASE("Controller: «import» arrows between packages, library imports as dashed packages") {
+    SemanticModel model;
+    SysMLTextImporter::importText("package Definitions { part def Vehicle; }\n"
+                                  "package Usages {\n    private import Definitions::*;\n    private import ISQ::*;\n"
+                                  "    part vehicle : Vehicle;\n}\n",
+                                  model);
+    DiagramController controller(model);
+
+    const auto *import = edgeOfKind(controller, DiagramTypes::Import);
+    CHECK(import != nullptr);
+    if (!import)
+        return;
+    CHECK_EQ(import->Label, QString("«import» *"));
+    CHECK_EQ(model.element(import->Source).name(), std::string("Usages"));
+    CHECK_EQ(model.element(import->Target).name(), std::string("Definitions"));
+    bool library = false;
+    for (const auto &node: controller.nodes()->nodes()) {
+        if (node.Kind == DiagramTypes::LibraryNode) {
+            library = true;
+            CHECK_EQ(node.Title, QString("ISQ"));
+            CHECK_EQ(node.Keyword, QString("private «import» *"));
+        }
+    }
+    CHECK(library);
+    // vehicle : Vehicle is drawn as "defined by" arrow
+    const auto *definedBy = edgeOfKind(controller, DiagramTypes::DefinedBy);
+    CHECK(definedBy != nullptr);
+    if (!definedBy)
+        return;
+    CHECK_EQ(model.element(definedBy->Target).name(), std::string("Vehicle"));
+
+    // deleting the arrows removes the import and the type
+    controller.deleteEdge(QString(import->Key));
+    CHECK(generated(model).find("import Definitions::*") == std::string::npos);
+    const auto *typed = edgeOfKind(controller, DiagramTypes::DefinedBy);
+    CHECK(typed != nullptr);
+    if (!typed)
+        return;
+    controller.deleteEdge(QString(typed->Key));
+    CHECK(generated(model).find("part vehicle;") != std::string::npos);
+}
+
+TEST_CASE("Controller: drawing «import», defined-by and perform arrows writes the SysML") {
+    SemanticModel model;
+    SysMLTextImporter::importText("package A { part def Engine; action def Start; }\npackage B {\n    part engine;\n"
+                                  "    action start;\n}\n",
+                                  model);
+    DiagramController controller(model);
+    const ElementId a = model.children(RootId).at(0);
+    const ElementId b = model.children(RootId).at(1);
+    const ElementId engineDef = model.children(a).at(0);
+    const ElementId engine = model.children(b).at(0);
+    const ElementId start = model.children(b).at(1);
+
+    CHECK(controller.createEdge(DiagramTypes::Import, key(b), key(a)));
+    CHECK(controller.createEdge(DiagramTypes::DefinedBy, key(engine), key(engineDef)));
+    CHECK(controller.createEdge(DiagramTypes::Performs, key(engine), key(start)));
+    const std::string text = generated(model);
+    CHECK(text.find("private import A::*;") != std::string::npos);
+    CHECK(text.find("part engine : Engine {") != std::string::npos);
+    CHECK(text.find("perform start;") != std::string::npos);
+    CHECK(edgeOfKind(controller, DiagramTypes::Import) != nullptr);
+    CHECK(edgeOfKind(controller, DiagramTypes::DefinedBy) != nullptr);
+    CHECK(edgeOfKind(controller, DiagramTypes::Performs) != nullptr);
+
+    SemanticModel again;
+    CHECK(SysMLTextImporter::importText(text, again).lossless());
+}
+
+TEST_CASE("Controller: ref parts are aggregation, redefined parts get a redefinition arrow") {
+    SemanticModel model;
+    SysMLTextImporter::importText("part vehicle {\n    ref part driver;\n    part engine;\n}\n"
+                                  "part vehicle2 :> vehicle {\n    part redefines engine;\n}\n",
+                                  model);
+    DiagramController controller(model);
+    CHECK(edgeOfKind(controller, DiagramTypes::Aggregation) != nullptr);
+    const auto *redefinition = edgeOfKind(controller, DiagramTypes::Redefinition);
+    CHECK(redefinition != nullptr);
+    if (!redefinition)
+        return;
+    CHECK_EQ(model.element(redefinition->Target).name(), std::string("engine"));
+    CHECK(model.element(redefinition->Target).owner() == model.children(RootId).at(0));
+}
+
+TEST_CASE("Controller: inherited features with ^, perform actions, exhibit states and state actions (slides 28, 63, 85)") {
+    SemanticModel model;
+    CHECK(SysMLTextImporter::importText(
+            "part def Vehicle {\n"
+            "    attribute mass;\n"
+            "    attribute velocity;\n"
+            "    port fuelCmdPort;\n"
+            "    perform providePower;\n"
+            "    exhibit state vehicleStates;\n"
+            "    assert constraint { mass <= 2000 }\n"
+            "}\n"
+            "action providePower;\n"
+            "state def VehicleStates {\n"
+            "    entry action1;\n"
+            "    do action2;\n"
+            "    exit action3;\n"
+            "}\n"
+            "action action1;\n"
+            "action action2;\n"
+            "action action3;\n"
+            "part vehicle_b : Vehicle {\n"
+            "    attribute redefines mass = 1500;\n"
+            "    part fuelTank;\n"
+            "}\n"
+            "state vehicleStates : VehicleStates {\n"
+            "    do action2b :>> action2;\n"
+            "}\n", model).lossless());
+    DiagramController controller(model);
+    const auto node = [&](const std::string &name) -> const DiagramNode & {
+        for (const ElementId child: model.children(RootId))
+            if (model.element(child).name() == name)
+                return *controller.nodes()->find(child);
+        return controller.nodes()->nodes().front();
+    };
+    const DiagramNode &vehicle = node("Vehicle");
+    CHECK_EQ(entryTexts(vehicle, "perform actions"), QStringList({QString("providePower")}));
+    CHECK_EQ(entryTexts(vehicle, "exhibit states"), QStringList({QString("vehicleStates")}));
+    CHECK_EQ(entryTexts(vehicle, "assert constraints").size(), 1);
+
+    const DiagramNode &vehicleB = node("vehicle_b");
+    CHECK_EQ(entryTexts(vehicleB, "attributes"), QStringList({QString("mass redefines mass = 1500"), QString("^velocity")}));
+    CHECK_EQ(entryTexts(vehicleB, "ports"), QStringList({QString("^fuelCmdPort")}));
+    CHECK_EQ(entryTexts(vehicleB, "perform actions"), QStringList({QString("^providePower")}));
+    CHECK_EQ(entryTexts(vehicleB, "exhibit states"), QStringList({QString("^vehicleStates")}));
+    CHECK_EQ(entryTexts(vehicleB, "assert constraints").size(), 1);
+    CHECK(entryTexts(vehicleB, "assert constraints").front().startsWith("^"));
+
+    const DiagramNode &states = node("VehicleStates");
+    CHECK_EQ(entryTexts(states, "state actions"),
+             QStringList({QString("entry action1"), QString("do action2"), QString("exit action3")}));
+    CHECK(entryTexts(states, "actions").isEmpty()); // not "perform action1"
+    const DiagramNode &usage = node("vehicleStates");
+    CHECK_EQ(entryTexts(usage, "state actions"),
+             QStringList({QString("do action2b :>> action2"), QString("entry ^action1"), QString("exit ^action3")}));
+}
+
+TEST_CASE("Controller: calc def parameters with return, calc usage with bound values (slides 79, 80)") {
+    SemanticModel model;
+    CHECK(SysMLTextImporter::importText(
+            "calc def Force {\n"
+            "    in attribute m :> ISQ::mass;\n"
+            "    in attribute a :> ISQ::acceleration;\n"
+            "    return f :> ISQ::force = m * a;\n"
+            "}\n"
+            "part vehicle {\n"
+            "    calc force : Force {\n"
+            "        in m = 1500 [kg];\n"
+            "        in a = 9.806 [m / s ^ 2];\n"
+            "    }\n"
+            "}\n", model).lossless());
+    DiagramController controller(model);
+    const DiagramNode &force = *controller.nodes()->find(model.children(RootId).at(0));
+    CHECK_EQ(entryTexts(force, "parameters"), QStringList({QString("in m :> ISQ::mass"), QString("in a :> ISQ::acceleration"),
+                                                           QString("return f :> ISQ::force = m * a")}));
+    const DiagramNode &vehicle = *controller.nodes()->find(model.children(RootId).at(1));
+    CHECK_EQ(entryTexts(vehicle, "calcs"), QStringList({QString("force : Force(m = 1500 [kg], a = 9.806 [m / s ^ 2])")}));
+}
+
+TEST_CASE("Controller: perform arrows to actions of an action tree (slide 51)") {
+    SemanticModel model;
+    CHECK(SysMLTextImporter::importText(
+            "part vehicle_b {\n"
+            "    perform providePower;\n"
+            "    part engine {\n"
+            "        perform providePower.generateTorque;\n"
+            "    }\n"
+            "}\n"
+            "action providePower {\n"
+            "    action generateTorque;\n"
+            "}\n", model).lossless());
+    DiagramController controller(model);
+    int performs = 0;
+    for (const auto &edge: controller.edges()->edges()) {
+        if (edge.Kind != DiagramTypes::Performs)
+            continue;
+        ++performs;
+        const std::string target = model.element(edge.Target).name();
+        CHECK(target == "providePower" || target == "generateTorque");
+        CHECK(model.element(edge.Target).kind() == ElementKind::ActionUsage);
+    }
+    CHECK_EQ(performs, 2);
+}
+
+TEST_CASE("Interconnection: a part with its parts, items and ports nested, connections between them (slides 39, 40)") {
+    SemanticModel model;
+    CHECK(SysMLTextImporter::importText(
+            "port def FuelOutPort {\n    out item fuel : Fuel;\n}\n"
+            "item def Fuel;\n"
+            "part def Vehicle;\n"
+            "part vehicle_b : Vehicle {\n"
+            "    part fuelTank {\n"
+            "        ref item fuel : Fuel;\n"
+            "        port p1 : FuelOutPort;\n"
+            "    }\n"
+            "    part engine {\n"
+            "        port p2 : ~FuelOutPort;\n"
+            "    }\n"
+            "    connect fuelTank.p1 to engine.p2;\n"
+            "    flow of Fuel from fuelTank.p1.fuel to engine.p2.fuel;\n"
+            "}\n"
+            "part other;\n", model).lossless());
+    DiagramController view(model, nullptr, true);
+    CHECK(view.interconnection());
+    CHECK_EQ(view.contexts().size(), 3); // vehicle_b, fuelTank, engine
+    const ElementId vehicle = model.children(RootId).at(3);
+    view.setContextId(key(vehicle));
+    CHECK_EQ(view.contextId(), key(vehicle));
+    // vehicle_b, fuelTank, fuel, p1, engine, p2 (not "other", no definitions)
+    CHECK_EQ(view.nodes()->count(), 6);
+    const ElementId fuelTank = model.children(vehicle).at(0);
+    const ElementId engine = model.children(vehicle).at(1);
+    const ElementId fuel = model.children(fuelTank).at(0);
+    const auto *vehicleNode = view.nodes()->find(vehicle);
+    const auto *tankNode = view.nodes()->find(fuelTank);
+    CHECK(vehicleNode->Container);
+    CHECK(tankNode->Container);
+    CHECK(!view.nodes()->find(engine)->Container);
+    CHECK(vehicleNode->Rect.contains(tankNode->Rect));
+    CHECK(vehicleNode->Rect.contains(view.nodes()->find(engine)->Rect));
+    CHECK(tankNode->Rect.contains(view.nodes()->find(fuel)->Rect));
+    CHECK(view.nodes()->find(fuel)->Dashed); // ref item
+    CHECK_EQ(view.nodes()->find(fuel)->Keyword, QString("«item»"));
+    int connections = 0;
+    int flows = 0;
+    for (const auto &edge: view.edges()->edges()) {
+        CHECK(edge.Kind == DiagramTypes::Connection || edge.Kind == DiagramTypes::Flow);
+        connections += edge.Kind == DiagramTypes::Connection ? 1 : 0;
+        flows += edge.Kind == DiagramTypes::Flow ? 1 : 0;
+    }
+    CHECK_EQ(connections, 1);
+    CHECK_EQ(flows, 1);
+    // moving the part moves what is inside
+    const QRectF before = view.nodes()->find(fuel)->Rect;
+    view.moveNode(key(fuelTank), tankNode->Rect.x() + 20, tankNode->Rect.y() + 10);
+    CHECK(view.nodes()->find(fuel)->Rect.topLeft() == before.topLeft() + QPointF(20, 10));
+    // drawing: a part dropped into engine becomes its part
+    const QRectF engineRect = view.nodes()->find(engine)->Rect;
+    const QString added = view.addElement(DiagramTypes::ToolPart, engineRect.center().x(), engineRect.center().y());
+    CHECK(!added.isEmpty());
+    CHECK_EQ(model.element(idOf(added)).owner(), engine);
+    view.syncNow();
+    CHECK(view.nodes()->find(engine)->Container);
+}
+
+TEST_CASE("Controller: action def parameters, port def directed features (slide 24)") {
+    SemanticModel model;
+    CHECK(SysMLTextImporter::importText(
+            "port def FuelCmdPort {\n"
+            "    in item fuelCmd : FuelCmd;\n"
+            "    in attribute x : Real;\n"
+            "    attribute y : Real;\n"
+            "}\n"
+            "action def ProvidePower {\n"
+            "    in pwrCmd : PwrCmd;\n"
+            "    out torqueToWheels : Torque[*];\n"
+            "}\n", model).lossless());
+    DiagramController controller(model);
+    const DiagramNode &port = *controller.nodes()->find(model.children(RootId).at(0));
+    CHECK_EQ(entryTexts(port, "directed features"), QStringList({QString("in item fuelCmd : FuelCmd"), QString("in attribute x : Real")}));
+    CHECK_EQ(entryTexts(port, "attributes"), QStringList({QString("y : Real")}));
+    const DiagramNode &action = *controller.nodes()->find(model.children(RootId).at(1));
+    CHECK_EQ(entryTexts(action, "parameters"), QStringList({QString("in pwrCmd : PwrCmd"), QString("out torqueToWheels : Torque[*]")}));
 }
