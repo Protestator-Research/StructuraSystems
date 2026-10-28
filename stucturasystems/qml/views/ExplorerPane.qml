@@ -60,6 +60,7 @@ Pane {
             placeholderText: qsTr("Filter projects")
             leftPadding: 34
             visible: AppController.localProjects.count > 0
+            onTextChanged: AppController.localProjectTree.filterText = text
             Accessible.name: qsTr("Filter projects")
             selectByMouse: true
             Keys.onDownPressed: list.focusFirst()
@@ -78,15 +79,13 @@ Pane {
             Layout.fillWidth: true
             Layout.fillHeight: true
 
-            ProjectList {
+            ProjectTree {
                 anchors.fill: parent
                 id: list
-                sourceModel: AppController.localProjects
-                iconSource: Theme.iconProject
-                filterText: search.text
                 isOpenFunction: row => AppController.isLocalProjectOpen(row)
                 onProjectActivated: row => AppController.openLocalProject(row)
                 onDeleteRequested: (row, name) => deleteDialog.openFor(row, name)
+                onLevelRequested: (path, level) => levelDialog.openFor(path, level)
             }
 
             Label {
@@ -120,6 +119,8 @@ Pane {
             }
         }
     }
+
+    LibraryLevelDialog { id: levelDialog }
 
     ConfirmDeleteDialog {
         id: deleteDialog

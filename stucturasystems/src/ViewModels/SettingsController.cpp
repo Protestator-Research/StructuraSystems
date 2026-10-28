@@ -11,6 +11,7 @@ namespace StructuraSystems::Client {
         AppearanceSettings.beginGroup(APPEARANCE_SETTINGS_GROUP_NAME);
         ThemeMode = qBound(0, AppearanceSettings.value(THEME_MODE_ENTRY, 0).toInt(), 2);
         AppearanceSettings.endGroup();
+        Settings.setPasswordLoadingCallback([this]() { emit passwordLoadingChanged(); });
     }
 
     QString SettingsController::workingDirectory() const {
@@ -57,7 +58,21 @@ namespace StructuraSystems::Client {
     }
 
     QString SettingsController::password() const {
-        return QString::fromStdString(const_cast<SettingsModel &>(Settings).password());
+        // The first access loads the password from the keychain (lazily, see SettingsModel::password()). QML is
+        // notified afterwards, because that access can also change the keychain availability.
+        auto &model = const_cast<SettingsModel &>(Settings);
+        const auto wasLoaded = model.passwordLoaded();
+        const auto wasAvailable = model.keychainAvailable();
+        const auto result = QString::fromStdString(model.password());
+        // A re-entrant call during the keychain read returns early (still loading); only the call that finished the
+        // load notifies, so QML never sees the temporary empty value as the password.
+        if (!wasLoaded && model.passwordLoaded()) {
+            auto *self = const_cast<SettingsController *>(this);
+            emit self->passwordChanged();
+            if (wasAvailable != model.keychainAvailable())
+                emit self->keychainAvailableChanged();
+        }
+        return result;
     }
 
     void SettingsController::setPassword(const QString &password) {
@@ -65,6 +80,25 @@ namespace StructuraSystems::Client {
             return;
         Settings.setPassword(password.toStdString());
         emit passwordChanged();
+    }
+
+    bool SettingsController::rememberPassword() const {
+        return const_cast<SettingsModel &>(Settings).rememberPassword();
+    }
+
+    void SettingsController::setRememberPassword(bool rememberPassword) {
+        if (rememberPassword == this->rememberPassword())
+            return;
+        Settings.setRememberPassword(rememberPassword);
+        emit rememberPasswordChanged();
+    }
+
+    bool SettingsController::passwordLoading() const {
+        return Settings.passwordLoading();
+    }
+
+    bool SettingsController::keychainAvailable() const {
+        return const_cast<SettingsModel &>(Settings).keychainAvailable();
     }
 
     int SettingsController::themeMode() const {
@@ -80,8 +114,10 @@ namespace StructuraSystems::Client {
     }
 
     void SettingsController::save() {
-        // TODO: store password in system keychain
+        const auto keychainWasAvailable = keychainAvailable();
         Settings.saveData();
+        if (keychainWasAvailable != keychainAvailable())
+            emit keychainAvailableChanged();
 
         AppearanceSettings.beginGroup(APPEARANCE_SETTINGS_GROUP_NAME);
         AppearanceSettings.setValue(THEME_MODE_ENTRY, ThemeMode);

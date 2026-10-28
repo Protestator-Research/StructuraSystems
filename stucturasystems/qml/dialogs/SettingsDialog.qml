@@ -5,11 +5,21 @@ import QtQuick.Dialogs
 import QtQuick.Layouts
 import StructuraSystems
 
-// Application settings: working directory, server connection and appearance.
+// Application settings: working directory, server connection, libraries and appearance.
 Dialog {
     id: dialog
 
     readonly property var settings: AppController.settings
+    // The password is loaded lazily from the keychain; do not replace what the user typed meanwhile.
+    property bool passwordEdited: false
+
+    Connections {
+        target: dialog.settings
+        function onPasswordChanged() {
+            if (!dialog.passwordEdited)
+                password.text = dialog.settings.password
+        }
+    }
 
     parent: Overlay.overlay
     anchors.centerIn: Overlay.overlay
@@ -21,8 +31,11 @@ Dialog {
         directory.text = settings.workingDirectory
         server.text = settings.serverPath
         username.text = settings.username
+        passwordEdited = false
         password.text = settings.password
+        rememberPassword.checked = settings.rememberPassword
         theme.currentIndex = settings.themeMode
+        libraries.refresh()
     }
 
     FolderDialog {
@@ -98,8 +111,28 @@ Dialog {
                 Layout.fillWidth: true
                 placeholderText: qsTr("Password")
                 echoMode: TextInput.Password
+                onTextEdited: dialog.passwordEdited = true
                 selectByMouse: true
             }
+        }
+        CheckBox {
+            id: rememberPassword
+            text: qsTr("Remember password")
+            enabled: dialog.settings.keychainAvailable
+        }
+        Label {
+            Layout.fillWidth: true
+            visible: !dialog.settings.keychainAvailable
+            wrapMode: Text.WordWrap
+            text: qsTr("The system keychain is not available. The password cannot be stored securely and is only kept until the application is closed.")
+            font.pixelSize: 12
+            color: Theme.textSecondary
+        }
+
+        SectionHeader { text: qsTr("Libraries"); iconSource: Theme.iconProject }
+        LibrarySettings {
+            id: libraries
+            Layout.fillWidth: true
         }
 
         SectionHeader { text: qsTr("Appearance"); iconSource: Theme.iconTheme }
@@ -118,6 +151,7 @@ Dialog {
         Button {
             text: qsTr("Save")
             highlighted: true
+            enabled: !dialog.settings.passwordLoading
             icon.source: Theme.iconSave
             icon.color: "transparent"
             icon.width: 18
@@ -131,6 +165,7 @@ Dialog {
         settings.serverPath = server.text.trim()
         settings.username = username.text.trim()
         settings.password = password.text
+        settings.rememberPassword = rememberPassword.checked
         settings.themeMode = theme.currentIndex
         settings.save()
     }

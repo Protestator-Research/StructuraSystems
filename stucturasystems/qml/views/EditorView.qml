@@ -124,6 +124,8 @@ Item {
             required property string headerAuthor
             required property int problemCount
             required property string elementId
+            required property ElementTreeModel elementTree
+            required property int elementCount
 
             width: list.width
             height: card.implicitHeight + divider.implicitHeight
@@ -140,6 +142,9 @@ Item {
                 headerAuthor: delegate.headerAuthor
                 problemCount: delegate.problemCount
                 elementId: delegate.elementId
+                elementTree: delegate.elementTree
+                elementCount: delegate.elementCount
+                tableOfContents: view.document ? view.document.tableOfContents : []
                 first: delegate.index === 0
                 last: delegate.index === list.count - 1
                 locked: view.locked
@@ -160,6 +165,7 @@ Item {
                 onInsertRequested: (targetRow, language) => view.insertAndEdit(targetRow, language)
                 onDeleteRequested: deleteDialog.openFor(delegate.index)
                 onDiagramEditorRequested: view.diagramEditorRequested(delegate.elementId)
+                onTocEntryActivated: row => view.scrollToRow(row)
             }
 
             InsertDivider {

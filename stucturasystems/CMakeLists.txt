@@ -51,10 +51,26 @@ set(SOURCES
         src/Models/Parser/Markdown/CommonmarkParser/xml.c
         resources/Resources.qrc
         ../resources/sysml.qrc
+        src/Models/Libraries/CodeScanner.cpp
+        src/Models/Libraries/CodeScanner.h
+        src/Models/Libraries/DocumentWorkspace.cpp
+        src/Models/Libraries/DocumentWorkspace.h
+        src/Models/Libraries/LibraryWorkspace.cpp
+        src/Models/Libraries/LibraryWorkspace.h
+        src/Models/Libraries/WorkspaceConfig.cpp
+        src/Models/Libraries/WorkspaceConfig.h
         src/Models/SettingsModel.cpp
         src/Models/SettingsModel.h
+        src/Models/SettingsMigration.cpp
+        src/Models/SettingsMigration.h
+        src/Services/CredentialStore.h
+        src/Services/CredentialStore.cpp
         src/Services/BECommunicationService.h
         src/Services/BECommunicationService.cpp
+        src/Services/CommitDelta.h
+        src/Services/CommitDelta.cpp
+        src/Services/PagedRequest.h
+        src/Services/PagedRequest.cpp
         src/Services/entities/DigitalTwin.h
         src/Services/entities/DigitalTwin.cpp
         src/Services/entities/DigitalTwinRequest.h
@@ -78,12 +94,14 @@ qt_add_qml_module(StructuraSystems
             qml/components/EmptyState.qml
             qml/components/InsertDivider.qml
             qml/components/LanguageChip.qml
+            qml/components/LibrarySettings.qml
             qml/components/LineNumberGutter.qml
             qml/components/LanguageMenu.qml
             qml/components/NavigationRail.qml
             qml/components/NavRailItem.qml
             qml/components/ConfirmDeleteDialog.qml
             qml/components/ProjectList.qml
+            qml/components/ProjectTree.qml
             qml/components/SegmentedControl.qml
             qml/components/Snackbar.qml
             qml/views/DetachedBanner.qml
@@ -101,6 +119,7 @@ qt_add_qml_module(StructuraSystems
             qml/dialogs/DetailsDialog.qml
             qml/dialogs/DiscardChangesDialog.qml
             qml/dialogs/DigitalTwinWizard.qml
+            qml/dialogs/LibraryLevelDialog.qml
             qml/dialogs/NewBranchDialog.qml
             qml/dialogs/NewProjectDialog.qml
             qml/dialogs/QuitDialog.qml
@@ -141,10 +160,16 @@ qt_add_qml_module(StructuraSystems
             src/ViewModels/DocumentModel.h
             src/ViewModels/OpenDocumentsModel.cpp
             src/ViewModels/OpenDocumentsModel.h
+            src/ViewModels/ElementTreeModel.cpp
+            src/ViewModels/ElementTreeModel.h
             src/ViewModels/ProblemListModel.cpp
             src/ViewModels/ProblemListModel.h
             src/ViewModels/ProjectFilterModel.cpp
             src/ViewModels/ProjectFilterModel.h
+            src/ViewModels/LibraryController.cpp
+            src/ViewModels/LibraryController.h
+            src/ViewModels/LocalProjectTreeModel.cpp
+            src/ViewModels/LocalProjectTreeModel.h
             src/ViewModels/SettingsController.cpp
             src/ViewModels/SettingsController.h
             src/Models/ItemModels/ProjectItemModel.cpp
@@ -194,6 +219,7 @@ target_link_libraries(StructuraSystems PUBLIC
         md4c::md4c
         sysmllib::sysmllib
         yaml-cpp::yaml-cpp
+        Qt6Keychain::Qt6Keychain
         StructuraDiagramCore)
 
 # Core of the graphical diagram editor (plain C++20, no Qt) and its unit tests.
@@ -224,4 +250,4 @@ elseif (UNIX AND NOT APPLE)
     target_compile_options(StructuraSystems PRIVATE -Wall -Wextra -Wpedantic -Werror)
 else ()
     target_compile_options(StructuraSystems PRIVATE -Wall -Wextra -Wpedantic -Werror)
-endif()
+endif()

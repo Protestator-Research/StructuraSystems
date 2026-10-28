@@ -2,6 +2,10 @@
 // Created by Moritz Herzog on 07.10.26.
 //
 
+// The ANTLR headers have to come before any Qt header (Qt defines macros like emit and signals).
+#include <kerml/parser/KerMLLexer.h>
+#include <sysmlv2/parser/SysMLv2Lexer.h>
+
 #include "SysMLHighlighter.h"
 
 #include <QColor>
@@ -19,24 +23,35 @@ namespace StructuraSystems::Client {
             InDocComment = 2
         };
 
-        const QSet<QString> &keywords() {
-            static const QSet<QString> Keywords = {
-                "part", "def", "attribute", "port", "item", "action", "state", "requirement", "constraint", "package",
-                "import", "private", "public", "protected", "connection", "interface", "flow", "ref", "in", "out", "inout",
-                "abstract", "specializes", "subsets", "redefines", "doc", "comment", "enum", "calc", "use", "case", "view",
-                "viewpoint", "verification", "analysis", "allocation", "metadata", "transition", "then", "first", "accept",
-                "do", "entry", "exit", "if", "else", "while", "for", "return", "alias", "library", "standard", "class",
-                "struct", "datatype", "feature", "type", "classifier", "function", "predicate", "behavior", "step", "expr",
-                "bool", "assoc", "connector", "binding", "succession", "namespace", "member", "about", "language", "true",
-                "false", "null", "occurrence", "individual", "variation", "variant", "event", "perform", "exhibit",
-                "include", "satisfy", "assert", "assume", "require", "subject", "objective", "actor", "stakeholder",
-                "concern", "frame", "render", "rendering", "message", "from", "to", "of", "all", "end", "readonly",
-                "derived", "nonunique", "ordered", "conjugate", "conjugates", "typed", "by", "dependency", "filter",
-                "expose", "send", "via", "loop", "until", "merge", "decide", "fork", "join", "terminate", "bind", "succession",
-                "snapshot", "timeslice", "inverse", "disjoint", "differences", "intersects", "unions", "chains", "featured",
-                "multiplicity", "interaction", "metaclass", "var", "const", "not", "and", "or", "xor", "implies", "hastype",
-                "istype", "as", "meta", "self", "this", "inv", "default", "assign", "rep", "textualrepresentation"
-            };
+        /**
+         * Collects all KEYWORD_* literals of the given ANTLR lexer vocabulary.
+         */
+        template<typename LexerType>
+        QSet<QString> collectKeywords() {
+            antlr4::ANTLRInputStream input{std::string{}};
+            LexerType lexer(&input);
+            const auto &vocabulary = lexer.getVocabulary();
+            QSet<QString> result;
+            for (size_t type = 1; type <= vocabulary.getMaxTokenType(); ++type) {
+                const std::string symbolic{vocabulary.getSymbolicName(type)};
+                if (symbolic.rfind("KEYWORD_", 0) != 0)
+                    continue;
+                std::string literal{vocabulary.getLiteralName(type)};
+                if (literal.size() >= 2 && literal.front() == '\'' && literal.back() == '\'')
+                    literal = literal.substr(1, literal.size() - 2);
+                if (!literal.empty())
+                    result.insert(QString::fromStdString(literal));
+            }
+            return result;
+        }
+
+        const QSet<QString> &sysmlKeywords() {
+            static const QSet<QString> Keywords = collectKeywords<SysMLv2Lexer>();
+            return Keywords;
+        }
+
+        const QSet<QString> &kermlKeywords() {
+            static const QSet<QString> Keywords = collectKeywords<KerMLLexer>();
             return Keywords;
         }
 
@@ -58,6 +73,14 @@ namespace StructuraSystems::Client {
                 return;
             Dark = dark;
             applyColors();
+            rehighlight();
+        }
+
+        void setLanguage(const QString &language) {
+            const QSet<QString> *keywords = language == "KerML" ? &kermlKeywords() : &sysmlKeywords();
+            if (Keywords == keywords)
+                return;
+            Keywords = keywords;
             rehighlight();
         }
 
@@ -153,7 +176,7 @@ namespace StructuraSystems::Client {
                     while (end < length && isIdentifierPart(text.at(end)))
                         ++end;
                     const QString word = text.mid(pos, end - pos);
-                    if (keywords().contains(word)) {
+                    if (Keywords->contains(word)) {
                         setFormat(pos, end - pos, KeywordFormat);
                         lastWasDoc = word == "doc" || word == "comment";
                     } else {
@@ -205,6 +228,7 @@ namespace StructuraSystems::Client {
         }
 
         bool Dark = false;
+        const QSet<QString> *Keywords = &sysmlKeywords();
         QTextCharFormat KeywordFormat;
         QTextCharFormat TypeFormat;
         QTextCharFormat StringFormat;
@@ -233,6 +257,7 @@ namespace StructuraSystems::Client {
         if (TextDocument && TextDocument->textDocument()) {
             auto *highlighter = new SysMLSyntaxHighlighter(TextDocument->textDocument());
             highlighter->setDark(DarkTheme);
+            highlighter->setLanguage(Language);
             Highlighter = highlighter;
         }
         emit textDocumentChanged();
@@ -249,5 +274,18 @@ namespace StructuraSystems::Client {
         if (Highlighter)
             static_cast<SysMLSyntaxHighlighter *>(Highlighter.data())->setDark(darkTheme);
         emit darkThemeChanged();
+    }
+
+    QString SysMLHighlighter::language() const {
+        return Language;
+    }
+
+    void SysMLHighlighter::setLanguage(const QString &language) {
+        if (Language == language)
+            return;
+        Language = language;
+        if (Highlighter)
+            static_cast<SysMLSyntaxHighlighter *>(Highlighter.data())->setLanguage(language);
+        emit languageChanged();
     }
 }

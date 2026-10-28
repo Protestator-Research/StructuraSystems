@@ -7,6 +7,7 @@
 
 #include <QObject>
 #include <QPointer>
+#include <QString>
 #include <QQuickTextDocument>
 #include <QSyntaxHighlighter>
 #include <QtQml/qqmlregistration.h>
@@ -20,6 +21,7 @@ namespace StructuraSystems::Client {
         QML_ELEMENT
         Q_PROPERTY(QQuickTextDocument *textDocument READ textDocument WRITE setTextDocument NOTIFY textDocumentChanged)
         Q_PROPERTY(bool darkTheme READ darkTheme WRITE setDarkTheme NOTIFY darkThemeChanged)
+        Q_PROPERTY(QString language READ language WRITE setLanguage NOTIFY languageChanged)
     public:
         explicit SysMLHighlighter(QObject *parent = nullptr);
         ~SysMLHighlighter() override;
@@ -30,14 +32,19 @@ namespace StructuraSystems::Client {
         [[nodiscard]] bool darkTheme() const;
         void setDarkTheme(bool darkTheme);
 
+        [[nodiscard]] QString language() const;
+        void setLanguage(const QString &language);
+
     signals:
         void textDocumentChanged();
         void darkThemeChanged();
+        void languageChanged();
 
     private:
         QPointer<QQuickTextDocument> TextDocument;
         QPointer<QSyntaxHighlighter> Highlighter;
         bool DarkTheme = false;
+        QString Language;
     };
 }
 

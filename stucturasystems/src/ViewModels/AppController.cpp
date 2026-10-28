@@ -4,6 +4,7 @@
 
 #include "AppController.h"
 
+#include <algorithm>
 #include <exception>
 #include <stdexcept>
 #include <chrono>
@@ -11,10 +12,12 @@
 #include <utility>
 
 #include <QDir>
+#include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
 #include <QFuture>
 #include <QTextStream>
+#include <QThreadPool>
 #include <QTimer>
 #include <QtConcurrent/QtConcurrent>
 
@@ -34,12 +37,16 @@
 #include "CommitHistoryModel.h"
 #include "DigitalTwinProjectModel.h"
 #include "DocumentModel.h"
+#include "LibraryController.h"
+#include "LocalProjectTreeModel.h"
 #include "OpenDocumentsModel.h"
 #include "ProblemListModel.h"
 #include "SettingsController.h"
 #include "../Models/ItemModels/ProjectItemModel.h"
+#include "../Models/Libraries/DocumentWorkspace.h"
 #include "../Models/Parser/StructuraSystemsParser.h"
 #include "../Services/BECommunicationService.h"
+#include "../Services/CommitDelta.h"
 #include "../Services/entities/DigitalTwin.h"
 #include "../Services/entities/DigitalTwinRequest.h"
 
@@ -135,6 +142,8 @@ namespace StructuraSystems::Client {
         QObject(parent),
         Settings(new SettingsController(this)),
         LocalProjects(new ProjectItemModel(this)),
+        LocalProjectTree(new LocalProjectTreeModel(LocalProjects, this)),
+        Libraries(new LibraryController(this)),
         OnlineProjects(new ProjectItemModel(this)),
         DigitalTwinProjects(new DigitalTwinProjectModel(this)),
         Documents(new OpenDocumentsModel(this)),
@@ -143,18 +152,31 @@ namespace StructuraSystems::Client {
         CommitHistory(new CommitHistoryModel(this)),
         StatusText(tr("Ready")) {
         Settings->initWithDefaultsIfEmpty();
+        // Warm-ups and recycling of the document workspaces run one after another, never in parallel.
+        WorkspacePool.setMaxThreadCount(1);
         connect(Settings, &SettingsController::saved, this, &AppController::onSettingsSaved);
+
+        // The tree shows the level of the libraries; it has to follow the settings and the index.
+        LocalProjectTree->setLibraryLevelProvider([this](const QString &path) { return Libraries->levelOf(path); });
+        connect(Libraries, &LibraryController::changed, LocalProjectTree, &LocalProjectTreeModel::refreshLibraryLevels);
+        connect(Libraries, &LibraryController::notify, this, &AppController::notify);
 
         // Deferred, so that the QML side is already connected to notify() when the folder is loaded.
         QTimer::singleShot(0, this, &AppController::openWorkingDirectoryIfPresent);
     }
 
-    AppController::~AppController() = default;
+    AppController::~AppController() {
+        // Do not wait for a warm-up and do not take the workspaces apart on the way out: the process ends anyway.
+        DocumentWorkspace::beginShutdown();
+        WorkspacePool.clear();
+        WorkspacePool.waitForDone();
+    }
 
     bool AppController::connected() const { return Connected; }
     bool AppController::busy() const { return Busy; }
     QString AppController::statusText() const { return StatusText; }
     ProjectItemModel *AppController::localProjects() const { return LocalProjects; }
+    LocalProjectTreeModel *AppController::localProjectTree() const { return LocalProjectTree; }
     ProjectItemModel *AppController::onlineProjects() const { return OnlineProjects; }
     DigitalTwinProjectModel *AppController::digitalTwinProjects() const { return DigitalTwinProjects; }
     bool AppController::twinsLoading() const { return TwinsLoading; }
@@ -163,6 +185,7 @@ namespace StructuraSystems::Client {
     DocumentModel *AppController::currentDocument() const { return CurrentDocument; }
     ProblemListModel *AppController::problems() const { return Problems; }
     SettingsController *AppController::settings() const { return Settings; }
+    LibraryController *AppController::libraries() const { return Libraries; }
     BranchListModel *AppController::branches() const { return Branches; }
     CommitHistoryModel *AppController::commitHistory() const { return CommitHistory; }
     bool AppController::historyLoading() const { return HistoryLoading; }
@@ -282,16 +305,47 @@ namespace StructuraSystems::Client {
         LocalProjects->clear();
 
         const QDir directory(folder);
-        const auto files = directory.entryList(PROJECT_FILE_FILTERS, QDir::Files, QDir::Name);
-        for (const auto &fileName : files)
-            loadFile(directory.absoluteFilePath(fileName), directory.absolutePath());
+        const auto root = directory.absolutePath();
+        // Only the settings of the folder are read, the files are not touched before a document needs a library.
+        Libraries->setFolder(root);
+
+        // Recursive, symbolic links are not followed. Hidden folders (for example .git) are skipped.
+        QStringList files;
+        QDirIterator iterator(root, PROJECT_FILE_FILTERS, QDir::Files, QDirIterator::Subdirectories);
+        while (iterator.hasNext()) {
+            const auto relative = directory.relativeFilePath(iterator.next());
+            const auto segments = relative.split('/');
+            const bool hidden = std::any_of(segments.begin(), segments.end() - 1,
+                                            [](const QString &segment) { return segment.startsWith('.'); });
+            if (!hidden)
+                files.append(relative);
+        }
+
+        // Within each folder, subfolders come before files, each sorted alphabetically.
+        std::sort(files.begin(), files.end(), [](const QString &left, const QString &right) {
+            const auto leftParts = left.split('/');
+            const auto rightParts = right.split('/');
+            const auto common = std::min(leftParts.size(), rightParts.size());
+            for (qsizetype i = 0; i < common; ++i) {
+                if (leftParts[i] == rightParts[i])
+                    continue;
+                const bool leftIsFolder = i < leftParts.size() - 1;
+                const bool rightIsFolder = i < rightParts.size() - 1;
+                if (leftIsFolder != rightIsFolder)
+                    return leftIsFolder;
+                return leftParts[i].compare(rightParts[i], Qt::CaseInsensitive) < 0;
+            }
+            return leftParts.size() < rightParts.size();
+        });
+
+        for (const auto &relative : files)
+            loadFile(directory.absoluteFilePath(relative), root, relative);
 
         setStatusText(tr("Opened %1 (%2 projects)").arg(folder).arg(LocalProjects->count()));
     }
 
-    void AppController::loadFile(const QString &filePath, const QString &folder) {
+    void AppController::loadFile(const QString &filePath, const QString &folder, const QString &name) {
         try {
-            const auto name = filePath.split("/").last();
             const auto project = LocalProjects->createProject(name.toStdString(), "Created from Filesystem");
 
             StructuraSystemsParser parser;
@@ -322,7 +376,7 @@ namespace StructuraSystems::Client {
                     known = true;
 
             if (!known)
-                loadFile(info.absoluteFilePath(), info.absolutePath());
+                loadFile(info.absoluteFilePath(), info.absolutePath(), name);
             openLocalProjectByName(name);
         }
     }
@@ -338,6 +392,14 @@ namespace StructuraSystems::Client {
     }
 
     void AppController::openDocument(const QString &key, DocumentModel *document) {
+        // The file of the document counts as its own only if it belongs to the opened folder (files opened from elsewhere
+        // may have the same name as a file of the folder).
+        QString ownFile;
+        if (document->isLocalFile() && QDir::cleanPath(LocalFolders.value(document->title())) == QDir::cleanPath(Libraries->workspace()->root()))
+            ownFile = document->title();
+        document->attachLibraries(Libraries->workspace(), ownFile);
+        // The next document will probably be parsed too; its workspace is made ready meanwhile.
+        prepareSpareWorkspace();
         connect(document, &DocumentModel::problemsChanged, this, [this, document]() {
             if (document == CurrentDocument)
                 refreshProblems();
@@ -351,6 +413,46 @@ namespace StructuraSystems::Client {
         connect(document, &DocumentModel::branchChanged, this, contextChanged);
         const int index = Documents->append(key, document);
         updateCurrentDocument(index);
+    }
+
+    std::shared_ptr<DocumentWorkspace> AppController::takeWorkspace() {
+        std::shared_ptr<DocumentWorkspace> workspace;
+        {
+            std::lock_guard lock(SpareMutex);
+            workspace = std::move(SpareWorkspace);
+            SpareWorkspace.reset();
+        }
+        if (workspace == nullptr)
+            workspace = std::make_shared<DocumentWorkspace>();
+        return workspace;
+    }
+
+    void AppController::prepareSpareWorkspace() {
+        std::lock_guard lock(SpareMutex);
+        if (SpareWorkspace != nullptr)
+            return;
+        // Parsing the standard library takes seconds. The first parser run of the document that gets this workspace waits for it
+        // if it is not ready yet.
+        SpareWorkspace = std::make_shared<DocumentWorkspace>();
+        const auto workspace = SpareWorkspace;
+        WorkspacePool.start([workspace]() { workspace->warmUp(); });
+    }
+
+    void AppController::recycleWorkspace(std::shared_ptr<DocumentWorkspace> workspace) {
+        if (workspace == nullptr)
+            return;
+        // Everything happens on the pool thread, including dropping the last reference of a workspace that is not needed:
+        // taking a model apart takes a moment and must not block the user interface.
+        WorkspacePool.start([this, workspace = std::move(workspace)]() mutable {
+            workspace->recycle();
+            {
+                std::lock_guard lock(SpareMutex);
+                if (SpareWorkspace == nullptr)
+                    SpareWorkspace = std::move(workspace);
+            }
+            // Outside the lock: disposing a surplus workspace must not block takeWorkspace() on the GUI thread.
+            workspace.reset();
+        });
     }
 
     void AppController::openLocalProject(int row) {
@@ -482,8 +584,11 @@ namespace StructuraSystems::Client {
         else if (index == CurrentIndex)
             newIndex = qMin(CurrentIndex, Documents->count() - 2);
 
+        const auto closing = Documents->at(index);
+        auto workspace = closing != nullptr ? closing->releaseWorkspace() : nullptr;
         Documents->remove(index);
         updateCurrentDocument(newIndex);
+        recycleWorkspace(std::move(workspace));
     }
 
     bool AppController::isLocalProjectOpen(int row) const {
@@ -561,10 +666,15 @@ namespace StructuraSystems::Client {
         }
 
         const auto title = document->title();
+        if (!document->hasWorkspace())
+            document->adoptWorkspace(takeWorkspace());
+        const auto workspace = document->workspace();
         QPointer<DocumentModel> guard(document);
         runAsync<ParseResult>(tr("Parsing %1").arg(title),
-            [inputs, title]() { return DocumentModel::runParser(inputs, title); },
+            [inputs, title, workspace]() { return DocumentModel::runParser(inputs, title, workspace); },
             [this, guard, title](ParseResult result) {
+                // The parser may have built the package index of the opened folder.
+                Libraries->indexUsed();
                 if (!guard)
                     return;
                 int errors = 0;
@@ -680,6 +790,11 @@ namespace StructuraSystems::Client {
         }
         const auto username = Settings->username().toStdString();
         const auto password = Settings->password().toStdString();
+        if (Settings->passwordLoading()) {
+            // Another call is still waiting for the keychain, the password read above is not the real one.
+            emitNotify(2, tr("The password is still being read from the keychain. Please try again in a moment."));
+            return;
+        }
 
         runAsync<ConnectResult>(tr("Connecting to backend"),
             [serverPath, username, password]() {
@@ -775,18 +890,14 @@ namespace StructuraSystems::Client {
                 OnlineProjectContent content;
                 content.Project = project;
 
-                auto branches = service->getAllBranchesForProjectWithID(project->getId());
-                std::shared_ptr<SysMLv2::REST::Branch> mainBranch;
-                for (const auto &branch : branches)
-                    if (branch != nullptr && project->getDefaultBranch() != nullptr && branch->getId() == project->getDefaultBranch()->getId())
-                        mainBranch = branch;
-                if (mainBranch == nullptr || mainBranch->getHead() == nullptr)
-                    throw std::runtime_error("The project has no default branch with a commit.");
-
-                content.BranchId = uuidText(mainBranch->getId());
-                content.BranchName = QString::fromStdString(mainBranch->getName());
-                content.Commit = service->getCommitWithId(project->getId(), mainBranch->getHead()->getId());
-                content.Elements = service->getAllElements(content.Commit->getId(), project->getId());
+                if (project->getDefaultBranch() == nullptr)
+                    throw std::runtime_error("The project has no default branch.");
+                // A new project has a branch without commits: its document is empty and gets the first commit later.
+                auto state = service->loadBranchState(project->getId(), project->getDefaultBranch()->getId());
+                content.BranchId = uuidText(state.Branch->getId());
+                content.BranchName = QString::fromStdString(state.Branch->getName());
+                content.Commit = std::move(state.Commit);
+                content.Elements = std::move(state.Elements);
                 return content;
             },
             [this, key](OnlineProjectContent content) {
@@ -821,24 +932,55 @@ namespace StructuraSystems::Client {
 
         const auto service = BackendConnection;
         const auto project = document->getProject();
-        const auto request = document->buildCommitRequest(message);
         // The commit goes to the branch of the document, the default branch of the project is the fallback.
         auto branchId = document->branchId();
         if (branchId.isEmpty() && project->getDefaultBranch() != nullptr)
             branchId = uuidText(project->getDefaultBranch()->getId());
+        if (branchId.isEmpty()) {
+            emitNotify(2, tr("The branch of this document is unknown. Refresh the history."));
+            return;
+        }
+        const auto documentBranchId = document->branchId();
         const auto branchIdText = branchId.toStdString();
         QPointer<DocumentModel> guard(document);
-        runAsync<std::shared_ptr<SysMLv2::REST::Commit>>(tr("Committing %1").arg(document->title()),
-            [service, project, request, branchIdText]() {
-                if (branchIdText.empty())
-                    return service->postCommitWithId(project->getId(), request);
-                return service->postCommitToBranch(project->getId(), boost::uuids::string_generator()(branchIdText), request);
+        // A commit only contains the changes against the head of the branch on the server. So the head is loaded first, and the
+        // delta is computed in the GUI thread, where the elements of the document are not changed concurrently.
+        runAsync<BranchState>(tr("Checking %1").arg(document->title()),
+            [service, project, branchIdText]() {
+                return service->loadBranchState(project->getId(), boost::uuids::string_generator()(branchIdText));
             },
-            [this, guard](std::shared_ptr<SysMLv2::REST::Commit> commit) {
-                if (guard)
-                    guard->applyCommit(std::move(commit));
-                emitNotify(1, tr("Commit created."));
-                loadHistory();
+            [this, guard, message, service, project, branchIdText, documentBranchId](BranchState state) {
+                if (!guard || guard->branchId() != documentBranchId)
+                    return;
+
+                // Other users could have committed since the document was loaded. Committing now would overwrite their work.
+                const auto headId = state.Commit != nullptr ? uuidText(state.Commit->getId()) : QString();
+                if (headId != guard->commitId()) {
+                    emitNotify(3, tr("The branch has new commits on the server."), tr("Reload the project before committing."));
+                    return;
+                }
+
+                const auto delta = guard->commitDelta(state.Elements);
+                if (delta.empty()) {
+                    emitNotify(0, tr("Nothing to commit."));
+                    return;
+                }
+                const auto request = buildCommitRequest(message.toStdString(), delta);
+                const auto branchName = QString::fromStdString(state.Branch->getName());
+                runAsync<std::shared_ptr<SysMLv2::REST::Commit>>(tr("Committing %1").arg(guard->title()),
+                    [service, project, request, branchIdText]() {
+                        return service->postCommitToBranch(project->getId(), boost::uuids::string_generator()(branchIdText), request);
+                    },
+                    [this, guard, branchIdText, branchName](std::shared_ptr<SysMLv2::REST::Commit> commit) {
+                        if (guard) {
+                            // A document without branch continues on the branch that received the commit.
+                            if (guard->branchId().isEmpty())
+                                guard->setBranch(QString::fromStdString(branchIdText), branchName);
+                            guard->applyCommit(std::move(commit));
+                        }
+                        emitNotify(1, tr("Commit created."));
+                        loadHistory();
+                    });
             });
     }
 
@@ -853,13 +995,31 @@ namespace StructuraSystems::Client {
 
         const auto service = BackendConnection;
         const auto project = document->getProject();
-        const auto request = document->buildCommitRequest(QStringLiteral("Upload from Local Project, by Structura Systems"));
+        // The project is new, so everything is created. A document without elements only creates the project: the server
+        // rejects a commit without changes.
+        const auto delta = document->commitDelta({});
+        const auto request = delta.empty() ? nullptr : buildCommitRequest("Upload from Local Project, by Structura Systems", delta);
+        auto projectName = project->getName();
+        if (projectName.empty())
+            projectName = document->title().toStdString();
         QPointer<DocumentModel> guard(document);
         runAsync<UploadResult>(tr("Uploading %1").arg(document->title()),
-            [service, project, request]() {
+            [service, project, projectName, request]() {
                 UploadResult result;
-                result.Project = service->postProject(project->getName(), project->getDescription(), "Main");
-                result.Commit = service->postCommitWithId(result.Project->getId(), request);
+                result.Project = service->postProject(projectName, project->getDescription(), "Main");
+                if (request != nullptr) {
+                    // The commit goes to the default branch of the new project, by its id.
+                    boost::uuids::uuid branchId{};
+                    if (result.Project->getDefaultBranch() != nullptr) {
+                        branchId = result.Project->getDefaultBranch()->getId();
+                    } else {
+                        const auto branches = service->getAllBranchesForProjectWithID(result.Project->getId());
+                        if (branches.empty() || branches.front() == nullptr)
+                            throw std::runtime_error("The new project has no branch.");
+                        branchId = branches.front()->getId();
+                    }
+                    result.Commit = service->postCommitToBranch(result.Project->getId(), branchId, request);
+                }
                 result.Projects = service->getAllProjects();
                 return result;
             },
@@ -999,7 +1159,7 @@ namespace StructuraSystems::Client {
                         const auto milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(created->second.time_since_epoch());
                         info.Created = QDateTime::fromMSecsSinceEpoch(milliseconds.count());
                     }
-                    for (const auto &previous : commit->getPreviusCommits())
+                    for (const auto &previous : commit->getPreviousCommits())
                         if (previous != nullptr)
                             info.PreviousIds.append(uuidText(previous->getId()));
                     outcome.Value.Commits.append(info);
@@ -1071,18 +1231,16 @@ namespace StructuraSystems::Client {
             [service, projectId, branchIdText]() {
                 const auto id = boost::uuids::string_generator()(branchIdText);
                 // The head is read again, other users may have committed since the branch list was loaded.
-                for (const auto &branch : service->getAllBranchesForProjectWithID(projectId)) {
-                    if (branch == nullptr || branch->getId() != id)
-                        continue;
-                    if (branch->getHead() == nullptr)
-                        throw std::runtime_error("The branch " + branch->getName() + " has no commit yet.");
-                    auto content = downloadCommit(service, projectId, branch->getHead()->getId());
-                    content.BranchId = uuidText(branch->getId());
-                    content.BranchName = QString::fromStdString(branch->getName());
-                    content.BranchHeadCommitId = uuidText(branch->getHead()->getId());
-                    return content;
-                }
-                throw std::runtime_error("The branch does not exist on the server (anymore). Refresh the history.");
+                auto state = service->loadBranchState(projectId, id);
+                CommitContent content;
+                content.BranchId = uuidText(state.Branch->getId());
+                content.BranchName = QString::fromStdString(state.Branch->getName());
+                // A branch without commits shows an empty document.
+                if (state.Commit != nullptr)
+                    content.BranchHeadCommitId = uuidText(state.Commit->getId());
+                content.Commit = std::move(state.Commit);
+                content.Elements = std::move(state.Elements);
+                return content;
             },
             [this, guard](CommitContent content) {
                 if (!guard)

@@ -6,11 +6,13 @@
 #define STRUCTURASYSTEMS_APPCONTROLLER_H
 
 #include <memory>
+#include <mutex>
 #include <vector>
 #include <QHash>
 #include <QList>
 #include <QObject>
 #include <QPointer>
+#include <QThreadPool>
 #include <QString>
 #include <QStringList>
 #include <QUrl>
@@ -26,6 +28,9 @@ namespace StructuraSystems::Client {
     class CommunicationService;
     class DigitalTwinProjectModel;
     class DocumentModel;
+    class DocumentWorkspace;
+    class LibraryController;
+    class LocalProjectTreeModel;
     class OpenDocumentsModel;
     class ProblemListModel;
     class ProjectItemModel;
@@ -44,6 +49,8 @@ namespace StructuraSystems::Client {
         Q_MOC_INCLUDE("CommitHistoryModel.h")
         Q_MOC_INCLUDE("DigitalTwinProjectModel.h")
         Q_MOC_INCLUDE("DocumentModel.h")
+        Q_MOC_INCLUDE("LibraryController.h")
+        Q_MOC_INCLUDE("LocalProjectTreeModel.h")
         Q_MOC_INCLUDE("OpenDocumentsModel.h")
         Q_MOC_INCLUDE("ProblemListModel.h")
         Q_MOC_INCLUDE("SettingsController.h")
@@ -52,6 +59,7 @@ namespace StructuraSystems::Client {
         Q_PROPERTY(bool busy READ busy NOTIFY busyChanged)
         Q_PROPERTY(QString statusText READ statusText NOTIFY statusTextChanged)
         Q_PROPERTY(StructuraSystems::Client::ProjectItemModel *localProjects READ localProjects CONSTANT)
+        Q_PROPERTY(StructuraSystems::Client::LocalProjectTreeModel *localProjectTree READ localProjectTree CONSTANT)
         Q_PROPERTY(StructuraSystems::Client::ProjectItemModel *onlineProjects READ onlineProjects CONSTANT)
         Q_PROPERTY(StructuraSystems::Client::DigitalTwinProjectModel *digitalTwinProjects READ digitalTwinProjects CONSTANT)
         Q_PROPERTY(bool twinsLoading READ twinsLoading NOTIFY twinsLoadingChanged)
@@ -63,6 +71,8 @@ namespace StructuraSystems::Client {
         Q_PROPERTY(StructuraSystems::Client::CommitHistoryModel *commitHistory READ commitHistory CONSTANT)
         Q_PROPERTY(bool historyLoading READ historyLoading NOTIFY historyLoadingChanged)
         Q_PROPERTY(StructuraSystems::Client::SettingsController *settings READ settings CONSTANT)
+        /** The local libraries of the opened folder: levels, preferred sources and the list for the settings. */
+        Q_PROPERTY(StructuraSystems::Client::LibraryController *libraries READ libraries CONSTANT)
     public:
         explicit AppController(QObject *parent = nullptr);
         ~AppController() override;
@@ -71,6 +81,7 @@ namespace StructuraSystems::Client {
         [[nodiscard]] bool busy() const;
         [[nodiscard]] QString statusText() const;
         [[nodiscard]] ProjectItemModel *localProjects() const;
+        [[nodiscard]] LocalProjectTreeModel *localProjectTree() const;
         [[nodiscard]] ProjectItemModel *onlineProjects() const;
         [[nodiscard]] DigitalTwinProjectModel *digitalTwinProjects() const;
         /** True while the digital twins are loaded. Independent of busy, the twins are loaded in the background. */
@@ -87,6 +98,7 @@ namespace StructuraSystems::Client {
         /** True while branches and commits are loaded. Independent of busy, the history is loaded in the background. */
         [[nodiscard]] bool historyLoading() const;
         [[nodiscard]] SettingsController *settings() const;
+        [[nodiscard]] LibraryController *libraries() const;
 
         /** Loads the projects of a folder into the local project list. Also becomes the working directory. */
         Q_INVOKABLE void openFolder(const QUrl &folder);
@@ -196,9 +208,23 @@ namespace StructuraSystems::Client {
         void emitNotify(int level, const QString &message, const QString &details = QString());
 
         void loadFolder(const QString &folder);
-        void loadFile(const QString &filePath, const QString &folder);
+        /**
+         * Loads a file as local project.
+         * @param name Project name, the path relative to folder (for example "sub/model.sysml").
+         * @param folder Folder the name is relative to.
+         */
+        void loadFile(const QString &filePath, const QString &folder, const QString &name);
         void openLocalProjectByName(const QString &name);
         void openDocument(const QString &key, DocumentModel *document);
+        /** The workspace for a document that is parsed for the first time: the spare one (see prepareSpareWorkspace), or a new one. */
+        std::shared_ptr<DocumentWorkspace> takeWorkspace();
+        /**
+         * Starts loading the standard library into a spare workspace, so that the first parser run of the next document does not
+         * wait for it. At most one spare exists; it is only started when a document is opened.
+         */
+        void prepareSpareWorkspace();
+        /** Recycles the workspace of a closed document in the background; it becomes the spare one if there is none. */
+        void recycleWorkspace(std::shared_ptr<DocumentWorkspace> workspace);
         void updateCurrentDocument(int newIndex);
         void refreshProblems();
         void populateOnlineProjects(const std::vector<std::shared_ptr<SysMLv2::REST::Project>> &projects);
@@ -214,6 +240,13 @@ namespace StructuraSystems::Client {
         SettingsController *Settings;
         std::shared_ptr<CommunicationService> BackendConnection;
         ProjectItemModel *LocalProjects;
+        LocalProjectTreeModel *LocalProjectTree;
+        LibraryController *Libraries;
+        /** Name resolution state with the standard library already loaded, for the next document that is opened. */
+        std::shared_ptr<DocumentWorkspace> SpareWorkspace;   ///< Guarded by SpareMutex
+        std::mutex SpareMutex;
+        /** One thread for the standard library warm-ups and the recycling, so that they neither pile up nor delay runAsync. */
+        QThreadPool WorkspacePool;
         ProjectItemModel *OnlineProjects;
         DigitalTwinProjectModel *DigitalTwinProjects;
         OpenDocumentsModel *Documents;

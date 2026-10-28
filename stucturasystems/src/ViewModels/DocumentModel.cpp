@@ -6,27 +6,32 @@
 
 #include <algorithm>
 #include <exception>
+#include <unordered_set>
 #include <utility>
 
 #include <QFile>
 #include <QRegularExpression>
+#include <QVariantMap>
 
 #include <boost/uuid/uuid.hpp>
 #include <boost/uuid/uuid_io.hpp>
-#include <boost/uuid/random_generator.hpp>
 #include <yaml-cpp/yaml.h>
 #include <kerml/root/elements/Element.h>
+#include <kerml/root/elements/Relationship.h>
+#include <kerml/root/namespaces/Namespace.h>
+#include <kerml/root/namespaces/OwningMembership.h>
 #include <kerml/root/annotations/TextualRepresentation.h>
 #include <sysmlv2/Parser.h>
 #include <sysmlv2/ParserError.h>
 #include <sysmlv2/rest/entities/JSONEntities.h>
 #include <sysmlv2/rest/entities/Project.h>
 #include <sysmlv2/rest/entities/Commit.h>
-#include <sysmlv2/rest/entities/CommitRequest.h>
-#include <sysmlv2/rest/entities/DataVersion.h>
 #include <sysmlv2/service/implementation/ElementNavigationService.h>
 
+#include "../Models/Libraries/DocumentWorkspace.h"
+#include "../Models/Libraries/LibraryWorkspace.h"
 #include "../Models/Parser/StructuraSystemsParser.h"
+#include "../Models/Parser/Markdown/CommonmarkParser/cmark.h"
 
 namespace StructuraSystems::Client {
     namespace {
@@ -46,6 +51,38 @@ namespace StructuraSystems::Client {
             if (value.IsDefined() && value.IsScalar())
                 return QString::fromStdString(value.as<std::string>());
             return {};
+        }
+
+        /** True for an element whose body is just the [toc] marker. */
+        bool isTocMarker(const QString &body) {
+            return body.trimmed().toLower() == QStringLiteral("[toc]");
+        }
+
+        /** Concatenated text and code literals below a heading, line breaks become spaces. */
+        QString headingTitle(cmark_node *heading) {
+            QString title;
+            cmark_iter *iter = cmark_iter_new(heading);
+            cmark_event_type event;
+            while ((event = cmark_iter_next(iter)) != CMARK_EVENT_DONE) {
+                if (event != CMARK_EVENT_ENTER)
+                    continue;
+                cmark_node *node = cmark_iter_get_node(iter);
+                switch (cmark_node_get_type(node)) {
+                    case CMARK_NODE_TEXT:
+                    case CMARK_NODE_CODE:
+                        if (const char *literal = cmark_node_get_literal(node))
+                            title += QString::fromUtf8(literal);
+                        break;
+                    case CMARK_NODE_SOFTBREAK:
+                    case CMARK_NODE_LINEBREAK:
+                        title += QLatin1Char(' ');
+                        break;
+                    default:
+                        break;
+                }
+            }
+            cmark_iter_free(iter);
+            return title.trimmed();
         }
 
         bool fileFormatIsWritable(const QString &path) {
@@ -92,9 +129,49 @@ namespace StructuraSystems::Client {
 
             Row row;
             row.Element = std::move(textualRepresentation);
+            row.ElementTree = new ElementTreeModel(this);
             updateHeader(row);
             Rows.push_back(std::move(row));
         }
+        rebuildTableOfContents();
+    }
+
+    void DocumentModel::rebuildTableOfContents() {
+        QVariantList entries;
+        for (size_t i = 0; i < Rows.size(); i++) {
+            if (normalizeLanguage(QString::fromStdString(Rows[i].Element->language())) != "Markdown")
+                continue;
+            const auto &body = Rows[i].Element->body();
+            if (isTocMarker(QString::fromStdString(body)))
+                continue;
+
+            cmark_node *document = cmark_parse_document(body.c_str(), body.size(), 0);
+            if (document == nullptr)
+                continue;
+            cmark_iter *iter = cmark_iter_new(document);
+            cmark_event_type event;
+            while ((event = cmark_iter_next(iter)) != CMARK_EVENT_DONE) {
+                if (event != CMARK_EVENT_ENTER)
+                    continue;
+                cmark_node *node = cmark_iter_get_node(iter);
+                if (cmark_node_get_type(node) != CMARK_NODE_HEADING || cmark_node_get_heading_level(node) > 3)
+                    continue;
+                entries.append(QVariantMap{{"level", cmark_node_get_heading_level(node)},
+                                           {"title", headingTitle(node)},
+                                           {"row", int(i)}});
+            }
+            cmark_iter_free(iter);
+            cmark_node_free(document);
+        }
+
+        if (entries == TableOfContents)
+            return;
+        TableOfContents = std::move(entries);
+        emit tableOfContentsChanged();
+    }
+
+    QVariantList DocumentModel::tableOfContents() const {
+        return TableOfContents;
     }
 
     void DocumentModel::updateHeader(Row &row) const {
@@ -168,6 +245,10 @@ namespace StructuraSystems::Client {
                 return row.Selected;
             case ProblemCountRole:
                 return row.ProblemCount;
+            case ElementTreeRole:
+                return QVariant::fromValue(row.ElementTree);
+            case ElementCountRole:
+                return row.ElementTree ? row.ElementTree->count() : 0;
             default:
                 return {};
         }
@@ -206,7 +287,9 @@ namespace StructuraSystems::Client {
             {HeaderTitleRole, "headerTitle"},
             {HeaderAuthorRole, "headerAuthor"},
             {SelectedRole, "selected"},
-            {ProblemCountRole, "problemCount"}
+            {ProblemCountRole, "problemCount"},
+            {ElementTreeRole, "elementTree"},
+            {ElementCountRole, "elementCount"}
         };
     }
 
@@ -273,6 +356,8 @@ namespace StructuraSystems::Client {
         beginResetModel();
         Commit = std::move(commit);
         Elements = std::move(elements);
+        for (auto &row : Rows)
+            row.ElementTree->deleteLater();
         Rows.clear();
         loadRows();
         InstanceElements.clear();
@@ -310,6 +395,7 @@ namespace StructuraSystems::Client {
         entry.Element->setBody(newBody);
         updateHeader(entry);
         markEdited(row, {BodyRole, HeaderTitleRole, HeaderAuthorRole});
+        rebuildTableOfContents();
     }
 
     void DocumentModel::setLanguage(int row, const QString &language) {
@@ -322,6 +408,7 @@ namespace StructuraSystems::Client {
         entry.Element->setLanguage(storedLanguage(normalized).toStdString());
         updateHeader(entry);
         markEdited(row, {LanguageRole, HeaderTitleRole, HeaderAuthorRole});
+        rebuildTableOfContents();
     }
 
     void DocumentModel::syncElementOrder() {
@@ -349,6 +436,7 @@ namespace StructuraSystems::Client {
         endMoveRows();
 
         syncElementOrder();
+        rebuildTableOfContents();
         setModified(true);
         emit edited();
     }
@@ -375,9 +463,11 @@ namespace StructuraSystems::Client {
         Elements.insert(position, element);
         Row entry;
         entry.Element = element;
+        entry.ElementTree = new ElementTreeModel(this);
         Rows.insert(Rows.begin() + row, std::move(entry));
         endInsertRows();
 
+        rebuildTableOfContents();
         emit countChanged();
         setModified(true);
         emit edited();
@@ -389,10 +479,12 @@ namespace StructuraSystems::Client {
 
         const auto element = std::static_pointer_cast<KerML::Entities::Element>(Rows[row].Element);
         beginRemoveRows(QModelIndex(), row, row);
+        Rows[row].ElementTree->deleteLater();
         Rows.erase(Rows.begin() + row);
         Elements.erase(std::remove(Elements.begin(), Elements.end(), element), Elements.end());
         endRemoveRows();
 
+        rebuildTableOfContents();
         emit countChanged();
         setModified(true);
         emit edited();
@@ -457,35 +549,158 @@ namespace StructuraSystems::Client {
         return inputs;
     }
 
-    ParseResult DocumentModel::runParser(const QList<ParseInput> &inputs, const QString &documentTitle) {
-        ParseResult result;
-        for (const auto &input : inputs) {
-            try {
-                auto parsed = input.Language == "KerML"
-                              ? SysMLv2::Files::Parser::parseKerML(input.Body)
-                              : SysMLv2::Files::Parser::parseSysMLv2(input.Body);
-
-                for (const auto &error : parsed.second) {
-                    Problem problem;
-                    problem.Message = QString::fromStdString(error->description());
-                    problem.Line = error->getLine();
-                    problem.Column = error->getColumn();
-                    problem.DocumentTitle = documentTitle;
-                    problem.Row = input.Row;
-                    problem.Severity = error->errorType() == SysMLv2::Files::ErrorType::WARNING ? 2 : 3;
-                    result.Problems.append(problem);
+    namespace {
+        /** Walks the owners of the first element up to the root namespace. */
+        std::shared_ptr<KerML::Entities::Element>
+        findRootElement(const std::vector<std::shared_ptr<KerML::Entities::Element>> &elements) {
+            std::shared_ptr<KerML::Entities::Element> current;
+            for (const auto &element : elements) {
+                if (element != nullptr) {
+                    current = element;
+                    break;
                 }
-                for (const auto &element : parsed.first)
+            }
+            if (current == nullptr)
+                return nullptr;
+            while (const auto owner = current->owner())
+                current = owner;
+            return current;
+        }
+
+        /** Adds the owned elements a relationship contributes: its owned related elements and, for an owning membership, the member. */
+        void appendRelationshipChildren(const std::shared_ptr<KerML::Entities::Relationship> &relationship,
+                                        std::vector<std::shared_ptr<KerML::Entities::Element>> &children) {
+            if (relationship == nullptr)
+                return;
+            for (const auto &related : relationship->ownedRelatedElement())
+                children.push_back(related);
+            if (const auto membership = std::dynamic_pointer_cast<KerML::Entities::OwningMembership>(relationship))
+                children.push_back(membership->ownedMemberElement());
+        }
+
+        /**
+         * Children of an element in the sense of KerML: the elements owned through its owned relationships (and the members
+         * of owning memberships), plus owned elements that are no plain relationships. Relationships are never returned.
+         */
+        std::vector<std::shared_ptr<KerML::Entities::Element>>
+        ownedChildren(const std::shared_ptr<KerML::Entities::Element> &element) {
+            std::vector<std::shared_ptr<KerML::Entities::Element>> candidates;
+            for (const auto &relationship : element->ownedRelationship())
+                appendRelationshipChildren(relationship, candidates);
+            for (const auto &owned : element->ownedElements()) {
+                if (owned == nullptr)
+                    continue;
+                const auto relationship = std::dynamic_pointer_cast<KerML::Entities::Relationship>(owned);
+                if (relationship != nullptr && std::dynamic_pointer_cast<KerML::Entities::Namespace>(owned) == nullptr)
+                    appendRelationshipChildren(relationship, candidates);
+                else
+                    candidates.push_back(owned);
+            }
+
+            std::vector<std::shared_ptr<KerML::Entities::Element>> children;
+            std::unordered_set<const KerML::Entities::Element *> seen;
+            for (const auto &candidate : candidates) {
+                if (candidate != nullptr && seen.insert(candidate.get()).second)
+                    children.push_back(candidate);
+            }
+            return children;
+        }
+
+        /** Appends the element and all its children in pre-order. Elements seen before are skipped. */
+        void appendElementTree(const std::shared_ptr<KerML::Entities::Element> &element, int parent,
+                               std::unordered_set<const KerML::Entities::Element *> &visited,
+                               QList<ElementTreeNode> &nodes) {
+            if (element == nullptr || !visited.insert(element.get()).second)
+                return;
+
+            ElementTreeNode node;
+            node.Type = QString::fromStdString(element->getType());
+            auto name = element->effectiveName();
+            if (!name.has_value())
+                name = element->declaredName();
+            if (name.has_value())
+                node.Name = QString::fromStdString(*name);
+            node.Parent = parent;
+            const int index = int(nodes.size());
+            nodes.append(node);
+
+            for (const auto &child : ownedChildren(element))
+                appendElementTree(child, index, visited, nodes);
+        }
+    }
+
+    ParseResult DocumentModel::runParser(const QList<ParseInput> &inputs, const QString &documentTitle,
+                                         std::shared_ptr<DocumentWorkspace> workspace) {
+        ParseResult result;
+        if (workspace == nullptr)
+            workspace = std::make_shared<DocumentWorkspace>();
+
+        std::vector<DocumentSource> sources;
+        for (const auto &input : inputs)
+            sources.push_back({input.Row, input.Language == "KerML", input.Body});
+
+        try {
+            // The element trees are made while the workspace is locked: afterwards another thread may recycle the workspace and
+            // take the model apart. Only plain data (and shared_ptrs, which are read on the GUI thread while the document is
+            // open) leave this function.
+            auto resolved = workspace->update(sources, documentTitle, [&result](const WorkspaceRow &row) {
+                for (const auto &element : row.Elements)
                     result.InstanceElements.push_back(element);
-            } catch (const std::exception &ex) {
+
+                if (!row.HasSyntaxErrors) {
+                    const std::shared_ptr<KerML::Entities::Element> root =
+                            row.Root != nullptr ? std::static_pointer_cast<KerML::Entities::Element>(row.Root) : findRootElement(row.Elements);
+                    if (root != nullptr) {
+                        std::unordered_set<const KerML::Entities::Element *> visited;
+                        appendElementTree(root, -1, visited, result.ElementTrees[row.Row]);
+                    }
+                }
+            });
+
+            for (const auto &diagnostic : std::as_const(resolved.Diagnostics)) {
                 Problem problem;
-                problem.Message = QString::fromUtf8(ex.what());
+                problem.Message = diagnostic.Message;
+                problem.Line = diagnostic.Line;
+                problem.Column = diagnostic.Column;
                 problem.DocumentTitle = documentTitle;
-                problem.Row = input.Row;
+                problem.Row = diagnostic.Row;
+                problem.Severity = diagnostic.Severity;
                 result.Problems.append(problem);
             }
+        } catch (const std::exception &ex) {
+            Problem problem;
+            problem.Message = QString::fromUtf8(ex.what());
+            problem.DocumentTitle = documentTitle;
+            result.Problems.append(problem);
         }
         return result;
+    }
+
+    std::shared_ptr<DocumentWorkspace> DocumentModel::workspace() {
+        if (Workspace == nullptr)
+            Workspace = std::make_shared<DocumentWorkspace>(Libraries, OwnFile);
+        return Workspace;
+    }
+
+    void DocumentModel::attachLibraries(std::shared_ptr<LibraryWorkspace> libraries, const QString &ownFile) {
+        Libraries = std::move(libraries);
+        OwnFile = ownFile;
+        if (Workspace != nullptr)
+            Workspace->setLibraries(Libraries, OwnFile);
+    }
+
+    bool DocumentModel::hasWorkspace() const {
+        return Workspace != nullptr;
+    }
+
+    void DocumentModel::adoptWorkspace(std::shared_ptr<DocumentWorkspace> workspace) {
+        Workspace = std::move(workspace);
+        if (Workspace != nullptr)
+            Workspace->setLibraries(Libraries, OwnFile);
+    }
+
+    std::shared_ptr<DocumentWorkspace> DocumentModel::releaseWorkspace() {
+        return std::exchange(Workspace, nullptr);
     }
 
     void DocumentModel::applyParseResult(ParseResult result) {
@@ -497,17 +712,25 @@ namespace StructuraSystems::Client {
             const int rowIndex = int(i);
             const int errors = int(std::count_if(ParserProblems.begin(), ParserProblems.end(),
                                                  [rowIndex](const Problem &problem) { return problem.Row == rowIndex; }));
+            QList<int> changedRoles;
             if (Rows[i].ProblemCount != errors) {
                 Rows[i].ProblemCount = errors;
+                changedRoles.append(ProblemCountRole);
+            }
+            const int elementsBefore = Rows[i].ElementTree->count();
+            Rows[i].ElementTree->setNodes(result.ElementTrees.value(rowIndex));
+            if (Rows[i].ElementTree->count() != elementsBefore)
+                changedRoles.append(ElementCountRole);
+            if (!changedRoles.isEmpty()) {
                 const auto changed = index(rowIndex);
-                emit dataChanged(changed, changed, {ProblemCountRole});
+                emit dataChanged(changed, changed, changedRoles);
             }
         }
         emit problemsChanged();
     }
 
     QList<Problem> DocumentModel::parse() {
-        applyParseResult(runParser(parseInputs(), title()));
+        applyParseResult(runParser(parseInputs(), title(), workspace()));
         return ParserProblems;
     }
 
@@ -519,13 +742,8 @@ namespace StructuraSystems::Client {
         return InstanceElements;
     }
 
-    std::shared_ptr<SysMLv2::REST::CommitRequest> DocumentModel::buildCommitRequest(const QString &description) const {
-        std::vector<std::shared_ptr<SysMLv2::REST::DataVersion>> requestedChange;
-        for (const auto &element : Elements) {
-            auto dataVersion = std::make_shared<SysMLv2::REST::DataVersion>(boost::uuids::random_generator()(), element);
-            requestedChange.push_back(dataVersion);
-        }
-        return std::make_shared<SysMLv2::REST::CommitRequest>(description.toStdString(), requestedChange);
+    CommitDelta DocumentModel::commitDelta(const std::vector<std::shared_ptr<KerML::Entities::Element>> &base) const {
+        return computeCommitDelta(base, Elements);
     }
 
     void DocumentModel::applyCommit(std::shared_ptr<SysMLv2::REST::Commit> commit) {

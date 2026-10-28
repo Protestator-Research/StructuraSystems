@@ -16,6 +16,8 @@ Pane {
     required property string headerTitle
     required property string headerAuthor
     required property int problemCount
+    required property ElementTreeModel elementTree
+    required property int elementCount
     property bool first: false
     property bool last: false
     /** True while no editing is allowed (background work in progress). */
@@ -37,6 +39,12 @@ Pane {
         if (generatedBlock && !diagramHiddenByUser)
             diagramOpen = true;
     }
+    /** True while the model elements of this section are shown. */
+    property bool modelExpanded: false
+    /** Headings of the whole document as list of {level, title, row}, shown by a [toc] element. */
+    property var tableOfContents: []
+    /** True for a Markdown element that only contains the [toc] marker. */
+    readonly property bool isToc: language === "Markdown" && body.trim().toLowerCase() === "[toc]"
 
     signal commitRequested(string text, string language)
     signal moveRequested(int target)
@@ -44,14 +52,27 @@ Pane {
     signal deleteRequested
     /** "Open in diagram editor" in the preview. */
     signal diagramEditorRequested
+    signal tocEntryActivated(int row)
 
     function startEdit() {
         if (!locked)
             editing = true;
     }
 
+    function copyText(text) {
+        clipboard.text = text;
+        clipboard.selectAll();
+        clipboard.copy();
+        clipboard.text = "";
+    }
+
     function _closeEditor() {
         editing = false;
+    }
+
+    onElementCountChanged: {
+        if (elementCount === 0)
+            modelExpanded = false;
     }
 
     onEditingChanged: {
@@ -65,6 +86,12 @@ Pane {
 
     HoverHandler {
         id: hover
+    }
+
+    // Hidden helper that puts text onto the clipboard.
+    TextEdit {
+        id: clipboard
+        visible: false
     }
 
     readonly property bool actionsVisible: (!locked || editing) && (hover.hovered || editing || card.activeFocus || insertButton.activeFocus || actionMenu.visible)
@@ -174,6 +201,51 @@ Pane {
                     ToolTip.delay: 500
                 }
 
+                // Chip that shows or hides the model elements parsed from this section.
+                Rectangle {
+                    id: elementChip
+
+                    visible: card.elementCount > 0
+                    implicitWidth: elementRow.implicitWidth + 12
+                    implicitHeight: 22
+                    radius: 11
+                    color: Qt.alpha(Theme.accent, Theme.dark ? 0.22 : 0.12)
+                    border.width: 1
+                    border.color: Qt.alpha(Theme.accent, 0.45)
+
+                    Accessible.role: Accessible.Button
+                    Accessible.name: card.modelExpanded ? qsTr("Hide the model elements of this section") : qsTr("Show the model elements of this section")
+                    Accessible.onPressAction: card.modelExpanded = !card.modelExpanded
+
+                    Row {
+                        id: elementRow
+                        anchors.centerIn: parent
+                        spacing: 4
+                        Label {
+                            text: card.elementCount === 1 ? qsTr("1 element") : qsTr("%1 elements").arg(card.elementCount)
+                            font.pixelSize: 11
+                            font.weight: Font.Medium
+                            color: Theme.accent
+                            anchors.verticalCenter: parent.verticalCenter
+                        }
+                        Icon {
+                            size: 14
+                            source: card.modelExpanded ? Theme.iconMoveUp : Theme.iconChevronDown
+                            anchors.verticalCenter: parent.verticalCenter
+                        }
+                    }
+                    HoverHandler {
+                        id: elementChipHover
+                        cursorShape: Qt.PointingHandCursor
+                    }
+                    TapHandler {
+                        onTapped: card.modelExpanded = !card.modelExpanded
+                    }
+                    ToolTip.visible: elementChipHover.hovered
+                    ToolTip.text: card.modelExpanded ? qsTr("Hide the model elements of this section") : qsTr("Show the model elements of this section")
+                    ToolTip.delay: 500
+                }
+
                 Item {
                     Layout.fillWidth: true
                 }
@@ -248,7 +320,7 @@ Pane {
                     x: 14
                     y: 0
                     width: parent.width - 28
-                    sourceComponent: card.editing ? editorComponent : card.language === "YAML" && card.headerTitle.length > 0 ? yamlComponent : card.language === "Markdown" ? markdownComponent : codeComponent
+                    sourceComponent: card.editing ? editorComponent : card.language === "YAML" && card.headerTitle.length > 0 ? yamlComponent : card.isToc ? tocComponent : card.language === "Markdown" ? markdownComponent : codeComponent
                 }
             }
 
@@ -266,6 +338,103 @@ Pane {
                     onOpenRequested: card.diagramEditorRequested()
                 }
             }
+
+            // ---------------------------------------------------------------- model elements
+            Item {
+                id: modelClip
+
+                Layout.fillWidth: true
+                implicitHeight: card.modelExpanded && card.elementCount > 0 ? Math.min(tree.contentHeight, 320) + 17 : 0
+                clip: true
+
+                Behavior on implicitHeight {
+                    NumberAnimation {
+                        duration: Theme.animationDuration
+                        easing.type: Easing.OutCubic
+                    }
+                }
+
+                Rectangle {
+                    id: modelSeparator
+                    x: 14
+                    width: parent.width - 28
+                    height: 1
+                    color: Theme.outline
+                }
+
+                TreeView {
+                    id: tree
+
+                    x: 14
+                    y: 9
+                    width: parent.width - 28
+                    height: Math.min(contentHeight, 320)
+                    clip: true
+                    model: card.elementTree
+                    boundsBehavior: Flickable.StopAtBounds
+                    // Without own scrolling, wheel events go on to the list of cards.
+                    interactive: contentHeight > height
+                    columnWidthProvider: () => tree.width
+                    ScrollBar.vertical: ScrollBar { }
+
+                    Component.onCompleted: expandRecursively()
+
+                    // The tree is rebuilt after every parser run; show all of it.
+                    Connections {
+                        target: card.elementTree
+
+                        function onModelReset() {
+                            // Deferred, so the TreeView has processed the reset itself first.
+                            Qt.callLater(tree.expandRecursively)
+                        }
+                    }
+
+                    delegate: TreeViewDelegate {
+                        id: node
+
+                        required property string elementType
+                        required property string name
+
+                        implicitHeight: 28
+                        hoverEnabled: true
+                        indentation: 16
+
+                        TapHandler {
+                            acceptedButtons: Qt.RightButton
+                            onTapped: nodeMenu.popup()
+                        }
+
+                        Menu {
+                            id: nodeMenu
+
+                            MenuItem {
+                                text: qsTr("Copy")
+                                icon.source: Theme.iconDocument
+                                icon.color: "transparent"
+                                onTriggered: card.copyText(node.name.length > 0 ? node.elementType + " " + node.name : node.elementType)
+                            }
+                        }
+
+                        contentItem: RowLayout {
+                            spacing: 8
+                            Label {
+                                text: node.elementType
+                                color: Theme.textSecondary
+                                font.pixelSize: 12
+                            }
+                            Label {
+                                Layout.fillWidth: true
+                                visible: node.name.length > 0
+                                text: node.name
+                                elide: Text.ElideRight
+                                color: Theme.textPrimary
+                            }
+                            Item { Layout.fillWidth: node.name.length === 0 }
+                        }
+                    }
+                }
+            }
+
         }
     }
 
@@ -315,6 +484,55 @@ Pane {
                 Layout.fillWidth: true
                 visible: card.headerAuthor.length > 0
                 text: qsTr("Author: %1").arg(card.headerAuthor)
+                color: Theme.textSecondary
+            }
+            TapHandler {
+                onDoubleTapped: card.startEdit()
+            }
+        }
+    }
+
+    Component {
+        id: tocComponent
+
+        ColumnLayout {
+            spacing: 4
+
+            Label {
+                Layout.fillWidth: true
+                text: qsTr("Table of contents")
+                wrapMode: Text.Wrap
+                font.pixelSize: 18
+                font.weight: Font.Medium
+                color: Theme.textPrimary
+            }
+            Repeater {
+                model: card.tableOfContents
+
+                Label {
+                    id: tocEntry
+                    required property var modelData
+                    Layout.fillWidth: true
+                    leftPadding: (modelData.level - 1) * 16
+                    text: modelData.title
+                    wrapMode: Text.Wrap
+                    font.bold: modelData.level === 1
+                    font.underline: entryHover.hovered
+                    color: entryHover.hovered ? Material.accentColor : Theme.textPrimary
+                    HoverHandler {
+                        id: entryHover
+                        cursorShape: Qt.PointingHandCursor
+                    }
+                    TapHandler {
+                        onTapped: card.tocEntryActivated(tocEntry.modelData.row)
+                    }
+                }
+            }
+            Label {
+                Layout.fillWidth: true
+                visible: card.tableOfContents.length === 0
+                text: qsTr("No headings (levels 1–3) in this document.")
+                wrapMode: Text.Wrap
                 color: Theme.textSecondary
             }
             TapHandler {
@@ -376,6 +594,7 @@ Pane {
                 SysMLHighlighter {
                     textDocument: Theme.isCode(card.language) && card.body.length > 0 ? codeText.textDocument : null
                     darkTheme: Theme.dark
+                    language: card.language
                 }
                 TapHandler {
                     onDoubleTapped: card.startEdit()
@@ -431,6 +650,7 @@ Pane {
                     SysMLHighlighter {
                         textDocument: Theme.isCode(languageBox.currentText) ? area.textDocument : null
                         darkTheme: Theme.dark
+                        language: languageBox.currentText
                     }
 
                     Keys.onPressed: event => {

@@ -15,6 +15,7 @@
 #include <sysmlv2/rest/entities/Branch.h>
 #include <sysmlv2/rest/entities/ProjectRequest.h>
 #include <sysmlv2/rest/entities/CommitRequest.h>
+#include <sysmlv2/rest/serialization/SysMLv2Deserializer.h>
 #include <kerml/root/annotations/TextualRepresentation.h>
 #include <kerml/root/elements/Element.h>
 #include "entities/DigitalTwin.h"
@@ -34,6 +35,7 @@
 // Internal Classes
 //---------------------------------------------------------
 #include "BECommunicationService.h"
+#include "CommitDelta.h"
 
 
 
@@ -81,27 +83,35 @@ namespace {
     }
 
     /**
-     * Creates a commit from its JSON object. The Commit class reads the creation time from "timestamp", the SysML v2
-     * API standard calls it "created". If only one of them is present, it is copied, so that the answer is accepted.
+     * Creates a commit from its JSON object. The creation time ("created" in the SysML v2 API, "timestamp" in older
+     * answers) is also parsed here, because Commit::getCreated does not interpret ISO 8601 on every platform.
      * @param timestamp Receives the parsed creation time, if the answer contains one.
      */
-    std::shared_ptr<SysMLv2::REST::Commit> commitFromJson(nlohmann::json json, std::optional<std::chrono::system_clock::time_point> &timestamp) {
+    std::shared_ptr<SysMLv2::REST::Commit> commitFromJson(const nlohmann::json &json, std::optional<std::chrono::system_clock::time_point> &timestamp) {
         if (!json.is_object() || !json.contains("@id") || !json["@id"].is_string())
             throw std::runtime_error("The server answered with an entry that is not a commit.");
 
-        if (!json.contains("timestamp") && json.contains("created"))
-            json["timestamp"] = json["created"];
-        // The Commit class needs a timestamp next to a description; the placeholder is not reported as creation time.
-        const bool hasTimestamp = json.contains("timestamp");
-        if (json.contains("description") && !hasTimestamp)
-            json["timestamp"] = "1970-01-01T00:00:00Z";
-
-        if (hasTimestamp && json["timestamp"].is_string())
-            timestamp = parseIso8601(json["timestamp"].get<std::string>());
-        else
-            timestamp.reset();
-
+        timestamp.reset();
+        for (const auto *key : {"created", "timestamp"}) {
+            if (json.contains(key) && json[key].is_string()) {
+                timestamp = parseIso8601(json[key].get<std::string>());
+                break;
+            }
+        }
         return std::make_shared<SysMLv2::REST::Commit>(json.dump());
+    }
+
+    /** Creates the entities of a list route with the deserializer of the sysmllib. Entries of another type are left out. */
+    template<typename Entity>
+    std::vector<std::shared_ptr<Entity>> entitiesFromJson(const std::vector<nlohmann::json> &entries) {
+        std::vector<std::shared_ptr<Entity>> result;
+        if (entries.empty())
+            return result;
+        const auto entities = SysMLv2::SysMLv2Deserializer::deserializeJsonArray(nlohmann::json(entries).dump());
+        for (const auto &entity : entities)
+            if (auto typed = std::dynamic_pointer_cast<Entity>(entity))
+                result.push_back(std::move(typed));
+        return result;
     }
 
     /** Short text of an error answer of the server, if it is a JSON object with a message. */
@@ -116,7 +126,12 @@ namespace {
 }
 
 namespace StructuraSystems::Client {
-    CommunicationService::CommunicationService(std::string serverAddress) {
+    CommunicationService::CommunicationService(std::string serverAddress) :
+        CommunicationService(std::move(serverAddress), curlTransport()) {
+    }
+
+    CommunicationService::CommunicationService(std::string serverAddress, HttpTransport transport) :
+        Transport(std::move(transport)) {
         ServerAddress = std::move(serverAddress);
         APIImplementation = std::make_unique<SysMLv2::API::SysMLAPIImplementation>(ServerAddress);
     }
@@ -124,34 +139,36 @@ namespace StructuraSystems::Client {
     CommunicationService::~CommunicationService() = default;
 
     std::shared_ptr<CommunicationService> CommunicationService::createIndependentConnection() const {
-        auto connection = std::make_shared<CommunicationService>(ServerAddress);
+        auto connection = std::make_shared<CommunicationService>(ServerAddress, Transport);
         connection->BarrierString = BarrierString;
         return connection;
     }
 
+    void CommunicationService::setBearerToken(std::string token) {
+        BarrierString = std::move(token);
+    }
+
+    std::vector<nlohmann::json> CommunicationService::getAllPagesOf(const std::string &endpoint) const {
+        return getAllPages(buildUrl(ServerAddress, endpoint), BarrierString, Transport);
+    }
+
     std::vector<std::shared_ptr<KerML::Entities::Element>> CommunicationService::getAllElements(boost::uuids::uuid commitId, boost::uuids::uuid projectId) const {
-        auto entities = APIImplementation->getAllElementsFromCommit(boost::lexical_cast<std::string>(projectId),boost::lexical_cast<std::string>(commitId), BarrierString);
-        std::vector<std::shared_ptr<KerML::Entities::Element>> elements;
+        return elementsOfCommit(projectId, commitId);
+    }
 
-        for(auto entitiy : entities)
-            elements.push_back(dynamic_pointer_cast<KerML::Entities::Element>(entitiy));
-
-        return elements;
+    std::vector<std::shared_ptr<KerML::Entities::Element>> CommunicationService::elementsOfCommit(boost::uuids::uuid projectId, boost::uuids::uuid commitId) const {
+        const auto entries = getAllPagesOf("projects/" + boost::lexical_cast<std::string>(projectId) + "/commits/" + boost::lexical_cast<std::string>(commitId) + "/elements");
+        return entitiesFromJson<KerML::Entities::Element>(entries);
     }
 
     std::vector<std::shared_ptr<SysMLv2::REST::Project>> CommunicationService::getAllProjects() {
-        auto projects = APIImplementation->getAllProjects(BarrierString);
-        std::vector<std::shared_ptr<SysMLv2::REST::Project>> returnValue;
-
-        for(auto oldProject : projects)
-            returnValue.push_back(dynamic_pointer_cast<SysMLv2::REST::Project>(oldProject));
-
-        return returnValue;
+        return entitiesFromJson<SysMLv2::REST::Project>(getAllPagesOf("projects"));
     }
 
     std::shared_ptr<SysMLv2::REST::Commit> CommunicationService::getCommitWithId(boost::uuids::uuid projectId, boost::uuids::uuid commitId) {
-        auto commit = APIImplementation->getCommit(boost::lexical_cast<std::string>(projectId), boost::lexical_cast<std::string>(commitId), BarrierString);
-        return std::dynamic_pointer_cast<SysMLv2::REST::Commit>(commit);
+        const auto json = getJson(buildUrl(ServerAddress, "projects/" + boost::lexical_cast<std::string>(projectId) + "/commits/" + boost::lexical_cast<std::string>(commitId)), BarrierString, Transport);
+        std::optional<std::chrono::system_clock::time_point> timestamp;
+        return commitFromJson(json, timestamp);
     }
 
     std::shared_ptr<SysMLv2::REST::Commit> CommunicationService::postCommitWithId(boost::uuids::uuid projectId, std::shared_ptr<SysMLv2::REST::CommitRequest> commit)
@@ -260,20 +277,12 @@ namespace StructuraSystems::Client {
 
     std::vector<std::shared_ptr<SysMLv2::REST::Commit>> CommunicationService::getAllCommitsForProject(
         boost::uuids::uuid projectId, std::map<boost::uuids::uuid, std::chrono::system_clock::time_point> *timestamps) {
-        const auto commitsJSON = APIImplementation->getCustomRequest("projects/"+boost::lexical_cast<std::string>(projectId)+"/commits",BarrierString);
         // A project without commits answers with an empty array.
-        if (!nlohmann::json::accept(commitsJSON))
-            throw std::runtime_error("The server did not return the commits of the project.");
-
-        const auto parsedJson = nlohmann::json::parse(commitsJSON);
-        if (!parsedJson.is_array()) {
-            const auto message = serverMessage(parsedJson);
-            throw std::runtime_error("The server did not return a list of commits." + (message.empty() ? std::string() : " " + message));
-        }
+        const auto entries = getAllPagesOf("projects/" + boost::lexical_cast<std::string>(projectId) + "/commits");
 
         std::vector<std::shared_ptr<SysMLv2::REST::Commit>> returnValue;
-        returnValue.reserve(parsedJson.size());
-        for (const auto& entry : parsedJson) {
+        returnValue.reserve(entries.size());
+        for (const auto &entry : entries) {
             std::optional<std::chrono::system_clock::time_point> timestamp;
             auto commit = commitFromJson(entry, timestamp);
             if (timestamps != nullptr && timestamp.has_value())
@@ -285,7 +294,7 @@ namespace StructuraSystems::Client {
 
     std::shared_ptr<SysMLv2::REST::Commit> CommunicationService::postCommitToBranch(
         boost::uuids::uuid projectId, boost::uuids::uuid branchId, std::shared_ptr<SysMLv2::REST::CommitRequest> commit) {
-        const auto endpoint = "projects/"+boost::lexical_cast<std::string>(projectId)+"/commits?branchId="+boost::lexical_cast<std::string>(branchId);
+        const auto endpoint = commitEndpoint(boost::lexical_cast<std::string>(projectId), boost::lexical_cast<std::string>(branchId));
         const auto commitJSON = APIImplementation->postCustomRequest(endpoint,commit->serializeToJson(),BarrierString);
         if (!nlohmann::json::accept(commitJSON))
             throw std::runtime_error("The server did not return a valid commit.");
@@ -328,18 +337,11 @@ namespace StructuraSystems::Client {
     }
 
     std::vector<std::shared_ptr<SysMLv2::REST::DigitalTwin>> CommunicationService::getAllDigitalTwinsForProject(boost::uuids::uuid projectId) {
-        const auto twinsJSON = APIImplementation->getCustomRequest("projects/"+boost::lexical_cast<std::string>(projectId)+"/twins",BarrierString);
-        if (!nlohmann::json::accept(twinsJSON))
-            throw std::runtime_error("The server did not return the digital twins of the project.");
-
-        const auto parsedJson = nlohmann::json::parse(twinsJSON);
-        if (!parsedJson.is_array())
-            throw std::runtime_error("The server did not return a list of digital twins.");
+        const auto entries = getAllPagesOf("projects/" + boost::lexical_cast<std::string>(projectId) + "/twins");
 
         std::vector<std::shared_ptr<SysMLv2::REST::DigitalTwin>> returnValue;
-        returnValue.reserve(parsedJson.size());
-
-        for (const auto& twin : parsedJson)
+        returnValue.reserve(entries.size());
+        for (const auto &twin : entries)
             returnValue.push_back(std::make_shared<SysMLv2::REST::DigitalTwin>(twin.dump()));
 
         return returnValue;
@@ -347,24 +349,27 @@ namespace StructuraSystems::Client {
 
 
     std::vector<std::shared_ptr<SysMLv2::REST::Branch>> CommunicationService::getAllBranchesForProjectWithID(boost::uuids::uuid projectId) {
-        auto elements = APIImplementation->getAllBranchesFroProject(boost::lexical_cast<std::string>(projectId), BarrierString);
+        return entitiesFromJson<SysMLv2::REST::Branch>(getAllPagesOf("projects/" + boost::lexical_cast<std::string>(projectId) + "/branches"));
+    }
 
-        std::vector<std::shared_ptr<SysMLv2::REST::Branch>> returnValue;
+    BranchState CommunicationService::loadBranchState(boost::uuids::uuid projectId, boost::uuids::uuid branchId) {
+        BranchState state;
+        for (const auto &branch : getAllBranchesForProjectWithID(projectId))
+            if (branch != nullptr && branch->getId() == branchId)
+                state.Branch = branch;
+        if (state.Branch == nullptr)
+            throw std::runtime_error("The branch does not exist on the server (anymore).");
 
-        for (auto elem : elements)
-            returnValue.push_back(dynamic_pointer_cast<SysMLv2::REST::Branch>(elem));
-
-        return returnValue;
+        // A branch without commits (a new project) has no head: the state is empty.
+        if (const auto head = state.Branch->getHead(); head != nullptr) {
+            state.Commit = getCommitWithId(projectId, head->getId());
+            state.Elements = elementsOfCommit(projectId, state.Commit->getId());
+        }
+        return state;
     }
 
     std::vector<std::shared_ptr<KerML::Entities::Element>> CommunicationService::getAllElementsOfCommit(boost::uuids::uuid projectId, boost::uuids::uuid commitId) {
-        auto elements = APIImplementation->getAllElementsFromCommit(boost::lexical_cast<std::string>(projectId),boost::lexical_cast<std::string>(commitId), BarrierString);
-        std::vector<std::shared_ptr<KerML::Entities::Element>> returnValue;
-
-        for(auto elem : elements)
-            returnValue.push_back(dynamic_pointer_cast<KerML::Entities::Element>(elem));
-
-        return returnValue;
+        return elementsOfCommit(projectId, commitId);
     }
 
     std::shared_ptr<SysMLv2::REST::Project> CommunicationService::postProject(std::string projectName, std::string projectDescription, std::string defaultBranchName, std::string owningGroup) {

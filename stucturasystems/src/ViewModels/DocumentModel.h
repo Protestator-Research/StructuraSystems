@@ -11,14 +11,16 @@
 #include <QList>
 #include <QString>
 #include <QStringList>
+#include <QVariantList>
 #include <QtQml/qqmlregistration.h>
 
+#include "../Services/CommitDelta.h"
+#include "ElementTreeModel.h"
 #include "ProblemListModel.h"
 
 namespace SysMLv2::REST {
     class Project;
     class Commit;
-    class CommitRequest;
 }
 
 namespace KerML::Entities {
@@ -27,6 +29,9 @@ namespace KerML::Entities {
 }
 
 namespace StructuraSystems::Client {
+    class DocumentWorkspace;
+    class LibraryWorkspace;
+
     /**
      * Input of one parser run for a single textual element. Plain data, so it can be handed to a worker thread.
      */
@@ -41,6 +46,12 @@ namespace StructuraSystems::Client {
      */
     struct ParseResult {
         QList<Problem> Problems;
+        QHash<int, QList<ElementTreeNode>> ElementTrees;   ///< Root namespace and its owned elements per ParseInput::Row, only for error-free rows
+        /**
+         * The elements of the parsed texts. They are only counted and kept while the document is open; the model of a closed
+         * document is taken apart when its workspace is recycled, so it must not be walked after that. (The element trees
+         * above are plain data, made while the workspace was locked.)
+         */
         std::vector<std::shared_ptr<KerML::Entities::Element>> InstanceElements;
     };
 
@@ -64,6 +75,8 @@ namespace StructuraSystems::Client {
         Q_PROPERTY(QString branchName READ branchName NOTIFY branchChanged)
         /** True while an older commit, not the head of the branch, is loaded. The content is read-only then. */
         Q_PROPERTY(bool detached READ detached NOTIFY detachedChanged)
+        /** Headings (level 1-3) of all Markdown rows as list of {level, title, row}, used by the [toc] element. */
+        Q_PROPERTY(QVariantList tableOfContents READ tableOfContents NOTIFY tableOfContentsChanged)
     public:
         enum Roles {
             BodyRole = Qt::UserRole + 1,
@@ -72,7 +85,9 @@ namespace StructuraSystems::Client {
             HeaderTitleRole,
             HeaderAuthorRole,
             SelectedRole,
-            ProblemCountRole
+            ProblemCountRole,
+            ElementTreeRole,
+            ElementCountRole
         };
         Q_ENUM(Roles)
 
@@ -104,6 +119,7 @@ namespace StructuraSystems::Client {
         [[nodiscard]] QString branchId() const;
         [[nodiscard]] QString branchName() const;
         [[nodiscard]] bool detached() const;
+        [[nodiscard]] QVariantList tableOfContents() const;
 
         Q_INVOKABLE void setBody(int row, const QString &body);
         /** @param language one of "Markdown", "YAML", "SysMLv2", "KerML" */
@@ -129,8 +145,29 @@ namespace StructuraSystems::Client {
 
         /** Collects the textual SysML/KerML rows. Must be called on the GUI thread. */
         [[nodiscard]] QList<ParseInput> parseInputs() const;
-        /** Pure function, thread safe. Parses all inputs, parser exceptions are converted into problems. */
-        static ParseResult runParser(const QList<ParseInput> &inputs, const QString &documentTitle);
+        /**
+         * Thread safe. Parses all inputs, parser exceptions are converted into problems. The names are resolved against the
+         * standard library and, if the inputs refer to packages that are not defined in them, against the libraries the
+         * workspace finds in the opened folder (see DocumentWorkspace).
+         * @param workspace the workspace of the document (see workspace()), which keeps the loaded libraries between the runs.
+         *        Null: a workspace that is only used for this run.
+         */
+        static ParseResult runParser(const QList<ParseInput> &inputs, const QString &documentTitle,
+                                     std::shared_ptr<DocumentWorkspace> workspace = nullptr);
+        /** The name resolution state of this document. Pass it to runParser. */
+        [[nodiscard]] std::shared_ptr<DocumentWorkspace> workspace();
+        /**
+         * Lets the document use the local libraries of the opened folder.
+         * @param libraries index and levels of the libraries, null for none.
+         * @param ownFile path of the file of the document relative to the opened folder, empty if the document is not a file of
+         *        that folder. The file is not loaded as a library of the document itself.
+         */
+        void attachLibraries(std::shared_ptr<LibraryWorkspace> libraries, const QString &ownFile = QString());
+        [[nodiscard]] bool hasWorkspace() const;
+        /** Uses a workspace that was prepared (or recycled) elsewhere instead of creating one on the first parser run. */
+        void adoptWorkspace(std::shared_ptr<DocumentWorkspace> workspace);
+        /** Hands the workspace over (to be recycled when the document is closed). The document creates a new one if it is parsed again. */
+        [[nodiscard]] std::shared_ptr<DocumentWorkspace> releaseWorkspace();
         /** Stores the result of a parser run and updates the per row problem counts. GUI thread only. */
         void applyParseResult(ParseResult result);
         /** Synchronous convenience: parseInputs + runParser + applyParseResult. @return the problems found. */
@@ -139,9 +176,11 @@ namespace StructuraSystems::Client {
         [[nodiscard]] const std::vector<std::shared_ptr<KerML::Entities::Element>> &instanceElements() const;
 
         /**
-         * First half of a commit (GUI thread): builds the request containing all elements of the document.
+         * First half of a commit (GUI thread): the changes between the state of the branch on the server and this document.
+         * A commit only contains what is created, changed or deleted; see computeCommitDelta for the rules.
+         * @param base The elements at the head of the branch on the server, empty for a branch without commits.
          */
-        [[nodiscard]] std::shared_ptr<SysMLv2::REST::CommitRequest> buildCommitRequest(const QString &description) const;
+        [[nodiscard]] CommitDelta commitDelta(const std::vector<std::shared_ptr<KerML::Entities::Element>> &base) const;
 
         /** Second half of a commit (GUI thread): takes over the commit the backend returned. */
         void applyCommit(std::shared_ptr<SysMLv2::REST::Commit> commit);
@@ -172,6 +211,7 @@ namespace StructuraSystems::Client {
         void identityChanged();
         void branchChanged();
         void detachedChanged();
+        void tableOfContentsChanged();
         /** Emitted whenever the content of a row was changed by the user. */
         void edited();
         /** Emitted after a parse result was applied. */
@@ -182,6 +222,7 @@ namespace StructuraSystems::Client {
             std::shared_ptr<KerML::Entities::TextualRepresentation> Element;
             bool Selected = false;
             int ProblemCount = 0;
+            ElementTreeModel *ElementTree = nullptr;   ///< Owned by the DocumentModel (QObject parent)
             QString HeaderTitle;
             QString HeaderAuthor;
         };
@@ -189,6 +230,7 @@ namespace StructuraSystems::Client {
         void loadRows();
         void updateHeader(Row &row) const;
         void syncElementOrder();
+        void rebuildTableOfContents();
         void setModified(bool modified);
         void markEdited(int row, const QList<int> &roles);
         [[nodiscard]] bool validRow(int row) const;
@@ -197,6 +239,9 @@ namespace StructuraSystems::Client {
         std::shared_ptr<SysMLv2::REST::Commit> Commit;
         std::vector<std::shared_ptr<KerML::Entities::Element>> Elements;
         std::vector<Row> Rows;
+        std::shared_ptr<DocumentWorkspace> Workspace;
+        std::shared_ptr<LibraryWorkspace> Libraries;
+        QString OwnFile;
         std::vector<std::shared_ptr<KerML::Entities::Element>> InstanceElements;
         QList<Problem> ParserProblems;
         bool Modified = false;
@@ -205,6 +250,7 @@ namespace StructuraSystems::Client {
         QString BranchId;
         QString BranchName;
         bool Detached = false;
+        QVariantList TableOfContents;
     };
 }
 

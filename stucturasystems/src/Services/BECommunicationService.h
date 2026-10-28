@@ -18,6 +18,7 @@
 //---------------------------------------------------------
 // Internal Classes
 //---------------------------------------------------------
+#include "PagedRequest.h"
 //---------------------------------------------------------
 // Forwarding
 //---------------------------------------------------------
@@ -52,6 +53,17 @@ namespace StructuraSystems::Client {
     };
 
     /**
+     * The state of a branch at its head, as loaded from the server.
+     */
+    struct BranchState {
+        std::shared_ptr<SysMLv2::REST::Branch> Branch;
+        /** The head commit, nullptr for a branch without commits (a new project). */
+        std::shared_ptr<SysMLv2::REST::Commit> Commit;
+        /** The elements of the head commit, empty for a branch without head. */
+        std::vector<std::shared_ptr<KerML::Entities::Element>> Elements;
+    };
+
+    /**
      * Abstracts the communication to an interface for the programmer. Allows the communication with the backend.
      * Hereby a connection to the server is opened. With this connection the REST protocol is generated and sent.
      * REST API Specification is here <a href="https://github.com/Systems-Modeling/SysML-v2-API-Services">https://github.com/Systems-Modeling/SysML-v2-API-Services</a>
@@ -67,6 +79,14 @@ namespace StructuraSystems::Client {
         CommunicationService(std::string serverAddress);
 
         /**
+         * Like the constructor above, but the GET requests of the list routes, commits and elements are sent by the given
+         * transport instead of libcurl. This allows to test the handling of the answers without a server.
+         * @param serverAddress Address of the Server including the port and folder.
+         * @param transport Sends one GET request.
+         */
+        CommunicationService(std::string serverAddress, HttpTransport transport);
+
+        /**
          * D-Tor
          */
         virtual ~CommunicationService();
@@ -77,6 +97,12 @@ namespace StructuraSystems::Client {
          * @return A new, already authenticated connection.
          */
         [[nodiscard]] std::shared_ptr<CommunicationService> createIndependentConnection() const;
+
+        /**
+         * Sets the token that is sent with every request. It is normally set by setUserForLoginInBackend.
+         * @param token The bearer token.
+         */
+        void setBearerToken(std::string token);
 
         /**
          * Creates a connection to the REST endpoint of the given AGILA Backend server,  to get all Elements of a Commit and Project, distinguished by its uuid.
@@ -92,7 +118,8 @@ namespace StructuraSystems::Client {
         [[nodiscard]] std::vector<std::shared_ptr<KerML::Entities::Element>> getAllElements(boost::uuids::uuid commitId, boost::uuids::uuid projectId) const;
 
         /**
-         * Creates a connection to the REST endpoint of the given AGILA Backend sever, to get all saved projects within the instance of the Backend
+         * Creates a connection to the REST endpoint of the given AGILA Backend sever, to get all saved projects within the instance of the Backend.
+         * Lists of the server have at most 100 entries per page, the following pages (Link header, rel="next") are loaded too.
          * @return An std::vector of the Projects
          * @throws SysMLv2::API::EXCEPTIONS::HTTPException If the server answers with a status outside of 2xx.
          * @throws SysMLv2::API::EXCEPTIONS::ConnectionError If the server is not reachable.
@@ -122,6 +149,18 @@ namespace StructuraSystems::Client {
         std::vector<std::shared_ptr<SysMLv2::REST::Branch>> getAllBranchesForProjectWithID(boost::uuids::uuid projectId);
 
         /**
+         * Loads the head of a branch with its elements. The branches are read again, so the head is current. A branch
+         * without head (a new project has none) yields an empty state, not an error.
+         * @param projectId UUID ("@id") of the project.
+         * @param branchId UUID ("@id") of the branch.
+         * @return The branch, its head commit and the elements of the head.
+         * @throws std::runtime_error If the project has no such branch.
+         * @throws SysMLv2::API::EXCEPTIONS::HTTPException If the server answers with a status outside of 2xx.
+         * @throws SysMLv2::API::EXCEPTIONS::ConnectionError If the server is not reachable.
+         */
+        BranchState loadBranchState(boost::uuids::uuid projectId, boost::uuids::uuid branchId);
+
+        /**
          * Download the commits with its commit id and project id identifying the specific commit.
          * @param projectId UUID ("@id") of the project.
          * @param commitId UUID ("@id") of the commit.
@@ -145,7 +184,7 @@ namespace StructuraSystems::Client {
 
         /**
          * Downloads all commits of a project (GET projects/{projectId}/commits).
-         * The commits are returned in the order of the server, use Commit::getPreviusCommits to build the history.
+         * The commits are returned in the order of the server, use Commit::getPreviousCommits to build the history.
          * @param projectId UUID ("@id") of the project.
          * @param timestamps Optional. Receives the creation time of every commit by its id. The time is read from the
          *                   ISO 8601 text of the answer ("timestamp" or "created"), because Commit::getCreated does not
@@ -267,7 +306,14 @@ namespace StructuraSystems::Client {
         void deleteProject(boost::uuids::uuid projectId);
 
     private:
+        /** Downloads all pages of a list route (see getAllPages). */
+        [[nodiscard]] std::vector<nlohmann::json> getAllPagesOf(const std::string &endpoint) const;
+
+        [[nodiscard]] std::vector<std::shared_ptr<KerML::Entities::Element>> elementsOfCommit(boost::uuids::uuid projectId, boost::uuids::uuid commitId) const;
+
         std::string ServerAddress;
+
+        HttpTransport Transport;
 
         std::string BarrierString = "";
 
