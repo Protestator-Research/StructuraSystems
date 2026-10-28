@@ -11,6 +11,7 @@
 
 #include <QFile>
 #include <regex>
+#include <cstdlib>
 
 
 namespace StructuraSystems::Client {
@@ -29,8 +30,28 @@ namespace StructuraSystems::Client {
         parseInternally();
     }
 
+    MarkdownParser::~MarkdownParser() {
+        if (MarkdownDocument != nullptr)
+            cmark_node_free(MarkdownDocument);
+    }
+
+    void MarkdownParser::setParseYamlFrontMatter(bool parse) {
+        ParseYamlFrontMatter = parse;
+    }
+
+    QString MarkdownParser::getYamlFrontMatter() {
+        return QString::fromStdString(YamlFrontMatter);
+    }
+
     QString MarkdownParser::getHTMLOfMarkdown() {
-        return QString(cmark_render_html(MarkdownDocument,0));
+        if (FrontMatterNode != nullptr)
+            cmark_node_unlink(FrontMatterNode);
+        char* html = cmark_render_html(MarkdownDocument,0);
+        QString result = QString(html);
+        free(html);
+        if (FrontMatterNode != nullptr)
+            cmark_node_prepend_child(MarkdownDocument, FrontMatterNode);
+        return result;
     }
 
     QString MarkdownParser::getMarkdownString()
@@ -64,6 +85,11 @@ namespace StructuraSystems::Client {
                     break;
                 }
                 case CMARK_NODE_CUSTOM_BLOCK:
+                    if (child == FrontMatterNode)
+                        returnValue.push_back(createElement("YAML", YamlFrontMatter));
+                    else
+                        returnValue.push_back(createElement("Markdown", cmark_render_commonmark(child,0,0)));
+                    break;
                 case CMARK_NODE_PARAGRAPH:
                 case CMARK_NODE_HEADING:
                 case CMARK_NODE_THEMATIC_BREAK:
@@ -88,7 +114,72 @@ namespace StructuraSystems::Client {
     }
 
     void MarkdownParser::parseInternally() {
-        MarkdownDocument = cmark_parse_document(MarkdownString.c_str(),MarkdownString.size(),0);
+        if (MarkdownDocument != nullptr) {
+            cmark_node_free(MarkdownDocument);
+            MarkdownDocument = nullptr;
+        }
+        FrontMatterNode = nullptr;
+
+        std::string body = MarkdownString;
+        bool hasFrontMatter = extractYamlFrontMatter(body);
+        MarkdownDocument = cmark_parse_document(body.c_str(),body.size(),0);
+
+        if (hasFrontMatter) {
+            cmark_node* node = cmark_node_new(CMARK_NODE_CUSTOM_BLOCK);
+            std::string literal = "---\n" + YamlFrontMatter + "---\n";
+            cmark_node_set_on_enter(node, literal.c_str());
+            cmark_node_set_on_exit(node, "");
+            cmark_node_prepend_child(MarkdownDocument, node);
+            FrontMatterNode = node;
+        }
+    }
+
+    bool MarkdownParser::extractYamlFrontMatter(std::string& markdownBody) {
+        YamlFrontMatter.clear();
+        if (!ParseYamlFrontMatter)
+            return false;
+
+        const std::string& text = markdownBody;
+        size_t pos = 0;
+        if (text.compare(0, 3, "\xEF\xBB\xBF") == 0)
+            pos = 3;
+
+        // Returns the line at pos without line ending and moves pos behind it.
+        auto nextLine = [&text](size_t& position) {
+            size_t end = text.find('\n', position);
+            std::string line;
+            if (end == std::string::npos) {
+                line = text.substr(position);
+                position = text.size();
+            } else {
+                line = text.substr(position, end - position);
+                position = end + 1;
+            }
+            if (!line.empty() && line.back() == '\r')
+                line.pop_back();
+            return line;
+        };
+        auto trimmed = [](std::string line) {
+            while (!line.empty() && (line.back() == ' ' || line.back() == '\t'))
+                line.pop_back();
+            return line;
+        };
+
+        if (pos >= text.size() || trimmed(nextLine(pos)) != "---")
+            return false;
+
+        std::string yaml;
+        while (pos < text.size()) {
+            std::string line = nextLine(pos);
+            std::string delimiter = trimmed(line);
+            if (delimiter == "---" || delimiter == "...") {
+                YamlFrontMatter = yaml;
+                markdownBody = text.substr(pos);
+                return true;
+            }
+            yaml += line + "\n";
+        }
+        return false;
     }
 
     std::shared_ptr<KerML::Entities::Element> MarkdownParser::createElement(std::string language, std::string body) {
