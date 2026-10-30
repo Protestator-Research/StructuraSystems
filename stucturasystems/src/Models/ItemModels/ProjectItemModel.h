@@ -20,7 +20,9 @@ namespace StructuraSystems::Client {
     public:
         enum Roles {
             NameRole = Qt::UserRole + 1,
-            DescriptionRole
+            DescriptionRole,
+            /** The UUID of the project ("@id"), for the places that must not depend on the row (a list can change meanwhile). */
+            IdRole
         };
         Q_ENUM(Roles)
 

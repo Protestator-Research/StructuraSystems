@@ -203,32 +203,66 @@ namespace StructuraSystems::Client {
         return url;
     }
 
-    std::vector<nlohmann::json> getAllPages(const std::string &firstUrl, const std::string &bearerToken, const HttpTransport &transport) {
-        std::vector<nlohmann::json> entries;
-        std::set<std::string> requested;
-        std::string url = firstUrl;
-        while (true) {
-            if (!requested.insert(url).second)
-                throw std::runtime_error("The server links to a page that was already loaded: " + url);
+    namespace {
+        thread_local const std::atomic<bool> *CurrentCancel = nullptr;
 
-            const auto response = transport(url, bearerToken);
-            checkStatus(response);
-
-            auto page = nlohmann::json::parse(response.Body, nullptr, false);
-            if (!page.is_array())
-                throw std::runtime_error("The server did not return a list.");
-            for (auto &entry : page)
-                entries.push_back(std::move(entry));
-
-            const auto link = nextPageUrl(response.Headers);
-            if (!link.has_value())
-                break;
-            const auto next = followLink(url, *link);
-            if (!next.has_value())
-                break;
-            url = *next;
+        /** libcurl asks after every chunk: a non-zero return aborts the transfer. */
+        int abortIfCancelled(void *, curl_off_t, curl_off_t, curl_off_t, curl_off_t) {
+            return CurrentCancel != nullptr && CurrentCancel->load() ? 1 : 0;
         }
-        return entries;
+    }
+
+    CancelScope::CancelScope(const std::atomic<bool> *flag) : Previous(CurrentCancel) {
+        CurrentCancel = flag;
+    }
+
+    CancelScope::~CancelScope() {
+        CurrentCancel = Previous;
+    }
+
+    bool cancelRequested() {
+        return CurrentCancel != nullptr && CurrentCancel->load();
+    }
+
+    namespace {
+        std::vector<nlohmann::json> collectPages(const std::string &firstUrl, const std::function<HttpResponse(const std::string &)> &send) {
+            std::vector<nlohmann::json> entries;
+            std::set<std::string> requested;
+            std::string url = firstUrl;
+            while (true) {
+                if (cancelRequested())
+                    throw std::runtime_error("The download was cancelled.");
+                if (!requested.insert(url).second)
+                    throw std::runtime_error("The server links to a page that was already loaded: " + url);
+
+                const auto response = send(url);
+                checkStatus(response);
+
+                auto page = nlohmann::json::parse(response.Body, nullptr, false);
+                if (!page.is_array())
+                    throw std::runtime_error("The server did not return a list.");
+                for (auto &entry : page)
+                    entries.push_back(std::move(entry));
+
+                const auto link = nextPageUrl(response.Headers);
+                if (!link.has_value())
+                    break;
+                const auto next = followLink(url, *link);
+                if (!next.has_value())
+                    break;
+                url = *next;
+            }
+            return entries;
+        }
+    }
+
+    std::vector<nlohmann::json> getAllPages(const std::string &firstUrl, const std::string &bearerToken, const HttpTransport &transport) {
+        return collectPages(firstUrl, [&](const std::string &url) { return transport(url, bearerToken); });
+    }
+
+    std::vector<nlohmann::json> postAllPages(const std::string &firstUrl, const std::string &bearerToken, const std::string &body,
+                                             const HttpPostTransport &transport) {
+        return collectPages(firstUrl, [&](const std::string &url) { return transport(url, bearerToken, body); });
     }
 
     nlohmann::json getJson(const std::string &url, const std::string &bearerToken, const HttpTransport &transport) {
@@ -240,8 +274,8 @@ namespace StructuraSystems::Client {
         return json;
     }
 
-    HttpTransport curlTransport() {
-        return [](const std::string &url, const std::string &bearerToken) {
+    namespace {
+        HttpResponse curlRequest(const std::string &url, const std::string &bearerToken, const std::string *postBody) {
             std::call_once(CurlGlobalInitFlag, []() { curl_global_init(CURL_GLOBAL_ALL); });
 
             HttpResponse response;
@@ -258,12 +292,20 @@ namespace StructuraSystems::Client {
                 headerList.reset(extended);
             };
             appendHeader("Accept: application/json");
+            if (postBody != nullptr)
+                appendHeader("Content-Type: application/json");
             if (!bearerToken.empty())
                 appendHeader("Authorization: Bearer " + bearerToken);
 
             CURL *handle = connection.get();
             curl_easy_setopt(handle, CURLOPT_URL, url.c_str());
-            curl_easy_setopt(handle, CURLOPT_HTTPGET, 1L);
+            if (postBody != nullptr) {
+                curl_easy_setopt(handle, CURLOPT_POST, 1L);
+                curl_easy_setopt(handle, CURLOPT_POSTFIELDS, postBody->c_str());
+                curl_easy_setopt(handle, CURLOPT_POSTFIELDSIZE_LARGE, static_cast<curl_off_t>(postBody->size()));
+            } else {
+                curl_easy_setopt(handle, CURLOPT_HTTPGET, 1L);
+            }
             curl_easy_setopt(handle, CURLOPT_WRITEFUNCTION, appendToString);
             curl_easy_setopt(handle, CURLOPT_WRITEDATA, &response.Body);
             curl_easy_setopt(handle, CURLOPT_HEADERFUNCTION, appendToString);
@@ -275,6 +317,8 @@ namespace StructuraSystems::Client {
             curl_easy_setopt(handle, CURLOPT_CONNECTTIMEOUT, 10L);
             curl_easy_setopt(handle, CURLOPT_TIMEOUT, 120L);
             curl_easy_setopt(handle, CURLOPT_NOSIGNAL, 1L);
+            curl_easy_setopt(handle, CURLOPT_NOPROGRESS, 0L);
+            curl_easy_setopt(handle, CURLOPT_XFERINFOFUNCTION, abortIfCancelled);
 
             const CURLcode result = curl_easy_perform(handle);
             if (result != CURLE_OK) {
@@ -283,6 +327,14 @@ namespace StructuraSystems::Client {
             }
             curl_easy_getinfo(handle, CURLINFO_RESPONSE_CODE, &response.Status);
             return response;
-        };
+        }
+    }
+
+    HttpTransport curlTransport() {
+        return [](const std::string &url, const std::string &bearerToken) { return curlRequest(url, bearerToken, nullptr); };
+    }
+
+    HttpPostTransport curlPostTransport() {
+        return [](const std::string &url, const std::string &bearerToken, const std::string &body) { return curlRequest(url, bearerToken, &body); };
     }
 }

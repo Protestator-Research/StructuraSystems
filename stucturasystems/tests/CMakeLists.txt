@@ -19,9 +19,21 @@ qt_add_executable(LibraryWorkspaceTests
         ${SRC}/Models/Libraries/DocumentWorkspace.h
         ${SRC}/Models/Libraries/LibraryWorkspace.cpp
         ${SRC}/Models/Libraries/LibraryWorkspace.h
+        ${SRC}/Models/Libraries/RemoteLibraries.cpp
+        ${SRC}/Models/Libraries/RemoteLibraries.h
         ${SRC}/Models/Libraries/WorkspaceConfig.cpp
         ${SRC}/Models/Libraries/WorkspaceConfig.h
         ${SRC}/Models/Parser/Markdown/MarkdownParser.cpp
+        # DocumentWorkspace builds the name index of the code completion.
+        ${SRC}/ViewModels/CompletionEngine.cpp
+        ${SRC}/ViewModels/LanguageKeywords.cpp
+        # The communication with the server (the project usages are read from and written to commits).
+        ${SRC}/Services/BECommunicationService.cpp
+        ${SRC}/Services/BECommunicationService.h
+        ${SRC}/Services/CommitDelta.cpp
+        ${SRC}/Services/PagedRequest.cpp
+        ${SRC}/Services/entities/DigitalTwin.cpp
+        ${SRC}/Services/entities/DigitalTwinRequest.cpp
         ${CMARK_SOURCES}
         # The standard library that the workspaces load.
         ${CMAKE_CURRENT_SOURCE_DIR}/../../resources/sysml.qrc)
@@ -29,7 +41,9 @@ qt_add_executable(LibraryWorkspaceTests
 target_link_libraries(LibraryWorkspaceTests PRIVATE
         Qt6::Core
         Qt6::Test
-        sysmllib::sysmllib)
+        sysmllib::sysmllib
+        CURL::libcurl
+        nlohmann_json::nlohmann_json)
 
 add_test(NAME LibraryWorkspaceTests COMMAND LibraryWorkspaceTests)
 # Parsing the standard library takes about a minute in a debug build.
@@ -60,10 +74,14 @@ qt_add_executable(OnlineDocumentTests
         ${SRC}/ViewModels/DocumentModel.cpp
         ${SRC}/ViewModels/ElementTreeModel.cpp
         ${SRC}/ViewModels/ProblemListModel.cpp
+        # The names of the model for the code completion (DocumentWorkspace builds the index, DocumentModel keeps it).
+        ${SRC}/ViewModels/CompletionEngine.cpp
+        ${SRC}/ViewModels/LanguageKeywords.cpp
         ${SRC}/Services/CommitDelta.cpp
         ${SRC}/Models/Libraries/CodeScanner.cpp
         ${SRC}/Models/Libraries/DocumentWorkspace.cpp
         ${SRC}/Models/Libraries/LibraryWorkspace.cpp
+        ${SRC}/Models/Libraries/RemoteLibraries.cpp
         ${SRC}/Models/Libraries/WorkspaceConfig.cpp
         ${SRC}/Models/Parser/StructuraSystemsParser.cpp
         ${SRC}/Models/Parser/Markdown/MarkdownParser.cpp
@@ -82,6 +100,39 @@ target_link_libraries(OnlineDocumentTests PRIVATE
 
 add_test(NAME OnlineDocumentTests COMMAND OnlineDocumentTests)
 set_tests_properties(OnlineDocumentTests PROPERTIES TIMEOUT 120)
+
+# The editing help of the code editor (indentation, bracket pairs, tab handling) is pure text logic.
+qt_add_executable(CodeEditAssistTests
+        tst_CodeEditAssist.cpp
+        ${SRC}/ViewModels/CodeEditAssist.cpp
+        ${SRC}/ViewModels/CodeEditAssist.h)
+
+# Only the headers of QtQml are needed for the QML registration macros, see OnlineDocumentTests.
+target_include_directories(CodeEditAssistTests PRIVATE $<TARGET_PROPERTY:Qt6::Qml,INTERFACE_INCLUDE_DIRECTORIES>)
+
+target_link_libraries(CodeEditAssistTests PRIVATE
+        Qt6::Core
+        Qt6::Test)
+
+add_test(NAME CodeEditAssistTests COMMAND CodeEditAssistTests)
+set_tests_properties(CodeEditAssistTests PROPERTIES TIMEOUT 60)
+
+# The code completion: pure text logic (context analysis, filtering, snippets, name index). The keywords come from the ANTLR lexers of
+# sysmllib, so no QtQml is needed.
+qt_add_executable(CompletionEngineTests
+        tst_CompletionEngine.cpp
+        ${SRC}/ViewModels/CompletionEngine.cpp
+        ${SRC}/ViewModels/CompletionEngine.h
+        ${SRC}/ViewModels/LanguageKeywords.cpp
+        ${SRC}/ViewModels/LanguageKeywords.h)
+
+target_link_libraries(CompletionEngineTests PRIVATE
+        Qt6::Core
+        Qt6::Test
+        sysmllib::sysmllib)
+
+add_test(NAME CompletionEngineTests COMMAND CompletionEngineTests)
+set_tests_properties(CompletionEngineTests PROPERTIES TIMEOUT 60)
 
 # ctest starts the executable without the environment of the Conan build, so the shared libraries it needs (sysmllib and its
 # dependencies, Qt) are put on the PATH of the test. The directories come from the variables the Conan CMake generator sets
@@ -116,7 +167,7 @@ if(WIN32 AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.22)
         list(APPEND _modifications "PATH=path_list_prepend:${_qt_bin}")
     endif()
     list(REMOVE_DUPLICATES _modifications)
-    set_tests_properties(LibraryWorkspaceTests OnlineSyncTests OnlineDocumentTests PROPERTIES ENVIRONMENT_MODIFICATION "${_modifications}")
+    set_tests_properties(LibraryWorkspaceTests OnlineSyncTests OnlineDocumentTests CodeEditAssistTests CompletionEngineTests PROPERTIES ENVIRONMENT_MODIFICATION "${_modifications}")
 endif()
 
 

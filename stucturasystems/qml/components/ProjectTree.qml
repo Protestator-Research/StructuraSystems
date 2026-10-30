@@ -122,7 +122,7 @@ TreeView {
             text: qsTr("Set level...")
             onTriggered: tree.levelRequested(contextMenu.path, contextMenu.level)
         }
-        MenuSeparator { visible: contextMenu.packages.length > 0 }
+        MenuSeparator { visible: contextMenu.packages.length > 0; height: visible ? implicitHeight : 0 }
 
         // One entry per package of the file: use this file if several files define the package.
         Instantiator {

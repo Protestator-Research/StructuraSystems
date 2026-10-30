@@ -56,6 +56,53 @@ namespace StructuraSystems::Client {
         QList<LibraryEntry> Entries;
     };
 
+    /** A project usage of the current online document, as shown in the settings. */
+    struct RemoteUsageEntry {
+        QString UsageId;
+        QString ProjectId;
+        QString ProjectName;
+        QString CommitId;
+        int Level = -1;           ///< -1 while the used project is not downloaded
+        QString Status;           ///< Empty if the project is in the cache, otherwise why it is not
+    };
+
+    /**
+     * The project usages of the current online document (SysML v2 API: ProjectUsage in the commit of the project). They are
+     * stored on the server; the model only shows them.
+     */
+    class RemoteUsageModel : public QAbstractListModel {
+        Q_OBJECT
+        QML_ELEMENT
+        QML_UNCREATABLE("RemoteUsageModel instances are owned by AppController.")
+        Q_PROPERTY(int count READ count NOTIFY countChanged)
+    public:
+        enum Roles {
+            UsageIdRole = Qt::UserRole + 1,
+            ProjectIdRole,
+            ProjectNameRole,
+            CommitIdRole,
+            LevelRole,
+            StatusRole
+        };
+        Q_ENUM(Roles)
+
+        explicit RemoteUsageModel(QObject *parent = nullptr);
+
+        int rowCount(const QModelIndex &parent = QModelIndex()) const override;
+        QVariant data(const QModelIndex &index, int role = Qt::DisplayRole) const override;
+        QHash<int, QByteArray> roleNames() const override;
+
+        [[nodiscard]] int count() const;
+        void setEntries(QList<RemoteUsageEntry> entries);
+        [[nodiscard]] const QList<RemoteUsageEntry> &entries() const;
+
+    signals:
+        void countChanged();
+
+    private:
+        QList<RemoteUsageEntry> Entries;
+    };
+
     /**
      * QML facing side of the LibraryWorkspace: the library levels of the opened folder. Level 0 is the standard library,
      * 1..n are the local libraries (set automatically from the imports, or manually by the user) and the open document is

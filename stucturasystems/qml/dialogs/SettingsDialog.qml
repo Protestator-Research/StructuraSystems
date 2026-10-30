@@ -10,6 +10,10 @@ Dialog {
     id: dialog
 
     readonly property var settings: AppController.settings
+
+    /** Forwarded from the libraries page; the dialogs for them are in Main.qml. */
+    signal addUsageRequested()
+    signal removeUsageRequested(string usageId, string usedProjectName)
     // The password is loaded lazily from the keychain; do not replace what the user typed meanwhile.
     property bool passwordEdited: false
 
@@ -26,6 +30,8 @@ Dialog {
     modal: true
     title: qsTr("Settings")
     width: 520
+    // Never taller than the window; the content scrolls.
+    height: Math.min(implicitHeight, (Overlay.overlay ? Overlay.overlay.height : 800) - 24)
 
     onAboutToShow: {
         directory.text = settings.workingDirectory
@@ -70,75 +76,86 @@ Dialog {
         }
     }
 
-    ColumnLayout {
+    // The content scrolls if the window is too small for it (the libraries and their project usages make it long).
+    ScrollView {
+        id: scroll
+
         anchors.fill: parent
-        spacing: 10
+        contentWidth: availableWidth
+        clip: true
 
-        SectionHeader { text: qsTr("General"); iconSource: Theme.iconFolder }
-        RowLayout {
-            Layout.fillWidth: true
-            TextField {
-                id: directory
-                Layout.fillWidth: true
-                placeholderText: qsTr("Working directory")
-                selectByMouse: true
-            }
-            IconToolButton {
-                iconSource: Theme.iconFolder
-                tip: qsTr("Browse...")
-                onClicked: folderDialog.open()
-            }
-        }
-
-        SectionHeader { text: qsTr("Connection"); iconSource: Theme.iconConnection }
-        TextField {
-            id: server
-            Layout.fillWidth: true
-            placeholderText: qsTr("Server address")
-            selectByMouse: true
-        }
-        RowLayout {
-            Layout.fillWidth: true
+        ColumnLayout {
+            width: scroll.availableWidth
             spacing: 10
-            TextField {
-                id: username
+
+            SectionHeader { text: qsTr("General"); iconSource: Theme.iconFolder }
+            RowLayout {
                 Layout.fillWidth: true
-                placeholderText: qsTr("Username")
+                TextField {
+                    id: directory
+                    Layout.fillWidth: true
+                    placeholderText: qsTr("Working directory")
+                    selectByMouse: true
+                }
+                IconToolButton {
+                    iconSource: Theme.iconFolder
+                    tip: qsTr("Browse...")
+                    onClicked: folderDialog.open()
+                }
+            }
+
+            SectionHeader { text: qsTr("Connection"); iconSource: Theme.iconConnection }
+            TextField {
+                id: server
+                Layout.fillWidth: true
+                placeholderText: qsTr("Server address")
                 selectByMouse: true
             }
-            TextField {
-                id: password
+            RowLayout {
                 Layout.fillWidth: true
-                placeholderText: qsTr("Password")
-                echoMode: TextInput.Password
-                onTextEdited: dialog.passwordEdited = true
-                selectByMouse: true
+                spacing: 10
+                TextField {
+                    id: username
+                    Layout.fillWidth: true
+                    placeholderText: qsTr("Username")
+                    selectByMouse: true
+                }
+                TextField {
+                    id: password
+                    Layout.fillWidth: true
+                    placeholderText: qsTr("Password")
+                    echoMode: TextInput.Password
+                    onTextEdited: dialog.passwordEdited = true
+                    selectByMouse: true
+                }
             }
-        }
-        CheckBox {
-            id: rememberPassword
-            text: qsTr("Remember password")
-            enabled: dialog.settings.keychainAvailable
-        }
-        Label {
-            Layout.fillWidth: true
-            visible: !dialog.settings.keychainAvailable
-            wrapMode: Text.WordWrap
-            text: qsTr("The system keychain is not available. The password cannot be stored securely and is only kept until the application is closed.")
-            font.pixelSize: 12
-            color: Theme.textSecondary
-        }
+            CheckBox {
+                id: rememberPassword
+                text: qsTr("Remember password")
+                enabled: dialog.settings.keychainAvailable
+            }
+            Label {
+                Layout.fillWidth: true
+                visible: !dialog.settings.keychainAvailable
+                wrapMode: Text.WordWrap
+                text: qsTr("The system keychain is not available. The password cannot be stored securely and is only kept until the application is closed.")
+                font.pixelSize: 12
+                color: Theme.textSecondary
+            }
 
-        SectionHeader { text: qsTr("Libraries"); iconSource: Theme.iconProject }
-        LibrarySettings {
-            id: libraries
-            Layout.fillWidth: true
-        }
+            SectionHeader { text: qsTr("Libraries"); iconSource: Theme.iconProject }
+            LibrarySettings {
+                id: libraries
+            onAddUsageRequested: dialog.addUsageRequested()
+            onRemoveUsageRequested: (usageId, name) => dialog.removeUsageRequested(usageId, name)
+                Layout.fillWidth: true
+            }
 
-        SectionHeader { text: qsTr("Appearance"); iconSource: Theme.iconTheme }
-        SegmentedControl {
-            id: theme
-            model: [qsTr("System"), qsTr("Light"), qsTr("Dark")]
+            SectionHeader { text: qsTr("Appearance"); iconSource: Theme.iconTheme }
+            SegmentedControl {
+                id: theme
+                model: [qsTr("System"), qsTr("Light"), qsTr("Dark")]
+            }
         }
     }
 

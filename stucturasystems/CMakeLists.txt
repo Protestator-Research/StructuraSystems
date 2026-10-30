@@ -57,6 +57,8 @@ set(SOURCES
         src/Models/Libraries/DocumentWorkspace.h
         src/Models/Libraries/LibraryWorkspace.cpp
         src/Models/Libraries/LibraryWorkspace.h
+        src/Models/Libraries/RemoteLibraries.cpp
+        src/Models/Libraries/RemoteLibraries.h
         src/Models/Libraries/WorkspaceConfig.cpp
         src/Models/Libraries/WorkspaceConfig.h
         src/Models/SettingsModel.cpp
@@ -99,6 +101,7 @@ qt_add_qml_module(StructuraSystems
             qml/components/LanguageMenu.qml
             qml/components/NavigationRail.qml
             qml/components/NavRailItem.qml
+            qml/components/CompletionPopup.qml
             qml/components/ConfirmDeleteDialog.qml
             qml/components/ProjectList.qml
             qml/components/ProjectTree.qml
@@ -114,6 +117,7 @@ qt_add_qml_module(StructuraSystems
             qml/views/ProblemsSheet.qml
             qml/views/StatusBar.qml
             qml/dialogs/AboutDialog.qml
+            qml/dialogs/AddUsageDialog.qml
             qml/dialogs/CloseDocumentDialog.qml
             qml/dialogs/CommitDialog.qml
             qml/dialogs/DetailsDialog.qml
@@ -127,6 +131,14 @@ qt_add_qml_module(StructuraSystems
         SOURCES
             src/ViewModels/SysMLHighlighter.cpp
             src/ViewModels/SysMLHighlighter.h
+            src/ViewModels/CodeEditAssist.cpp
+            src/ViewModels/CodeEditAssist.h
+            src/ViewModels/LanguageKeywords.cpp
+            src/ViewModels/LanguageKeywords.h
+            src/ViewModels/CompletionEngine.cpp
+            src/ViewModels/CompletionEngine.h
+            src/ViewModels/CompletionController.cpp
+            src/ViewModels/CompletionController.h
             src/ViewModels/AppController.cpp
             src/ViewModels/AppController.h
             src/ViewModels/BranchListModel.cpp

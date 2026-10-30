@@ -9,12 +9,17 @@
 #include <exception>
 #include <stdexcept>
 #include <map>
+#include <unordered_set>
 #include <utility>
 
 #include <QDir>
 
+#include <kerml/core/classifiers/Classifier.h>
+#include <kerml/core/features/Feature.h>
 #include <kerml/root/elements/Element.h>
+#include <kerml/root/namespaces/Import.h>
 #include <kerml/root/namespaces/Namespace.h>
+#include <kerml/root/namespaces/NamespaceImport.h>
 #include <sysmlv2/ParserError.h>
 #include <sysmlv2/Workspace.h>
 
@@ -55,6 +60,67 @@ namespace StructuraSystems::Client {
         void disposeSpace(SysMLv2::Files::Workspace &space) {
             for (size_t source = 0; source < space.sourceCount(); ++source)
                 space.replaceSource(source, std::string(), SourceLanguage::Auto);
+        }
+
+        /** The qualified name as the name index writes it (names of the owning namespaces up to the unnamed root), empty if unnamed. */
+        QString qualifiedNameOf(const KerML::Entities::Element &element) {
+            QStringList segments;
+            const KerML::Entities::Element *current = &element;
+            std::shared_ptr<KerML::Entities::Namespace> owner;
+            for (int depth = 0; current != nullptr && depth < 64; ++depth) {
+                auto name = current->effectiveName();
+                if (!name.has_value())
+                    name = current->declaredName();
+                if (!name.has_value() || name->empty())
+                    break;
+                segments.prepend(QString::fromStdString(*name));
+                owner = current->owningNamespace();
+                current = owner.get();
+            }
+            return segments.join(QStringLiteral("::"));
+        }
+
+        /** Appends the named members of the namespace and, below them, those of their members (anonymous elements are not reachable by name). */
+        void collectNames(const KerML::Entities::Namespace &owner, const QString &ownerName, int depth, bool inDocument,
+                          std::unordered_set<const KerML::Entities::Element *> &visited, QList<NameEntry> &entries) {
+            for (const auto &member : owner.ownedMember()) {
+                if (member == nullptr || !visited.insert(member.get()).second)
+                    continue;
+                auto name = member->effectiveName();
+                if (!name.has_value())
+                    name = member->declaredName();
+                if (!name.has_value() || name->empty())
+                    continue;
+
+                NameEntry entry;
+                entry.Name = QString::fromStdString(*name);
+                entry.Owner = ownerName;
+                entry.QualifiedName = ownerName.isEmpty() ? entry.Name : ownerName + QStringLiteral("::") + entry.Name;
+                entry.Type = QString::fromStdString(member->getType());
+                entry.IsType = dynamic_cast<const KerML::Entities::Classifier *>(member.get()) != nullptr;
+                entry.IsFeature = dynamic_cast<const KerML::Entities::Feature *>(member.get()) != nullptr;
+                const auto *ownedNamespace = dynamic_cast<const KerML::Entities::Namespace *>(member.get());
+                entry.IsNamespace = ownedNamespace != nullptr;
+                entry.InDocument = inDocument;
+                if (ownedNamespace != nullptr) {
+                    // `public import ISQBase::*;` makes the members of ISQBase reachable as ISQ::...
+                    for (const auto &import : ownedNamespace->ownedImport()) {
+                        if (import == nullptr || import->visibility() != KerML::Entities::PUBLIC ||
+                            dynamic_cast<const KerML::Entities::NamespaceImport *>(import.get()) == nullptr)
+                            continue;
+                        const auto target = import->importedElement();
+                        const QString targetName = target != nullptr ? qualifiedNameOf(*target) : QString();
+                        if (!targetName.isEmpty())
+                            entry.Exports.append(targetName);
+                    }
+                }
+                const QString qualifiedName = entry.QualifiedName;
+                entries.append(std::move(entry));
+
+                // The depth limit guards against models that nest deeper than any text does.
+                if (ownedNamespace != nullptr && depth < 32)
+                    collectNames(*ownedNamespace, qualifiedName, depth + 1, inDocument, visited, entries);
+            }
         }
 
         WorkspaceDiagnostic diagnostic(int severity, const QString &message, int row = -1) {
@@ -122,6 +188,7 @@ namespace StructuraSystems::Client {
             throw;
         }
         Space = std::move(space);
+        ++ModelEpoch;
         DocumentSlots.clear();
         DocumentTexts.clear();
         DocumentKerML.clear();
@@ -129,6 +196,7 @@ namespace StructuraSystems::Client {
         Loaded.clear();
         LoadedFiles.clear();
         AmbiguousRoots.clear();
+        RemoteMax = 0;
     }
 
     void DocumentWorkspace::warmUp() {
@@ -151,6 +219,7 @@ namespace StructuraSystems::Client {
     void DocumentWorkspace::disposeNonStandard() {
         if (Space == nullptr)
             return;
+        ++ModelEpoch;
         for (const auto slot : DocumentSlots)
             Space->replaceSource(slot, std::string(), SourceLanguage::Auto);
         for (const auto &library : Loaded)
@@ -161,17 +230,21 @@ namespace StructuraSystems::Client {
     void DocumentWorkspace::disposeAll() {
         if (Space == nullptr)
             return;
+        ++ModelEpoch;
         disposeSpace(*Space);
         Space.reset();
     }
 
     void DocumentWorkspace::dropLibraries() {
+        ++ModelEpoch;
         for (const auto &library : Loaded)
             for (const auto source : library.Sources)
                 Space->replaceSource(source, std::string(), SourceLanguage::Auto);
         Loaded.clear();
         LoadedFiles.clear();
         AmbiguousRoots.clear();
+        RemoteNotes.clear();
+        RemoteMax = 0;
     }
 
     void DocumentWorkspace::recycle() {
@@ -191,30 +264,69 @@ namespace StructuraSystems::Client {
         Loaded.clear();
         LoadedFiles.clear();
         AmbiguousRoots.clear();
+        RemoteMax = 0;
+        RemoteNotes.clear();
+        Remote.reset();
+        RemoteProject.clear();
+        RemoteCommit.clear();
+        ClosureCache.reset();
         std::fill(DocumentTexts.begin(), DocumentTexts.end(), std::string());
         std::fill(DocumentKerML.begin(), DocumentKerML.end(), false);
         std::fill(DocumentFailed.begin(), DocumentFailed.end(), false);
         ForceReparse = true;
     }
 
+    void DocumentWorkspace::setRemote(std::shared_ptr<RemoteLibraries> remote, QString projectId, QString commitId) {
+        std::lock_guard lock(PendingMutex);
+        PendingRemote = std::move(remote);
+        PendingRemoteProject = std::move(projectId);
+        PendingRemoteCommit = std::move(commitId);
+        HasPendingRemote = true;
+    }
+
     void DocumentWorkspace::applyPending() {
         std::shared_ptr<LibraryWorkspace> libraries;
         QString ownFile;
+        bool librariesChanged = false;
+        std::shared_ptr<RemoteLibraries> remote;
+        QString remoteProject;
+        QString remoteCommit;
+        bool remoteChanged = false;
         {
             std::lock_guard lock(PendingMutex);
-            if (!HasPending)
-                return;
-            HasPending = false;
-            libraries = std::move(PendingLibraries);
-            ownFile = std::move(PendingOwnFile);
+            if (HasPending) {
+                HasPending = false;
+                librariesChanged = true;
+                libraries = std::move(PendingLibraries);
+                ownFile = std::move(PendingOwnFile);
+            }
+            if (HasPendingRemote) {
+                HasPendingRemote = false;
+                remote = std::move(PendingRemote);
+                remoteProject = std::move(PendingRemoteProject);
+                remoteCommit = std::move(PendingRemoteCommit);
+                // The same usages are not loaded again: only another project or commit (or cache) changes the libraries.
+                remoteChanged = remote != Remote || remoteProject != RemoteProject || remoteCommit != RemoteCommit;
+            }
         }
-        Libraries = std::move(libraries);
-        OwnFile = std::move(ownFile);
-        if (Space != nullptr)
-            dropLibraries();
-        AmbiguousRoots.clear();
-        LibraryGeneration = Libraries != nullptr ? Libraries->generation() : 0;
-        ForceReparse = true;
+        if (librariesChanged) {
+            Libraries = std::move(libraries);
+            OwnFile = std::move(ownFile);
+            LibraryGeneration = Libraries != nullptr ? Libraries->generation() : 0;
+        }
+        if (remoteChanged) {
+            Remote = std::move(remote);
+            RemoteProject = std::move(remoteProject);
+            RemoteCommit = std::move(remoteCommit);
+            ClosureCache.reset();
+        }
+        if (librariesChanged || remoteChanged) {
+            // What was loaded for another context does not belong to this one (the standard library stays).
+            if (Space != nullptr)
+                dropLibraries();
+            AmbiguousRoots.clear();
+            ForceReparse = true;
+        }
     }
 
     const PackageLookup &DocumentWorkspace::lookup(const QString &package) {
@@ -237,8 +349,14 @@ namespace StructuraSystems::Client {
         return LevelCache.emplace(file, Libraries->levelInfo(file)).first->second;
     }
 
+    int DocumentWorkspace::effectiveLevel(const QString &file) {
+        // Local libraries sit above the remote ones (which have the levels 1..RemoteMax): they may use them, not the other way round.
+        return (std::min)(levelOf(file).Level + RemoteMax, LibraryWorkspace::MaxLibraryLevel);
+    }
+
     void DocumentWorkspace::reloadLibrary(LoadedLibrary &library) {
-        const auto level = levelOf(library.File).Level;
+        ++ModelEpoch;
+        const auto level = effectiveLevel(library.File);
         const auto stamp = Libraries->fileStamp(library.File);
         const auto blocks = Libraries->readFile(library.File);
         for (size_t i = 0; i < size_t(blocks.size()); ++i) {
@@ -259,7 +377,11 @@ namespace StructuraSystems::Client {
 
     void DocumentWorkspace::refreshLibraries(QList<WorkspaceDiagnostic> &diagnostics) {
         if (Libraries == nullptr) {
-            if (!Loaded.empty()) {
+            // Remote libraries do not depend on a folder; only the local ones are dropped.
+            bool anyLocal = false;
+            for (const auto &library : Loaded)
+                anyLocal = anyLocal || !library.Remote;
+            if (anyLocal) {
                 dropLibraries();
                 ForceReparse = true;
             }
@@ -278,6 +400,10 @@ namespace StructuraSystems::Client {
 
         bool changed = false;
         for (auto it = Loaded.begin(); it != Loaded.end();) {
+            if (it->Remote) {
+                ++it;   // a commit of another project never changes
+                continue;
+            }
             const auto stamp = Libraries->fileStamp(it->File);
             // The user may have picked another file for a package since the library was loaded.
             bool needed = false;
@@ -287,6 +413,7 @@ namespace StructuraSystems::Client {
                     needed = true;
             }
             if (stamp < 0 || !needed) {
+                ++ModelEpoch;
                 for (const auto source : it->Sources)
                     Space->replaceSource(source, std::string(), SourceLanguage::Auto);
                 LoadedFiles.erase(it->File);
@@ -294,7 +421,7 @@ namespace StructuraSystems::Client {
                 changed = true;
                 continue;
             }
-            if (stamp != it->Stamp || levelOf(it->File).Level != it->Level)
+            if (stamp != it->Stamp || effectiveLevel(it->File) != it->Level)
                 changed = true;
             ++it;
         }
@@ -303,6 +430,8 @@ namespace StructuraSystems::Client {
             // The libraries refer to each other, so they are replaced together (and with the document). The standard library
             // does not refer to them and stays as it is.
             for (auto &library : Loaded) {
+                if (library.Remote)
+                    continue;
                 try {
                     reloadLibrary(library);
                 } catch (const std::exception &ex) {
@@ -317,9 +446,10 @@ namespace StructuraSystems::Client {
         LoadedLibrary library;
         library.File = file;
         library.Stamp = Libraries->fileStamp(file);
-        library.Level = levelOf(file).Level;
+        library.Level = effectiveLevel(file);
         library.Triggers.append(trigger);
         LoadedFiles.insert(file);
+        ++ModelEpoch;
         try {
             for (const auto &source : Libraries->readFile(file))
                 library.Sources.push_back(Space->addText(source.Text.toStdString(), source.Name.toStdString(), languageOf(source.Language), library.Level));
@@ -329,6 +459,57 @@ namespace StructuraSystems::Client {
         Loaded.push_back(std::move(library));
     }
 
+    void DocumentWorkspace::loadRemoteLibrary(const RemoteLibrary &remote, QList<WorkspaceDiagnostic> &diagnostics) {
+        LoadedLibrary library;
+        library.File = remote.Name;
+        library.Remote = true;
+        library.Level = remote.Level;
+        library.Triggers.append(remote.Name);
+        LoadedFiles.insert(remote.Name);
+        ++ModelEpoch;
+        try {
+            for (const auto &source : remote.Content.Sources)
+                library.Sources.push_back(Space->addText(source.Text.toStdString(), source.Name.toStdString(), languageOf(source.Language), library.Level));
+        } catch (const std::exception &ex) {
+            diagnostics.append(diagnostic(2, QStringLiteral("Remote library '%1' could not be read: %2").arg(remote.Name, text(ex.what()))));
+        }
+        RemoteMax = (std::max)(RemoteMax, remote.Level);
+        Loaded.push_back(std::move(library));
+    }
+
+    void DocumentWorkspace::relevelLocalLibraries(QList<WorkspaceDiagnostic> &diagnostics) {
+        bool moved = false;
+        for (const auto &library : Loaded)
+            moved = moved || (!library.Remote && effectiveLevel(library.File) != library.Level);
+        if (!moved)
+            return;
+        // The local libraries move above the remote ones, together with the document (they refer to each other).
+        for (auto &library : Loaded) {
+            if (library.Remote)
+                continue;
+            try {
+                reloadLibrary(library);
+            } catch (const std::exception &ex) {
+                diagnostics.append(diagnostic(2, QStringLiteral("Library '%1' could not be read again: %2").arg(library.File, text(ex.what()))));
+            }
+        }
+        parseDocumentBlocks();
+    }
+
+    void DocumentWorkspace::addRemoteNote(const QString &note) {
+        if (!RemoteNotes.contains(note))
+            RemoteNotes.append(note);
+    }
+
+    const RemoteClosure &DocumentWorkspace::remoteClosure() {
+        const auto generation = Remote->generation();
+        if (!ClosureCache || ClosureGeneration != generation) {
+            ClosureCache = Remote->closure(RemoteProject, RemoteCommit);
+            ClosureGeneration = generation;
+        }
+        return *ClosureCache;
+    }
+
     void DocumentWorkspace::resolveWithLibraries(QList<WorkspaceDiagnostic> &diagnostics) {
         try {
             Space->resolve();
@@ -336,24 +517,48 @@ namespace StructuraSystems::Client {
             diagnostics.append(diagnostic(3, QStringLiteral("The names could not be resolved: %1").arg(text(ex.what()))));
             return;
         }
-        if (Libraries == nullptr)
+        const bool hasRemote = Remote != nullptr && !RemoteProject.isEmpty() && !RemoteCommit.isEmpty();
+        if (Libraries == nullptr && !hasRemote)
             return;
 
-        // Nothing of the opened folder is touched as long as the standard library resolves everything.
-        std::set<QString> tried;
+        // Nothing of the opened folder (and no remote usage) is touched as long as the standard library resolves everything.
+        // Order: the local libraries first, then the usages of the project on the server for what is still missing.
+        std::set<QString> tried;         // roots looked up for the document and the local libraries
+        std::set<QString> triedRemote;   // roots looked up for the remote libraries
         while (!Space->unresolvedReferences().empty()) {
+            // A remote library sees only what is below it: what it imports must come from the usages of the project, never from
+            // the local folder (a local package of the same name would sit above the remote library and stay invisible to it).
+            std::set<size_t> remoteSources;
+            for (const auto &library : Loaded)
+                if (library.Remote)
+                    remoteSources.insert(library.Sources.begin(), library.Sources.end());
+
             QStringList roots;
+            QStringList remoteRoots;
             for (const auto &reference : Space->unresolvedReferences()) {
                 const auto root = firstSegment(reference.name);
-                if (!root.isEmpty() && tried.insert(root).second)
+                if (root.isEmpty())
+                    continue;
+                if (remoteSources.count(reference.source)) {
+                    if (triedRemote.insert(root).second)
+                        remoteRoots.append(root);
+                } else if (tried.insert(root).second) {
                     roots.append(root);
+                }
             }
 
             bool loadedAny = false;
+            QStringList wantedRemote = remoteRoots;
             for (const auto &root : std::as_const(roots)) {
-                const auto found = lookup(root);
-                if (found.Chosen.isEmpty() || WorkspaceConfig::samePath(found.Chosen, OwnFile))
+                if (Libraries == nullptr) {
+                    wantedRemote.append(root);
                     continue;
+                }
+                const auto found = lookup(root);
+                if (found.Chosen.isEmpty() || WorkspaceConfig::samePath(found.Chosen, OwnFile)) {
+                    wantedRemote.append(root);
+                    continue;
+                }
                 if (found.Ambiguous && !AmbiguousRoots.contains(root))
                     AmbiguousRoots.append(root);
                 if (LoadedFiles.count(found.Chosen)) {
@@ -365,6 +570,43 @@ namespace StructuraSystems::Client {
                 loadLibraryFile(found.Chosen, root, diagnostics);
                 loadedAny = true;
             }
+
+            if (hasRemote && !wantedRemote.isEmpty()) {
+                bool remoteLoaded = false;
+                const auto &closure = remoteClosure();
+                for (const auto &root : std::as_const(wantedRemote)) {
+                    QStringList providers;
+                    const RemoteLibrary *chosen = nullptr;
+                    for (const auto &library : closure.Libraries) {
+                        if (!library.Content.Packages.contains(root))
+                            continue;
+                        providers.append(library.Name);
+                        if (chosen == nullptr)
+                            chosen = &library;
+                    }
+                    if (chosen == nullptr)
+                        continue;
+                    if (providers.size() > 1)
+                        addRemoteNote(QStringLiteral("Package '%1' is defined by several project usages (%2). '%3' is used.")
+                                              .arg(root, providers.join(QStringLiteral(", ")), chosen->Name));
+                    if (Libraries != nullptr && remoteRoots.contains(root)) {
+                        const auto local = lookup(root);
+                        if (!local.Chosen.isEmpty())
+                            addRemoteNote(QStringLiteral("Package '%1' exists in the project '%2' and in the local file '%3'. A project usage cannot "
+                                                         "see local files, so '%2' is used for it.")
+                                                  .arg(root, chosen->Name, local.Chosen));
+                    }
+                    if (LoadedFiles.count(chosen->Name))
+                        continue;
+                    loadRemoteLibrary(*chosen, diagnostics);
+                    remoteLoaded = true;
+                }
+                if (remoteLoaded) {
+                    relevelLocalLibraries(diagnostics);
+                    loadedAny = true;
+                }
+            }
+
             if (!loadedAny)
                 break;
             try {
@@ -374,9 +616,23 @@ namespace StructuraSystems::Client {
                 break;
             }
         }
+
+        // Names are still missing: if the usages of the project could help, say what is not available.
+        if (hasRemote && !Space->unresolvedReferences().empty()) {
+            const auto &closure = remoteClosure();
+            RemoteProblems = closure.Problems;
+            NeedsRemoteDownload = closure.Missing;
+        }
     }
 
     QString DocumentWorkspace::hintFor(const std::string &written, bool isImport) {
+        QString hint = hintForLocal(written, isImport);
+        if (!RemoteProblems.isEmpty())
+            hint += QStringLiteral("; project usages: %1").arg(RemoteProblems.join(QStringLiteral(" ")));
+        return hint;
+    }
+
+    QString DocumentWorkspace::hintForLocal(const std::string &written, bool isImport) {
         const auto name = text(written);
         const auto root = firstSegment(written);
         if (Libraries == nullptr)
@@ -409,12 +665,96 @@ namespace StructuraSystems::Client {
         return QStringLiteral("package '%1' is defined in '%2' but the file could not be used").arg(root, found.Chosen);
     }
 
+    void DocumentWorkspace::parseDocumentBlocks() {
+        const auto blockCount = (std::max)(DocumentSlots.size(), CurrentSources.size());
+        BlockFailures.assign(CurrentSources.size(), QString());
+        // A block that the parser cannot handle is reported on its row; replaceSource leaves the workspace unchanged then,
+        // and the stored text stays the old one, so that the block is tried again with the next change.
+        for (size_t i = 0; i < blockCount; ++i) {
+            const bool present = i < CurrentSources.size();
+            const std::string body = present ? CurrentSources[i].Text : std::string();
+            const bool kerml = present && CurrentSources[i].KerML;
+            const auto language = kerml ? SourceLanguage::KerML : SourceLanguage::SysML;
+            try {
+                if (i < DocumentSlots.size()) {
+                    Space->replaceSource(DocumentSlots[i], body, language);
+                    DocumentTexts[i] = body;
+                    DocumentKerML[i] = kerml;
+                    DocumentFailed[i] = false;
+                } else {
+                    const auto name = CurrentName.toStdString() + "#" + std::to_string(CurrentSources[i].Row);
+                    DocumentSlots.push_back(Space->addText(body, name, language, LibraryWorkspace::DocumentLevel));
+                    DocumentTexts.push_back(body);
+                    DocumentKerML.push_back(kerml);
+                    DocumentFailed.push_back(false);
+                }
+            } catch (const std::exception &ex) {
+                if (present)
+                    BlockFailures[i] = text(ex.what()).isEmpty() ? QStringLiteral("The text could not be parsed.") : text(ex.what());
+                // The stale model of the old text must not stay: the block is empty until it parses, and is tried again.
+                if (i < DocumentSlots.size()) {
+                    Space->replaceSource(DocumentSlots[i], std::string(), SourceLanguage::Auto);
+                    DocumentTexts[i].clear();
+                    DocumentKerML[i] = false;
+                    DocumentFailed[i] = true;
+                } else {
+                    // Keep the slots aligned with the blocks.
+                    DocumentSlots.push_back(Space->addText(std::string(), CurrentName.toStdString() + "#" + std::to_string(CurrentSources[i].Row),
+                                                           language, LibraryWorkspace::DocumentLevel));
+                    DocumentTexts.push_back(std::string());
+                    DocumentKerML.push_back(false);
+                    DocumentFailed.push_back(true);
+                }
+            }
+        }
+        ForceReparse = false;
+    }
+
+    std::shared_ptr<const NameIndex> DocumentWorkspace::buildNameIndex() {
+        std::lock_guard lock(Mutex);
+        if (Space == nullptr)
+            return std::make_shared<const NameIndex>();
+        try {
+            const std::set<size_t> documentSlots(DocumentSlots.begin(), DocumentSlots.end());
+            if (!LibraryNamesValid || LibraryNamesEpoch != ModelEpoch) {
+                QList<NameEntry> libraryNames;
+                for (size_t source = 0; source < Space->sourceCount(); ++source) {
+                    if (documentSlots.count(source))
+                        continue;
+                    const auto root = Space->rootNamespace(source);
+                    if (root == nullptr)
+                        continue;
+                    std::unordered_set<const KerML::Entities::Element *> visited;
+                    collectNames(*root, QString(), 0, false, visited, libraryNames);
+                }
+                LibraryNames = std::move(libraryNames);
+                LibraryNamesEpoch = ModelEpoch;
+                LibraryNamesValid = true;
+            }
+
+            QList<NameEntry> entries = LibraryNames;
+            for (const auto slot : DocumentSlots) {
+                const auto root = Space->rootNamespace(slot);
+                if (root == nullptr)
+                    continue;
+                std::unordered_set<const KerML::Entities::Element *> visited;
+                collectNames(*root, QString(), 0, true, visited, entries);
+            }
+            return std::make_shared<const NameIndex>(std::move(entries));
+        } catch (...) {
+            // Without names the completion only offers keywords.
+            return std::make_shared<const NameIndex>();
+        }
+    }
+
     WorkspaceResult DocumentWorkspace::update(const std::vector<DocumentSource> &sources, const QString &documentName,
                                               const RowVisitor &visitor) {
         std::lock_guard lock(Mutex);
         LookupCache.clear();
         LevelCache.clear();
         Rescanned = false;
+        RemoteProblems.clear();
+        NeedsRemoteDownload = false;
 
         WorkspaceResult result;
         try {
@@ -429,6 +769,8 @@ namespace StructuraSystems::Client {
             }
 
             // The blocks of a document refer to each other, so they are parsed again together if one of them changed.
+            CurrentSources = sources;
+            CurrentName = documentName;
             const auto blockCount = (std::max)(DocumentSlots.size(), sources.size());
             bool changed = ForceReparse;
             for (size_t i = 0; i < blockCount && !changed; ++i) {
@@ -441,52 +783,13 @@ namespace StructuraSystems::Client {
                     DocumentKerML[i] != (present && sources[i].KerML))
                     changed = true;
             }
-
-            // A block that the parser cannot handle is reported on its row; replaceSource leaves the workspace unchanged then,
-            // and the stored text stays the old one, so that the block is tried again with the next change.
-            std::vector<QString> failures(sources.size());
-            if (changed) {
-                for (size_t i = 0; i < blockCount; ++i) {
-                    const bool present = i < sources.size();
-                    const std::string body = present ? sources[i].Text : std::string();
-                    const bool kerml = present && sources[i].KerML;
-                    const auto language = kerml ? SourceLanguage::KerML : SourceLanguage::SysML;
-                    try {
-                        if (i < DocumentSlots.size()) {
-                            Space->replaceSource(DocumentSlots[i], body, language);
-                            DocumentTexts[i] = body;
-                            DocumentKerML[i] = kerml;
-                            DocumentFailed[i] = false;
-                        } else {
-                            const auto name = documentName.toStdString() + "#" + std::to_string(sources[i].Row);
-                            DocumentSlots.push_back(Space->addText(body, name, language, LibraryWorkspace::DocumentLevel));
-                            DocumentTexts.push_back(body);
-                            DocumentKerML.push_back(kerml);
-                            DocumentFailed.push_back(false);
-                        }
-                    } catch (const std::exception &ex) {
-                        if (present)
-                            failures[i] = text(ex.what()).isEmpty() ? QStringLiteral("The text could not be parsed.") : text(ex.what());
-                        // The stale model of the old text must not stay: the block is empty until it parses, and is tried again.
-                        if (i < DocumentSlots.size()) {
-                            Space->replaceSource(DocumentSlots[i], std::string(), SourceLanguage::Auto);
-                            DocumentTexts[i].clear();
-                            DocumentKerML[i] = false;
-                            DocumentFailed[i] = true;
-                        } else {
-                            // Keep the slots aligned with the blocks.
-                            DocumentSlots.push_back(Space->addText(std::string(), documentName.toStdString() + "#" + std::to_string(sources[i].Row),
-                                                                   language, LibraryWorkspace::DocumentLevel));
-                            DocumentTexts.push_back(std::string());
-                            DocumentKerML.push_back(false);
-                            DocumentFailed.push_back(true);
-                        }
-                    }
-                }
-                ForceReparse = false;
-            }
+            if (changed)
+                parseDocumentBlocks();
+            else
+                BlockFailures.assign(sources.size(), QString());
 
             resolveWithLibraries(result.Diagnostics);
+            result.NeedsRemoteDownload = NeedsRemoteDownload;
 
             if (Libraries != nullptr) {
                 QStringList stillAmbiguous;
@@ -504,15 +807,19 @@ namespace StructuraSystems::Client {
                 }
                 AmbiguousRoots = stillAmbiguous;
             }
+            for (const auto &problem : std::as_const(RemoteProblems))
+                result.Diagnostics.append(diagnostic(2, problem));
+            for (const auto &note : std::as_const(RemoteNotes))
+                result.Diagnostics.append(diagnostic(2, note));
 
             for (size_t i = 0; i < sources.size(); ++i) {
                 const auto slot = DocumentSlots[i];
                 WorkspaceRow row;
                 row.Row = sources[i].Row;
 
-                if (!failures[i].isEmpty()) {
+                if (i < BlockFailures.size() && !BlockFailures[i].isEmpty()) {
                     row.HasSyntaxErrors = true;
-                    result.Diagnostics.append(diagnostic(3, failures[i], row.Row));
+                    result.Diagnostics.append(diagnostic(3, BlockFailures[i], row.Row));
                     if (visitor)
                         visitor(row);
                     result.Rows.push_back(std::move(row));
@@ -560,8 +867,10 @@ namespace StructuraSystems::Client {
 
             // Problems of the libraries are not the document's, but they explain missing names.
             for (const auto &library : Loaded) {
-                for (const auto &warning : Libraries->levelWarnings(library.File))
-                    result.Diagnostics.append(diagnostic(2, warning));
+                if (!library.Remote && Libraries != nullptr) {
+                    for (const auto &warning : Libraries->levelWarnings(library.File))
+                        result.Diagnostics.append(diagnostic(2, warning));
+                }
                 int syntaxErrors = 0;
                 QString first;
                 int unresolved = 0;
@@ -574,12 +883,13 @@ namespace StructuraSystems::Client {
                         if (reference.source == source)
                             ++unresolved;
                 }
+                const auto kind = library.Remote ? QStringLiteral("Remote library") : QStringLiteral("Library");
                 if (syntaxErrors > 0)
-                    result.Diagnostics.append(diagnostic(2, QStringLiteral("Library '%1' has %2 syntax error(s), its names may be missing (%3)")
-                                                                    .arg(library.File).arg(syntaxErrors).arg(first)));
+                    result.Diagnostics.append(diagnostic(2, QStringLiteral("%1 '%2' has %3 syntax error(s), its names may be missing (%4)")
+                                                                    .arg(kind, library.File).arg(syntaxErrors).arg(first)));
                 if (unresolved > 0)
-                    result.Diagnostics.append(diagnostic(2, QStringLiteral("Library '%1' has %2 reference(s) that cannot be resolved")
-                                                                    .arg(library.File).arg(unresolved)));
+                    result.Diagnostics.append(diagnostic(2, QStringLiteral("%1 '%2' has %3 reference(s) that cannot be resolved")
+                                                                    .arg(kind, library.File).arg(unresolved)));
             }
             return result;
         } catch (...) {
@@ -587,7 +897,7 @@ namespace StructuraSystems::Client {
             try {
                 disposeAll();
             } catch (...) {
-                Space.reset();
+                Space.release();
             }
             throw;
         }

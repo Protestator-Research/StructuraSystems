@@ -69,6 +69,56 @@ namespace StructuraSystems::Client {
             emit countChanged();
     }
 
+    // ------------------------------------------------------------------ RemoteUsageModel
+
+    RemoteUsageModel::RemoteUsageModel(QObject *parent) : QAbstractListModel(parent) {
+    }
+
+    int RemoteUsageModel::rowCount(const QModelIndex &parent) const {
+        return parent.isValid() ? 0 : int(Entries.size());
+    }
+
+    QVariant RemoteUsageModel::data(const QModelIndex &index, int role) const {
+        if (!index.isValid() || index.row() < 0 || index.row() >= Entries.size())
+            return {};
+        const auto &entry = Entries[index.row()];
+        switch (role) {
+            case Qt::DisplayRole:
+            case ProjectNameRole: return entry.ProjectName.isEmpty() ? entry.ProjectId : entry.ProjectName;
+            case UsageIdRole: return entry.UsageId;
+            case ProjectIdRole: return entry.ProjectId;
+            case CommitIdRole: return entry.CommitId.left(8);
+            case LevelRole: return entry.Level;
+            case StatusRole: return entry.Status;
+            default: return {};
+        }
+    }
+
+    QHash<int, QByteArray> RemoteUsageModel::roleNames() const {
+        return {
+            {Qt::DisplayRole, "display"},
+            {UsageIdRole, "usageId"},
+            {ProjectIdRole, "projectId"},
+            {ProjectNameRole, "projectName"},
+            {CommitIdRole, "commitId"},
+            {LevelRole, "level"},
+            {StatusRole, "status"}
+        };
+    }
+
+    int RemoteUsageModel::count() const { return int(Entries.size()); }
+
+    const QList<RemoteUsageEntry> &RemoteUsageModel::entries() const { return Entries; }
+
+    void RemoteUsageModel::setEntries(QList<RemoteUsageEntry> entries) {
+        const auto before = Entries.size();
+        beginResetModel();
+        Entries = std::move(entries);
+        endResetModel();
+        if (before != Entries.size())
+            emit countChanged();
+    }
+
     // ------------------------------------------------------------------ LibraryController
 
     LibraryController::LibraryController(QObject *parent) :

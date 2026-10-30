@@ -10,6 +10,13 @@ Pane {
 
     signal newProjectRequested()
     signal settingsRequested()
+    /** The user wants to add the online project of a row (row in AppController.onlineProjects) as a usage to the current document. */
+    signal addUsageRequested(string projectId, string name)
+    /** The user wants to add a usage to the current document and picks the project in the dialog. */
+    signal addUsagePickerRequested()
+    signal manageUsagesRequested()
+    /** The user wants to remove a usage of the current document (asks first). */
+    signal removeUsageRequested(string usageId, string usedProjectName)
 
     padding: 0
     Material.background: Theme.panel
@@ -133,6 +140,7 @@ Pane {
                 isOpenFunction: row => AppController.isOnlineProjectOpen(row)
                 onProjectActivated: row => AppController.openOnlineProject(row)
                 onDeleteRequested: (row, name) => deleteDialog.openFor(row, name)
+                onContextMenuRequested: (row, projectId, name) => projectMenu.openFor(row, projectId, name)
             }
 
             Label {
@@ -175,6 +183,109 @@ Pane {
                     onClicked: pane.newProjectRequested()
                 }
             }
+        }
+    }
+
+    // Context menu of an online project: open it, and the project usages of the current document. The project is kept by its id.
+    Menu {
+        id: projectMenu
+
+        readonly property var states: AppController.UsageState
+
+        property int row: -1
+        property string projectId
+        property string projectName
+        property int usageState: AppController.UsageState.NoDocument
+        property string usageId
+        readonly property var document: AppController.currentDocument
+        // The answer of the server is awaited: the entries that depend on it wait too.
+        readonly property bool idle: !AppController.busy && !AppController.remoteUsagesLoading
+        readonly property string reason: {
+            switch (usageState) {
+            case states.NoDocument: return qsTr("Open an online project first: the usage is added to it.")
+            case states.NotOnline: return qsTr("The open document is a local project. Upload it first; usages belong to online projects.")
+            case states.Detached: return qsTr("The document shows an older commit. Return to the branch head first.")
+            case states.Offline: return qsTr("Connect to the server first.")
+            case states.Invalid: return qsTr("The project is not in the list (any more). Refresh the list of projects.")
+            default: return ""
+            }
+        }
+
+        function openFor(sourceRow, id, name) {
+            row = sourceRow
+            projectId = id
+            projectName = name
+            recompute()
+            AppController.refreshRemoteUsages()   // the answer arrives later and updates the entries (modelReset below)
+            popup()
+        }
+
+        function recompute() {
+            usageState = AppController.usageState(projectId)
+            usageId = AppController.usageIdOf(projectId)
+        }
+
+        Connections {
+            target: AppController.remoteUsages
+
+            function onModelReset() {
+                if (projectMenu.opened)
+                    projectMenu.recompute()
+            }
+        }
+
+        MenuItem {
+            text: qsTr("Open")
+            enabled: projectMenu.row >= 0
+            onTriggered: AppController.openOnlineProject(projectMenu.row)
+        }
+        MenuSeparator { }
+
+        // Another project than the one of the document: add it as a usage.
+        MenuItem {
+            visible: projectMenu.usageState !== projectMenu.states.Self && projectMenu.usageState !== projectMenu.states.Used
+            height: visible ? implicitHeight : 0
+            enabled: projectMenu.usageState === projectMenu.states.Ready && projectMenu.idle
+            text: qsTr("Add as usage to \"%1\"...").arg(projectMenu.document ? projectMenu.document.title : "")
+            onTriggered: pane.addUsageRequested(projectMenu.projectId, projectMenu.projectName)
+        }
+        MenuItem {
+            // Why the entry above is not available.
+            visible: projectMenu.reason.length > 0
+            height: visible ? implicitHeight : 0
+            enabled: false
+            text: projectMenu.reason
+        }
+
+        // Already used: offer the update.
+        MenuItem {
+            visible: projectMenu.usageState === projectMenu.states.Used
+            height: visible ? implicitHeight : 0
+            enabled: projectMenu.idle
+            text: qsTr("Update usage to the latest commit")
+            onTriggered: AppController.updateRemoteUsage(projectMenu.usageId)
+        }
+        MenuItem {
+            visible: projectMenu.usageState === projectMenu.states.Used
+            height: visible ? implicitHeight : 0
+            enabled: projectMenu.idle
+            text: qsTr("Remove usage...")
+            onTriggered: pane.removeUsageRequested(projectMenu.usageId, projectMenu.projectName)
+        }
+
+        // The project of the document itself.
+        MenuItem {
+            visible: projectMenu.usageState === projectMenu.states.Self
+            height: visible ? implicitHeight : 0
+            enabled: AppController.connected && projectMenu.idle
+            text: qsTr("Add project usage...")
+            onTriggered: pane.addUsagePickerRequested()
+        }
+        MenuItem {
+            visible: projectMenu.usageState === projectMenu.states.Self || projectMenu.usageState === projectMenu.states.Used
+            height: visible ? implicitHeight : 0
+            text: qsTr("Manage project usages...")
+            onTriggered: pane.manageUsagesRequested()
         }
     }
 

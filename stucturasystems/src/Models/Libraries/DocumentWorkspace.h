@@ -10,6 +10,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <set>
 #include <string>
 #include <vector>
@@ -18,7 +19,9 @@
 #include <QString>
 #include <QStringList>
 
+#include "../../ViewModels/CompletionEngine.h"
 #include "LibraryWorkspace.h"
+#include "RemoteLibraries.h"
 
 namespace KerML::Entities {
     class Element;
@@ -57,6 +60,11 @@ namespace StructuraSystems::Client {
     struct WorkspaceResult {
         std::vector<WorkspaceRow> Rows;
         QList<WorkspaceDiagnostic> Diagnostics;
+        /**
+         * Names stay unresolved, and the project usages of the document lead to libraries that are not in the cache yet: downloading
+         * them (RemoteLibraries::ensureClosure) may resolve more names.
+         */
+        bool NeedsRemoteDownload = false;
     };
 
     /**
@@ -107,6 +115,15 @@ namespace StructuraSystems::Client {
         void setLibraries(std::shared_ptr<LibraryWorkspace> libraries, QString ownFile);
 
         /**
+         * Sets the project usages of the document: the libraries that the usages of the commit of an online project lead to
+         * (SysML v2 API: ProjectUsage), read from the cache of @p remote, which this class never fills (no network access here).
+         * They are used for the names that the standard library and the local libraries do not resolve. Takes effect at the start
+         * of the next update(); setting the same values again changes nothing.
+         * @param remote null for none.
+         */
+        void setRemote(std::shared_ptr<RemoteLibraries> remote, QString projectId, QString commitId);
+
+        /**
          * Loads and resolves the standard library now (it takes seconds), so that the first update() is fast. Meant for a worker
          * thread. Stops early (and leaves nothing behind) if beginShutdown() is called meanwhile.
          */
@@ -132,11 +149,21 @@ namespace StructuraSystems::Client {
         /** Library files that are currently loaded, relative to the opened folder. */
         [[nodiscard]] QStringList loadedLibraryFiles() const;
 
+        /**
+         * Snapshot of the names of the model for the code completion: the standard library, the loaded libraries and the blocks
+         * of the document, as they are now. Plain QStrings, so the result can be used on any thread. Takes the lock of the
+         * workspace, so it waits for a running update(); call it after update() on the worker thread. The part of the libraries
+         * is built once and kept until the libraries change; the part of the document is built every time.
+         * @return an empty index if the workspace has no model (not parsed yet, or disposed).
+         */
+        [[nodiscard]] std::shared_ptr<const NameIndex> buildNameIndex();
+
     private:
         struct LoadedLibrary {
             QString File;
             qint64 Stamp = -1;
             int Level = 1;
+            bool Remote = false;             ///< A used project of the server; File is its name for messages, the level comes from the usages
             QStringList Triggers;            ///< Package names that made the file necessary
             std::vector<size_t> Sources;
         };
@@ -150,10 +177,19 @@ namespace StructuraSystems::Client {
         void refreshLibraries(QList<WorkspaceDiagnostic> &diagnostics);
         void reloadLibrary(LoadedLibrary &library);
         void loadLibraryFile(const QString &file, const QString &trigger, QList<WorkspaceDiagnostic> &diagnostics);
+        void loadRemoteLibrary(const RemoteLibrary &remote, QList<WorkspaceDiagnostic> &diagnostics);
+        /** After a remote library raised RemoteMax: the local libraries (and the document) move above the remote ones. */
+        void relevelLocalLibraries(QList<WorkspaceDiagnostic> &diagnostics);
+        void parseDocumentBlocks();
         void resolveWithLibraries(QList<WorkspaceDiagnostic> &diagnostics);
         const PackageLookup &lookup(const QString &package);
         LibraryLevelInfo levelOf(const QString &file);
+        /** The level of a local library in this workspace: its level in the folder, above all remote libraries. */
+        int effectiveLevel(const QString &file);
+        const RemoteClosure &remoteClosure();
+        void addRemoteNote(const QString &note);
         [[nodiscard]] QString hintFor(const std::string &written, bool isImport);
+        [[nodiscard]] QString hintForLocal(const std::string &written, bool isImport);
 
         mutable std::mutex Mutex;
         std::mutex PendingMutex;
@@ -161,11 +197,33 @@ namespace StructuraSystems::Client {
         std::shared_ptr<LibraryWorkspace> PendingLibraries;
         QString PendingOwnFile;
 
+        bool HasPendingRemote = false;
+        std::shared_ptr<RemoteLibraries> PendingRemote;
+        QString PendingRemoteProject;
+        QString PendingRemoteCommit;
+
         std::shared_ptr<LibraryWorkspace> Libraries;
         QString OwnFile;
+        std::shared_ptr<RemoteLibraries> Remote;
+        QString RemoteProject;                       ///< The project and commit of the document on the server
+        QString RemoteCommit;
+        int RemoteMax = 0;                           ///< Highest level of the loaded remote libraries
+        std::optional<RemoteClosure> ClosureCache;
+        quint64 ClosureGeneration = 0;
+        QStringList RemoteNotes;                     ///< Package conflicts between remote libraries (and local files), kept while the libraries are loaded
+        QStringList RemoteProblems;                  ///< What is missing of the usages, set by the last resolve
+        bool NeedsRemoteDownload = false;
+        std::vector<DocumentSource> CurrentSources;  ///< The blocks of the running update()
+        QString CurrentName;
+        std::vector<QString> BlockFailures;
         std::shared_ptr<const std::vector<StandardSource>> StandardLibrary;
         std::unique_ptr<SysMLv2::Files::Workspace> Space;
         quint64 LibraryGeneration = 0;
+        // Names of everything but the document blocks, see buildNameIndex(). ModelEpoch counts the changes of those sources.
+        quint64 ModelEpoch = 0;
+        quint64 LibraryNamesEpoch = 0;
+        bool LibraryNamesValid = false;
+        QList<NameEntry> LibraryNames;
         bool ForceReparse = false;
         std::vector<size_t> DocumentSlots;           ///< Source index per block of the document
         std::vector<std::string> DocumentTexts;

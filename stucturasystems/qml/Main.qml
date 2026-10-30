@@ -87,6 +87,11 @@ ApplicationWindow {
         AppController.settings.save()
     }
 
+    function confirmRemoveUsage(usageId, usedProjectName) {
+        removeUsageDialog.usageDocument = root.doc
+        removeUsageDialog.openForUsage(usageId, usedProjectName, root.doc ? root.doc.title : "")
+    }
+
     function selectDestination(index) {
         if (destination === index && panelOpen) {
             panelOpen = false
@@ -273,6 +278,10 @@ ApplicationWindow {
                 OnlinePane {
                     onNewProjectRequested: root.newProject(true)
                     onSettingsRequested: settingsDialog.open()
+                    onAddUsageRequested: (projectId, name) => addUsageDialog.openFor(projectId, name)
+                    onAddUsagePickerRequested: addUsageDialog.openPicker()
+                    onManageUsagesRequested: settingsDialog.open()
+                    onRemoveUsageRequested: (usageId, name) => root.confirmRemoveUsage(usageId, name)
                 }
                 DigitalTwinPane {
                     onCreateRequested: wizard.openWizard()
@@ -340,6 +349,25 @@ ApplicationWindow {
                                 width: Math.min(Math.max(implicitWidth, 120), 240)
                                 padding: 6
                                 leftPadding: 12
+
+                                // The menu acts on the document of the tab, so the tab becomes the current one.
+                                function openMenu() {
+                                    AppController.currentIndex = tab.index
+                                    if (root.isOnlineDoc)
+                                        tabMenu.popup()
+                                }
+
+                                TapHandler {
+                                    acceptedButtons: Qt.RightButton
+                                    onTapped: tab.openMenu()
+                                }
+                                // The Menu key and Shift+F10 open the menu of the focused tab.
+                                Keys.onPressed: event => {
+                                    if (event.key === Qt.Key_Menu || (event.key === Qt.Key_F10 && (event.modifiers & Qt.ShiftModifier))) {
+                                        tab.openMenu()
+                                        event.accepted = true
+                                    }
+                                }
 
                                 contentItem: RowLayout {
                                     spacing: 6
@@ -574,7 +602,45 @@ ApplicationWindow {
         onAccepted: AppController.openFiles(selectedFiles)
     }
 
-    SettingsDialog { id: settingsDialog }
+    SettingsDialog {
+        id: settingsDialog
+        onAddUsageRequested: addUsageDialog.openPicker()
+        onRemoveUsageRequested: (usageId, name) => root.confirmRemoveUsage(usageId, name)
+    }
+    // The one dialog for adding a project usage, and the one that asks before one is removed (used by the project list, the tab
+    // menu and the settings).
+    AddUsageDialog { id: addUsageDialog }
+    ConfirmDeleteDialog {
+        id: removeUsageDialog
+        // The document the confirmation was asked for; the usage belongs to it, not to whatever tab is shown now.
+        property var usageDocument: null
+        onConfirmed: (row, usageId) => {
+            if (usageDocument !== root.doc) {
+                AppController.notify(2, qsTr("The project usage was not removed."),
+                                     qsTr("The current document changed while the confirmation was open."))
+                return
+            }
+            AppController.removeRemoteUsage(usageId)
+        }
+    }
+
+    // Context menu of the tab of an online document: its project usages.
+    Menu {
+        id: tabMenu
+
+        readonly property bool usable: root.isOnlineDoc && AppController.connected
+
+        MenuItem {
+            enabled: tabMenu.usable && !root.busy
+            text: qsTr("Add project usage...")
+            onTriggered: addUsageDialog.openPicker()
+        }
+        MenuItem {
+            enabled: root.isOnlineDoc
+            text: qsTr("Manage project usages...")
+            onTriggered: settingsDialog.open()
+        }
+    }
     NewProjectDialog { id: newProjectDialog }
     CommitDialog { id: commitDialog }
     NewBranchDialog { id: newBranchDialog }

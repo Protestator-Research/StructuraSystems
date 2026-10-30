@@ -5,7 +5,9 @@
 #include "StructuraSystemsParser.h"
 #include "Markdown/MarkdownParser.h"
 #include <QString>
+#ifndef WIN32
 #include <md4c.h>
+#endif
 #include <stdexcept>
 #include <QFile>
 #include <QTextStream>
