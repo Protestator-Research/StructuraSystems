@@ -42,6 +42,7 @@
 #include "DigitalTwinProjectModel.h"
 #include "DocumentModel.h"
 #include "LibraryController.h"
+#include "LibraryWarmUpStatus.h"
 #include "LocalProjectTreeModel.h"
 #include "OpenDocumentsModel.h"
 #include "ProblemListModel.h"
@@ -244,6 +245,7 @@ namespace StructuraSystems::Client {
         Branches(new BranchListModel(this)),
         CommitHistory(new CommitHistoryModel(this)),
         StatusText(tr("Ready")) {
+        WarmUpStatus = new LibraryWarmUpStatus(this);
         Settings->initWithDefaultsIfEmpty();
         // Warm-ups and recycling of the document workspaces run one after another, never in parallel.
         WorkspacePool.setMaxThreadCount(1);
@@ -279,6 +281,9 @@ namespace StructuraSystems::Client {
 
         // Deferred, so that the QML side is already connected to notify() when the folder is loaded.
         QTimer::singleShot(0, this, &AppController::openWorkingDirectoryIfPresent);
+        // The standard library is loaded in the background from the start, so that the first document does not wait for it; the
+        // status bar shows how far it is. After the folder was opened: that does not wait for the standard library.
+        QTimer::singleShot(0, this, [this]() { prepareSpareWorkspace(true); });
     }
 
     namespace {
@@ -306,7 +311,9 @@ namespace StructuraSystems::Client {
         RemoteCache->cancel();
         RemotePool.clear();
         RemotePool.waitForDone();
-        // Do not wait for a warm-up and do not take the workspaces apart on the way out: the process ends anyway.
+        // Do not wait for a warm-up and do not take the workspaces apart on the way out: the process ends anyway. The warm-up stops
+        // quickly; after waitForDone() no thread calls into WarmUpStatus any more (it is deleted with this object), and what it
+        // queued is dropped with it.
         DocumentWorkspace::beginShutdown();
         WorkspacePool.clear();
         WorkspacePool.waitForDone();
@@ -630,25 +637,50 @@ namespace StructuraSystems::Client {
 
     std::shared_ptr<DocumentWorkspace> AppController::takeWorkspace() {
         std::shared_ptr<DocumentWorkspace> workspace;
+        std::shared_ptr<std::atomic<bool>> reports;
         {
             std::lock_guard lock(SpareMutex);
             workspace = std::move(SpareWorkspace);
             SpareWorkspace.reset();
+            reports = std::move(SpareReports);
+            SpareReports.reset();
         }
         if (workspace == nullptr)
             workspace = std::make_shared<DocumentWorkspace>();
+        // A document waits for the warm-up of this workspace (the parser run starts with it): show how far it is, if it was silent so far.
+        if (reports != nullptr && !workspace->isWarm())
+            reports->store(true);
         return workspace;
     }
 
-    void AppController::prepareSpareWorkspace() {
+    void AppController::prepareSpareWorkspace(bool reportProgress) {
         std::lock_guard lock(SpareMutex);
-        if (SpareWorkspace != nullptr)
+        if (SpareWorkspace != nullptr) {
+            // A spare that was made silently (a document was opened first) and is still loading: from now on it reports.
+            if (reportProgress && SpareReports != nullptr && !SpareWorkspace->isWarm())
+                SpareReports->store(true);
             return;
+        }
         // Parsing the standard library takes seconds. The first parser run of the document that gets this workspace waits for it
         // if it is not ready yet.
         SpareWorkspace = std::make_shared<DocumentWorkspace>();
+        SpareReports = std::make_shared<std::atomic<bool>>(reportProgress);
         const auto workspace = SpareWorkspace;
-        WorkspacePool.start([workspace]() { workspace->warmUp(); });
+        const auto reports = SpareReports;
+        // The status object outlives this thread: ~AppController waits for WorkspacePool before it is deleted (a QPointer alone is not
+        // thread safe). It is only used through post() and postFailure(), which queue the call onto the GUI thread.
+        const QPointer<LibraryWarmUpStatus> status(WarmUpStatus);
+        WorkspacePool.start([workspace, reports, status]() {
+            // The steps are handed to the GUI thread one by one (queued, so they arrive in order): the loading reports once per file,
+            // the others once per step. The status object is not deleted while this runs (see ~AppController()).
+            workspace->warmUp([reports, status](const WarmUpStep &step) {
+                if (reports->load() && status != nullptr)
+                    status->post(step);
+            });
+            // Cancelled or failed: the status bar must not stay in the loading state
+            if (!workspace->isWarm() && reports->load() && status != nullptr)
+                status->postFailure();
+        });
     }
 
     void AppController::recycleWorkspace(std::shared_ptr<DocumentWorkspace> workspace) {
@@ -660,8 +692,11 @@ namespace StructuraSystems::Client {
             workspace->recycle();
             {
                 std::lock_guard lock(SpareMutex);
-                if (SpareWorkspace == nullptr)
+                // (a workspace that recycle() had to dispose is not warm: it is dropped, prepareSpareWorkspace() makes a new spare)
+                if (SpareWorkspace == nullptr && workspace->isWarm()) {
                     SpareWorkspace = std::move(workspace);
+                    SpareReports.reset();
+                }
             }
             // Outside the lock: disposing a surplus workspace must not block takeWorkspace() on the GUI thread.
             workspace.reset();
@@ -896,7 +931,9 @@ namespace StructuraSystems::Client {
             document->adoptWorkspace(takeWorkspace());
         const auto workspace = document->workspace();
         QPointer<DocumentModel> guard(document);
-        runAsync<ParseResult>(tr("Parsing %1").arg(title),
+        // A workspace that is still loading the standard library makes the run wait for it (see DocumentWorkspace::warmUp()).
+        const auto description = workspace->isWarm() ? tr("Parsing %1").arg(title) : tr("Parsing %1 (waiting for the standard library)").arg(title);
+        runAsync<ParseResult>(description,
             [inputs, title, workspace]() { return DocumentModel::runParser(inputs, title, workspace); },
             [this, guard, title](ParseResult result) {
                 // The parser may have built the package index of the opened folder.

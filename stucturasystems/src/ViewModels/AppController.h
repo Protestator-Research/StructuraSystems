@@ -5,6 +5,7 @@
 #ifndef STRUCTURASYSTEMS_APPCONTROLLER_H
 #define STRUCTURASYSTEMS_APPCONTROLLER_H
 
+#include <atomic>
 #include <memory>
 #include <mutex>
 #include <vector>
@@ -32,6 +33,7 @@ namespace StructuraSystems::Client {
     class DocumentModel;
     class DocumentWorkspace;
     class LibraryController;
+    class LibraryWarmUpStatus;
     class LocalProjectTreeModel;
     class OpenDocumentsModel;
     class ProblemListModel;
@@ -62,6 +64,7 @@ namespace StructuraSystems::Client {
         Q_MOC_INCLUDE("DigitalTwinProjectModel.h")
         Q_MOC_INCLUDE("DocumentModel.h")
         Q_MOC_INCLUDE("LibraryController.h")
+        Q_MOC_INCLUDE("LibraryWarmUpStatus.h")
         Q_MOC_INCLUDE("LocalProjectTreeModel.h")
         Q_MOC_INCLUDE("OpenDocumentsModel.h")
         Q_MOC_INCLUDE("ProblemListModel.h")
@@ -70,6 +73,8 @@ namespace StructuraSystems::Client {
         Q_PROPERTY(bool connected READ connected NOTIFY connectedChanged)
         Q_PROPERTY(bool busy READ busy NOTIFY busyChanged)
         Q_PROPERTY(QString statusText READ statusText NOTIFY statusTextChanged)
+        /** The warm-up of the standard library (loading, progress 0..1 and text), shown in the status bar. */
+        Q_PROPERTY(StructuraSystems::Client::LibraryWarmUpStatus *libraryWarmUp READ libraryWarmUp CONSTANT)
         Q_PROPERTY(StructuraSystems::Client::ProjectItemModel *localProjects READ localProjects CONSTANT)
         Q_PROPERTY(StructuraSystems::Client::LocalProjectTreeModel *localProjectTree READ localProjectTree CONSTANT)
         Q_PROPERTY(StructuraSystems::Client::ProjectItemModel *onlineProjects READ onlineProjects CONSTANT)
@@ -117,6 +122,7 @@ namespace StructuraSystems::Client {
         [[nodiscard]] bool connected() const;
         [[nodiscard]] bool busy() const;
         [[nodiscard]] QString statusText() const;
+        [[nodiscard]] LibraryWarmUpStatus *libraryWarmUp() const { return WarmUpStatus; }
         [[nodiscard]] ProjectItemModel *localProjects() const;
         [[nodiscard]] LocalProjectTreeModel *localProjectTree() const;
         [[nodiscard]] ProjectItemModel *onlineProjects() const;
@@ -304,9 +310,12 @@ namespace StructuraSystems::Client {
         std::shared_ptr<DocumentWorkspace> takeWorkspace();
         /**
          * Starts loading the standard library into a spare workspace, so that the first parser run of the next document does not
-         * wait for it. At most one spare exists; it is only started when a document is opened.
+         * wait for it. At most one spare exists; it is started when the application starts (with @p reportProgress, so that the status bar
+         * shows the loading) and when a document is opened (silently: the progress is only shown for a warm-up that a document waits for,
+         * see takeWorkspace()).
+         * @param reportProgress show the steps of the warm-up in the status bar (LibraryWarmUpStatus)
          */
-        void prepareSpareWorkspace();
+        void prepareSpareWorkspace(bool reportProgress = false);
         /** Recycles the workspace of a closed document in the background; it becomes the spare one if there is none. */
         void recycleWorkspace(std::shared_ptr<DocumentWorkspace> workspace);
         void updateCurrentDocument(int newIndex);
@@ -328,6 +337,10 @@ namespace StructuraSystems::Client {
         LibraryController *Libraries;
         /** Name resolution state with the standard library already loaded, for the next document that is opened. */
         std::shared_ptr<DocumentWorkspace> SpareWorkspace;   ///< Guarded by SpareMutex
+        /** Whether the warm-up of SpareWorkspace reports to the status bar (read by its thread; set when a document takes a workspace that is not warm). Guarded by SpareMutex. */
+        std::shared_ptr<std::atomic<bool>> SpareReports;
+        /** Shown in the status bar while the standard library loads; a child of this object, which outlives the warm-up threads (see ~AppController). */
+        LibraryWarmUpStatus *WarmUpStatus = nullptr;
         std::mutex SpareMutex;
         /** The libraries of the project usages on the server, with their cache; filled by background downloads. */
         std::shared_ptr<RemoteLibraries> RemoteCache;

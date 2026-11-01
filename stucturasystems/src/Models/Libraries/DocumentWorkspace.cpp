@@ -5,6 +5,7 @@
 #include "DocumentWorkspace.h"
 
 #include <algorithm>
+#include <thread>
 #include <atomic>
 #include <exception>
 #include <stdexcept>
@@ -54,10 +55,20 @@ namespace StructuraSystems::Client {
             return language == QLatin1String("KerML") ? SourceLanguage::KerML : SourceLanguage::SysML;
         }
 
+        /** The flag of beginShutdown(): what loads or resolves stops. Trivially destructible, so threads that outlive main() can still read it. */
         std::atomic<bool> ShuttingDown{false};
+
+        /** The same flag for SysMLv2::Files::Workspace::setCancellation(): a pointer to ShuttingDown that never frees it. */
+        std::shared_ptr<const std::atomic<bool>> shutdownFlag() {
+            return std::shared_ptr<const std::atomic<bool>>(&ShuttingDown, [](const std::atomic<bool> *) {});
+        }
+
+        /// Four threads read the standard library (fewer on a machine with fewer cores): in a release build about three times as fast as one.
+        std::atomic<unsigned> LoadThreads{(std::min)(4u, (std::max)(1u, std::thread::hardware_concurrency()))};
 
         /** Frees the model of a workspace: it refers to itself in cycles, only replacing the sources takes it apart. */
         void disposeSpace(SysMLv2::Files::Workspace &space) {
+            space.setCancellation(nullptr);   // (taking the model apart must not be cancelled)
             for (size_t source = 0; source < space.sourceCount(); ++source)
                 space.replaceSource(source, std::string(), SourceLanguage::Auto);
         }
@@ -68,13 +79,16 @@ namespace StructuraSystems::Client {
             const KerML::Entities::Element *current = &element;
             std::shared_ptr<KerML::Entities::Namespace> owner;
             for (int depth = 0; current != nullptr && depth < 64; ++depth) {
+                // (the root namespace of a source is no part of a name: a KerML text names it "Root Namespace", the XMI and the SysML text do not)
+                owner = current->owningNamespace();
+                if (owner == nullptr)
+                    break;
                 auto name = current->effectiveName();
                 if (!name.has_value())
                     name = current->declaredName();
                 if (!name.has_value() || name->empty())
                     break;
                 segments.prepend(QString::fromStdString(*name));
-                owner = current->owningNamespace();
                 current = owner.get();
             }
             return segments.join(QStringLiteral("::"));
@@ -134,7 +148,8 @@ namespace StructuraSystems::Client {
 
     DocumentWorkspace::DocumentWorkspace(std::shared_ptr<LibraryWorkspace> libraries, QString ownFile,
                                          std::shared_ptr<const std::vector<StandardSource>> standardLibrary) :
-        Libraries(std::move(libraries)), OwnFile(std::move(ownFile)), StandardLibrary(std::move(standardLibrary)) {
+        Libraries(std::move(libraries)), OwnFile(std::move(ownFile)), StandardLibrary(std::move(standardLibrary)),
+        Format(LibraryWorkspace::standardFormat()) {
     }
 
     DocumentWorkspace::~DocumentWorkspace() {
@@ -153,6 +168,18 @@ namespace StructuraSystems::Client {
         ShuttingDown = true;
     }
 
+    void DocumentWorkspace::resetShutdownForTests() {
+        ShuttingDown = false;
+    }
+
+    void DocumentWorkspace::setLoadThreads(unsigned threads) {
+        LoadThreads = threads;
+    }
+
+    unsigned DocumentWorkspace::loadThreads() {
+        return LoadThreads;
+    }
+
     void DocumentWorkspace::setLibraries(std::shared_ptr<LibraryWorkspace> libraries, QString ownFile) {
         std::lock_guard lock(PendingMutex);
         PendingLibraries = std::move(libraries);
@@ -168,17 +195,29 @@ namespace StructuraSystems::Client {
         return files;
     }
 
-    void DocumentWorkspace::ensureSpace() {
+    void DocumentWorkspace::ensureSpace(const WarmUpProgress &progress) {
         if (Space != nullptr)
             return;
         auto space = std::make_unique<SysMLv2::Files::Workspace>();
         try {
-            for (const auto &standard : StandardLibrary != nullptr ? *StandardLibrary : LibraryWorkspace::standardLibrary()) {
-                if (ShuttingDown)
-                    throw std::runtime_error("The application is closing.");
-                space->addText(standard.Text, standard.Name, standard.KerML ? SourceLanguage::KerML : SourceLanguage::SysML,
-                               LibraryWorkspace::StandardLevel);
+            if (ShuttingDown)
+                throw std::runtime_error("The application is closing.");
+            space->setCancellation(shutdownFlag());   // (beginShutdown() stops a load that is running, which keeps nothing)
+            const auto &library = StandardLibrary != nullptr ? *StandardLibrary : LibraryWorkspace::standardLibrary(Format);
+            std::vector<SysMLv2::Files::TextInput> inputs;
+            inputs.reserve(library.size());
+            for (const auto &standard : library) {
+                inputs.push_back({standard.Text, standard.Name,
+                                  standard.Xmi ? SourceLanguage::Xmi : (standard.KerML ? SourceLanguage::KerML : SourceLanguage::SysML),
+                                  LibraryWorkspace::StandardLevel});
             }
+            const int total = static_cast<int>(inputs.size());
+            if (progress)
+                progress({WarmUpStep::Loading, 0, total});
+            space->addTexts(std::move(inputs), LoadThreads,
+                            progress ? std::function<void(size_t, size_t)>([&progress, total](size_t done, size_t) {
+                                progress({WarmUpStep::Loading, static_cast<int>(done), total});
+                            }) : std::function<void(size_t, size_t)>());
         } catch (...) {
             // Nothing half built is kept: the next attempt starts again.
             try {
@@ -199,18 +238,37 @@ namespace StructuraSystems::Client {
         RemoteMax = 0;
     }
 
-    void DocumentWorkspace::warmUp() {
+    void DocumentWorkspace::warmUp(const WarmUpProgress &progress) {
         std::lock_guard lock(Mutex);
         try {
-            ensureSpace();
+            ensureSpace(progress);
+            if (progress)
+                progress({WarmUpStep::Resolving, 0, 0});
             Space->resolve();
+            if (progress)
+                progress({WarmUpStep::Indexing, 0, 0});
+            try {
+                ensureLibraryIndex();
+            } catch (...) {
+                // Without the base of the index the first buildNameIndex() builds it again (and offers keywords only if that fails too);
+                // the warmed library is kept.
+            }
+            Warm = true;
+            if (progress)
+                progress({WarmUpStep::Ready, 0, 0});
         } catch (const std::exception &) {
             // Nothing to warm up if the library cannot be parsed (or the application closes); the first update() reports a problem.
             if (Space != nullptr) {
-                try {
-                    disposeAll();
-                } catch (...) {
+                if (ShuttingDown) {
+                    // (the process ends: freeing the model would only delay that, see ~DocumentWorkspace())
                     Space.release();
+                    Warm = false;
+                } else {
+                    try {
+                        disposeAll();
+                    } catch (...) {
+                        Space.release();
+                    }
                 }
             }
         }
@@ -230,6 +288,7 @@ namespace StructuraSystems::Client {
     void DocumentWorkspace::disposeAll() {
         if (Space == nullptr)
             return;
+        Warm = false;
         ++ModelEpoch;
         disposeSpace(*Space);
         Space.reset();
@@ -255,6 +314,12 @@ namespace StructuraSystems::Client {
             disposeNonStandard();
         } catch (const std::exception &) {
             // The workspace cannot be trusted any more, the next owner starts with a new one.
+            if (ShuttingDown) {
+                // (the process ends: freeing the model would only delay that, see ~DocumentWorkspace())
+                Space.release();
+                Warm = false;
+                return;
+            }
             try {
                 disposeAll();
             } catch (...) {
@@ -710,29 +775,33 @@ namespace StructuraSystems::Client {
         ForceReparse = false;
     }
 
+    void DocumentWorkspace::ensureLibraryIndex() {
+        if (LibraryNamesValid && LibraryNamesEpoch == ModelEpoch)
+            return;
+        const std::set<size_t> documentSlots(DocumentSlots.begin(), DocumentSlots.end());
+        QList<NameEntry> libraryNames;
+        for (size_t source = 0; source < Space->sourceCount(); ++source) {
+            if (documentSlots.count(source))
+                continue;
+            const auto root = Space->rootNamespace(source);
+            if (root == nullptr)
+                continue;
+            std::unordered_set<const KerML::Entities::Element *> visited;
+            collectNames(*root, QString(), 0, false, visited, libraryNames);
+        }
+        LibraryIndex = std::make_shared<const NameIndex>(std::move(libraryNames));
+        LibraryNamesEpoch = ModelEpoch;
+        LibraryNamesValid = true;
+    }
+
     std::shared_ptr<const NameIndex> DocumentWorkspace::buildNameIndex() {
         std::lock_guard lock(Mutex);
         if (Space == nullptr)
             return std::make_shared<const NameIndex>();
         try {
-            const std::set<size_t> documentSlots(DocumentSlots.begin(), DocumentSlots.end());
-            if (!LibraryNamesValid || LibraryNamesEpoch != ModelEpoch) {
-                QList<NameEntry> libraryNames;
-                for (size_t source = 0; source < Space->sourceCount(); ++source) {
-                    if (documentSlots.count(source))
-                        continue;
-                    const auto root = Space->rootNamespace(source);
-                    if (root == nullptr)
-                        continue;
-                    std::unordered_set<const KerML::Entities::Element *> visited;
-                    collectNames(*root, QString(), 0, false, visited, libraryNames);
-                }
-                LibraryNames = std::move(libraryNames);
-                LibraryNamesEpoch = ModelEpoch;
-                LibraryNamesValid = true;
-            }
+            ensureLibraryIndex();
 
-            QList<NameEntry> entries = LibraryNames;
+            QList<NameEntry> entries;
             for (const auto slot : DocumentSlots) {
                 const auto root = Space->rootNamespace(slot);
                 if (root == nullptr)
@@ -740,7 +809,8 @@ namespace StructuraSystems::Client {
                 std::unordered_set<const KerML::Entities::Element *> visited;
                 collectNames(*root, QString(), 0, true, visited, entries);
             }
-            return std::make_shared<const NameIndex>(std::move(entries));
+            // (two stages: the names of the libraries are indexed once per epoch, the document is indexed on top of them)
+            return std::make_shared<const NameIndex>(LibraryIndex, std::move(entries));
         } catch (...) {
             // Without names the completion only offers keywords.
             return std::make_shared<const NameIndex>();
@@ -891,9 +961,18 @@ namespace StructuraSystems::Client {
                     result.Diagnostics.append(diagnostic(2, QStringLiteral("%1 '%2' has %3 reference(s) that cannot be resolved")
                                                                     .arg(kind, library.File).arg(unresolved)));
             }
+            // The standard library is loaded and resolved (not while the application closes: a cancelled run is not a result to build on).
+            if (!ShuttingDown)
+                Warm = true;
             return result;
         } catch (...) {
             // The state of the workspace is unknown after an exception, the next run starts from scratch.
+            if (ShuttingDown) {
+                // (the process ends: freeing the model would only delay that, see ~DocumentWorkspace())
+                Space.release();
+                Warm = false;
+                throw;
+            }
             try {
                 disposeAll();
             } catch (...) {

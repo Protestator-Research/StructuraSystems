@@ -403,6 +403,19 @@ private slots:
         QCOMPARE(CompletionEngine::written(QStringLiteral("1st")), QStringLiteral("'1st'"));
         QCOMPARE(CompletionEngine::written(QStringLiteral("Mass"), true), QStringLiteral("'Mass'"));
         QCOMPARE(CompletionEngine::writtenQualified(QStringLiteral("ISQ::my mass")), QStringLiteral("ISQ::'my mass'"));
+        // The names of the index are the names of the elements, without quotes (the text and the XMI library agree on that): an operator or
+        // a name with a space is quoted once when it is written, and never twice.
+        QCOMPARE(CompletionEngine::written(QStringLiteral("!=")), QStringLiteral("'!='"));
+        QCOMPARE(CompletionEngine::written(QStringLiteral("a b")), QStringLiteral("'a b'"));
+        // reserved words are no basic names
+        QCOMPARE(CompletionEngine::written(QStringLiteral("not")), QStringLiteral("'not'"));
+        QCOMPARE(CompletionEngine::written(QStringLiteral("action")), QStringLiteral("'action'"));
+        QCOMPARE(CompletionEngine::written(QStringLiteral("notes")), QStringLiteral("notes"));
+        QCOMPARE(CompletionEngine::writtenQualified(QStringLiteral("BaseFunctions::not")), QStringLiteral("BaseFunctions::'not'"));
+        QCOMPARE(CompletionEngine::writtenQualified(QStringLiteral("ControlFunctions::if")), QStringLiteral("ControlFunctions::'if'"));
+        QCOMPARE(CompletionEngine::written(QStringLiteral("it's")), QStringLiteral("'it\\'s'"));
+        QCOMPARE(CompletionEngine::writtenQualified(QStringLiteral("DataFunctions::!=")), QStringLiteral("DataFunctions::'!='"));
+        QCOMPARE(CompletionEngine::writtenQualified(QStringLiteral("'a b'::c")), QStringLiteral("'\\'a b\\''::c"));   // (a name that starts with a quote is a name)
     }
 
     void resultsAreLimited() {

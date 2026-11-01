@@ -22,11 +22,18 @@
 #include "WorkspaceConfig.h"
 
 namespace StructuraSystems::Client {
-    /** A text of the standard library. The texts are read from the resources once and shared by all documents. */
+    /** The form in which the standard library of sysmllib is loaded (see LibraryWorkspace::setStandardFormat()). */
+    enum class StandardFormat {
+        Text,   ///< the textual notation, parsed
+        Xmi     ///< the XMI files of the pilot implementation, read (they refer to each other by hrefs relative to their names)
+    };
+
+    /** A file of the standard library. The files are read from sysmllib once and shared by all documents. */
     struct StandardSource {
-        std::string Name;     ///< File name with suffix, e.g. "Base.kerml"
+        std::string Name;     ///< The path of the file in the resources of sysmllib, e.g. "sysml.library/KerML/Semantic/Base.kerml". XMI files name each other relative to it.
         std::string Text;
-        bool KerML = false;
+        bool KerML = false;   ///< KerML text (not SysML)
+        bool Xmi = false;     ///< An XMI file (KerML is false then)
     };
 
     /** A SysML / KerML text of a project file, ready to be added to a SysMLv2::Files::Workspace. */
@@ -83,8 +90,20 @@ namespace StructuraSystems::Client {
         LibraryWorkspace(const LibraryWorkspace &) = delete;
         LibraryWorkspace &operator=(const LibraryWorkspace &) = delete;
 
-        /** The standard library, read from the resources on first use. */
+        /**
+         * The standard library in the format of standardFormat(), taken from the resources of sysmllib on first use (once per format).
+         * The reference stays valid for the lifetime of the process.
+         */
         static const std::vector<StandardSource> &standardLibrary();
+        /** The standard library in the given format (once per format, like standardLibrary()). */
+        static const std::vector<StandardSource> &standardLibrary(StandardFormat format);
+        /**
+         * The format of the standard library for the workspaces that are created from now on (DocumentWorkspace loads it when it builds
+         * its workspace). The default is Xmi: the standard library loads about twice as fast and the diagnostics and the name index are the
+         * ones of the text library (StandardFormatTests). Thread safe. Workspaces that exist keep the library they were built with.
+         */
+        static void setStandardFormat(StandardFormat format);
+        static StandardFormat standardFormat();
 
         // ---- folder ----
 

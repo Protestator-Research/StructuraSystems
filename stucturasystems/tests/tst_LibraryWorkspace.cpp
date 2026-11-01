@@ -211,7 +211,8 @@ private slots:
         timer.start();
         SysMLv2::Files::Workspace space;
         for (const auto &source : library)
-            space.addText(source.Text, source.Name, source.KerML ? SysMLv2::Files::SourceLanguage::KerML : SysMLv2::Files::SourceLanguage::SysML);
+            space.addText(source.Text, source.Name,
+                          source.Xmi ? SysMLv2::Files::SourceLanguage::Xmi : (source.KerML ? SysMLv2::Files::SourceLanguage::KerML : SysMLv2::Files::SourceLanguage::SysML));
         const auto parsed = timer.elapsed();
         space.resolve();
         qInfo() << "standard library:" << library.size() << "files, parsed in" << parsed << "ms, resolved in" << timer.elapsed() - parsed << "ms";

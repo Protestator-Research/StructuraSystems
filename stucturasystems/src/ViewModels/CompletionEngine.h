@@ -5,6 +5,7 @@
 #ifndef STRUCTURASYSTEMS_COMPLETIONENGINE_H
 #define STRUCTURASYSTEMS_COMPLETIONENGINE_H
 
+#include <iterator>
 #include <memory>
 
 #include <QHash>
@@ -88,14 +89,58 @@ namespace StructuraSystems::Client {
      */
     class NameIndex {
     public:
+        /**
+         * Read only view of the entries (the indices of members(), types() ... refer to it). An index can be in two stages, see the
+         * second constructor, so this is not a QList; it offers what the callers use: at(), size(), isEmpty() and range for.
+         */
+        class EntryList {
+        public:
+            class const_iterator {
+            public:
+                using iterator_category = std::forward_iterator_tag;
+                using value_type = NameEntry;
+                using difference_type = qsizetype;
+                using pointer = const NameEntry *;
+                using reference = const NameEntry &;
+                const_iterator(const NameIndex *owner, qsizetype position) : Owner(owner), Position(position) {}
+                reference operator*() const { return Owner->entry(Position); }
+                pointer operator->() const { return &Owner->entry(Position); }
+                const_iterator &operator++() { ++Position; return *this; }
+                const_iterator operator++(int) { const_iterator copy = *this; ++Position; return copy; }
+                bool operator==(const const_iterator &other) const { return Position == other.Position; }
+                bool operator!=(const const_iterator &other) const { return Position != other.Position; }
+            private:
+                const NameIndex *Owner;
+                qsizetype Position;
+            };
+
+            explicit EntryList(const NameIndex *owner) : Owner(owner) {}
+            [[nodiscard]] const NameEntry &at(qsizetype index) const { return Owner->entry(index); }
+            [[nodiscard]] const NameEntry &operator[](qsizetype index) const { return Owner->entry(index); }
+            [[nodiscard]] qsizetype size() const { return Owner->count(); }
+            [[nodiscard]] bool isEmpty() const { return Owner->isEmpty(); }
+            [[nodiscard]] const_iterator begin() const { return {Owner, 0}; }
+            [[nodiscard]] const_iterator end() const { return {Owner, Owner->count()}; }
+        private:
+            const NameIndex *Owner;
+        };
+
         NameIndex() = default;
         explicit NameIndex(QList<NameEntry> entries);
+        /**
+         * An index in two stages: the entries of @p base (shared, never copied; typically the standard library and the libraries, which
+         * stay the same for many documents) come first, then @p entries (the document). Everything answers as the flat index over both
+         * lists in this order would, indices included.
+         */
+        NameIndex(std::shared_ptr<const NameIndex> base, QList<NameEntry> entries);
 
-        [[nodiscard]] const QList<NameEntry> &entries() const { return Entries; }
-        [[nodiscard]] qsizetype count() const { return Entries.size(); }
-        [[nodiscard]] bool isEmpty() const { return Entries.isEmpty(); }
+        [[nodiscard]] EntryList entries() const { return EntryList(this); }
+        [[nodiscard]] qsizetype count() const { return BaseCount + Entries.size(); }
+        [[nodiscard]] bool isEmpty() const { return count() == 0; }
         /** Lower case name of the entry, for the case insensitive matching. */
-        [[nodiscard]] const QString &lowerName(qsizetype index) const { return Lower.at(index); }
+        [[nodiscard]] const QString &lowerName(qsizetype index) const {
+            return index < BaseCount ? Base->lowerName(index) : Lower.at(index - BaseCount);
+        }
 
         /** Indices of the entries that are owned by the namespace with the given qualified name. */
         [[nodiscard]] const QList<int> &members(const QString &owner) const;
@@ -117,12 +162,19 @@ namespace StructuraSystems::Client {
         [[nodiscard]] QList<int> visibleMembers(const QString &owner) const;
 
     private:
-        QList<NameEntry> Entries;
-        QStringList Lower;
+        [[nodiscard]] const NameEntry &entry(qsizetype index) const { return index < BaseCount ? Base->entry(index) : Entries.at(index - BaseCount); }
+        /** Indices of the entries with this qualified name, the base's first. */
+        [[nodiscard]] QList<int> withQualifiedName(const QString &qualifiedName) const;
+
+        std::shared_ptr<const NameIndex> Base;   ///< First stage, null for a flat index
+        qsizetype BaseCount = 0;
+        QList<NameEntry> Entries;                ///< This stage; its indices start at BaseCount
+        QStringList Lower;                       ///< of this stage
+        /// The owners of this stage: the indices of their members in both stages. (An owner that only the base has is answered by the base.)
         QHash<QString, QList<int>> ByOwner;
-        QHash<QString, QList<int>> ByQualifiedName;
-        QList<int> Types;
-        QList<int> Namespaces;
+        QHash<QString, QList<int>> ByQualifiedName;   ///< of this stage, indices in both stages
+        QList<int> Types;        ///< both stages
+        QList<int> Namespaces;   ///< both stages
     };
 
     /** A name that the text of the editor declares itself (found without parsing), see CompletionEngine::scanLocalNames(). */

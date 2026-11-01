@@ -11,6 +11,7 @@ set(SRC "${CMAKE_CURRENT_SOURCE_DIR}/../src")
 file(GLOB CMARK_SOURCES "${SRC}/Models/Parser/Markdown/CommonmarkParser/*.c")
 list(FILTER CMARK_SOURCES EXCLUDE REGEX "main\\.c$")
 
+# (The standard library comes from sysmllib: StandardLibraryResources.h, no resource file here.)
 qt_add_executable(LibraryWorkspaceTests
         tst_LibraryWorkspace.cpp
         ${SRC}/Models/Libraries/CodeScanner.cpp
@@ -34,9 +35,7 @@ qt_add_executable(LibraryWorkspaceTests
         ${SRC}/Services/PagedRequest.cpp
         ${SRC}/Services/entities/DigitalTwin.cpp
         ${SRC}/Services/entities/DigitalTwinRequest.cpp
-        ${CMARK_SOURCES}
-        # The standard library that the workspaces load.
-        ${CMAKE_CURRENT_SOURCE_DIR}/../../resources/sysml.qrc)
+        ${CMARK_SOURCES})
 
 target_link_libraries(LibraryWorkspaceTests PRIVATE
         Qt6::Core
@@ -48,6 +47,71 @@ target_link_libraries(LibraryWorkspaceTests PRIVATE
 add_test(NAME LibraryWorkspaceTests COMMAND LibraryWorkspaceTests)
 # Parsing the standard library takes about a minute in a debug build.
 set_tests_properties(LibraryWorkspaceTests PROPERTIES TIMEOUT 900)
+
+# Benchmark of DocumentWorkspace (warm-up, first update, update after a change, name index). Not a test: no add_test, run it by hand.
+qt_add_executable(DocumentWorkspaceBenchmark
+        tst_DocumentWorkspaceBenchmark.cpp
+        ${SRC}/Models/Libraries/CodeScanner.cpp
+        ${SRC}/Models/Libraries/CodeScanner.h
+        ${SRC}/Models/Libraries/DocumentWorkspace.cpp
+        ${SRC}/Models/Libraries/DocumentWorkspace.h
+        ${SRC}/Models/Libraries/LibraryWorkspace.cpp
+        ${SRC}/Models/Libraries/LibraryWorkspace.h
+        ${SRC}/Models/Libraries/RemoteLibraries.cpp
+        ${SRC}/Models/Libraries/RemoteLibraries.h
+        ${SRC}/Models/Libraries/WorkspaceConfig.cpp
+        ${SRC}/Models/Libraries/WorkspaceConfig.h
+        ${SRC}/Models/Parser/Markdown/MarkdownParser.cpp
+        ${SRC}/ViewModels/CompletionEngine.cpp
+        ${SRC}/ViewModels/LanguageKeywords.cpp
+        ${SRC}/Services/BECommunicationService.cpp
+        ${SRC}/Services/BECommunicationService.h
+        ${SRC}/Services/CommitDelta.cpp
+        ${SRC}/Services/PagedRequest.cpp
+        ${SRC}/Services/entities/DigitalTwin.cpp
+        ${SRC}/Services/entities/DigitalTwinRequest.cpp
+        ${CMARK_SOURCES})
+
+target_link_libraries(DocumentWorkspaceBenchmark PRIVATE
+        Qt6::Core
+        Qt6::Test
+        sysmllib::sysmllib
+        CURL::libcurl
+        nlohmann_json::nlohmann_json)
+
+# DocumentWorkspace::warmUp(): steps, progress, isWarm(), cancellation. Loads the standard library several times (about 7 s each in a debug build).
+qt_add_executable(WarmUpTests
+        tst_WarmUp.cpp
+        ${SRC}/Models/Libraries/CodeScanner.cpp
+        ${SRC}/Models/Libraries/CodeScanner.h
+        ${SRC}/Models/Libraries/DocumentWorkspace.cpp
+        ${SRC}/Models/Libraries/DocumentWorkspace.h
+        ${SRC}/Models/Libraries/LibraryWorkspace.cpp
+        ${SRC}/Models/Libraries/LibraryWorkspace.h
+        ${SRC}/Models/Libraries/RemoteLibraries.cpp
+        ${SRC}/Models/Libraries/RemoteLibraries.h
+        ${SRC}/Models/Libraries/WorkspaceConfig.cpp
+        ${SRC}/Models/Libraries/WorkspaceConfig.h
+        ${SRC}/Models/Parser/Markdown/MarkdownParser.cpp
+        ${SRC}/ViewModels/CompletionEngine.cpp
+        ${SRC}/ViewModels/LanguageKeywords.cpp
+        ${SRC}/Services/BECommunicationService.cpp
+        ${SRC}/Services/BECommunicationService.h
+        ${SRC}/Services/CommitDelta.cpp
+        ${SRC}/Services/PagedRequest.cpp
+        ${SRC}/Services/entities/DigitalTwin.cpp
+        ${SRC}/Services/entities/DigitalTwinRequest.cpp
+        ${CMARK_SOURCES})
+
+target_link_libraries(WarmUpTests PRIVATE
+        Qt6::Core
+        Qt6::Test
+        sysmllib::sysmllib
+        CURL::libcurl
+        nlohmann_json::nlohmann_json)
+
+add_test(NAME WarmUpTests COMMAND WarmUpTests)
+set_tests_properties(WarmUpTests PROPERTIES TIMEOUT 900)
 
 # Synchronisation with the server (SysML v2 API): delta commits, branches without head and pagination. The answers of the server are
 # faked, so no network is needed. The online DocumentModel is part of the test to check that a branch without head can be opened.
@@ -85,8 +149,7 @@ qt_add_executable(OnlineDocumentTests
         ${SRC}/Models/Libraries/WorkspaceConfig.cpp
         ${SRC}/Models/Parser/StructuraSystemsParser.cpp
         ${SRC}/Models/Parser/Markdown/MarkdownParser.cpp
-        ${CMARK_SOURCES}
-        ${CMAKE_CURRENT_SOURCE_DIR}/../../resources/sysml.qrc)
+        ${CMARK_SOURCES})
 
 # The headers of the view models use the QML registration macros, but nothing of QtQml is needed at run time. Linking Qt6::Qml
 # would scan the sources for QML imports, so only its headers are used.
@@ -134,6 +197,57 @@ target_link_libraries(CompletionEngineTests PRIVATE
 add_test(NAME CompletionEngineTests COMMAND CompletionEngineTests)
 set_tests_properties(CompletionEngineTests PROPERTIES TIMEOUT 60)
 
+# The standard library of sysmllib in the text and in the XMI format: the same diagnostics and names for a set of documents. Loads both
+# formats (parsing the text takes about a minute in a debug build).
+qt_add_executable(StandardFormatTests
+        tst_StandardFormat.cpp
+        ${SRC}/Models/Libraries/CodeScanner.cpp
+        ${SRC}/Models/Libraries/CodeScanner.h
+        ${SRC}/Models/Libraries/DocumentWorkspace.cpp
+        ${SRC}/Models/Libraries/DocumentWorkspace.h
+        ${SRC}/Models/Libraries/LibraryWorkspace.cpp
+        ${SRC}/Models/Libraries/LibraryWorkspace.h
+        ${SRC}/Models/Libraries/RemoteLibraries.cpp
+        ${SRC}/Models/Libraries/RemoteLibraries.h
+        ${SRC}/Models/Libraries/WorkspaceConfig.cpp
+        ${SRC}/Models/Libraries/WorkspaceConfig.h
+        ${SRC}/Models/Parser/Markdown/MarkdownParser.cpp
+        ${SRC}/ViewModels/CompletionEngine.cpp
+        ${SRC}/ViewModels/LanguageKeywords.cpp
+        ${SRC}/Services/BECommunicationService.cpp
+        ${SRC}/Services/BECommunicationService.h
+        ${SRC}/Services/CommitDelta.cpp
+        ${SRC}/Services/PagedRequest.cpp
+        ${SRC}/Services/entities/DigitalTwin.cpp
+        ${SRC}/Services/entities/DigitalTwinRequest.cpp
+        ${CMARK_SOURCES})
+
+target_link_libraries(StandardFormatTests PRIVATE
+        Qt6::Core
+        Qt6::Test
+        sysmllib::sysmllib
+        CURL::libcurl
+        nlohmann_json::nlohmann_json)
+
+add_test(NAME StandardFormatTests COMMAND StandardFormatTests)
+set_tests_properties(StandardFormatTests PROPERTIES TIMEOUT 900)
+
+# The name index in two stages (libraries and document) against the flat index.
+qt_add_executable(NameIndexStageTests
+        tst_NameIndexStages.cpp
+        ${SRC}/ViewModels/CompletionEngine.cpp
+        ${SRC}/ViewModels/CompletionEngine.h
+        ${SRC}/ViewModels/LanguageKeywords.cpp
+        ${SRC}/ViewModels/LanguageKeywords.h)
+
+target_link_libraries(NameIndexStageTests PRIVATE
+        Qt6::Core
+        Qt6::Test
+        sysmllib::sysmllib)
+
+add_test(NAME NameIndexStageTests COMMAND NameIndexStageTests)
+set_tests_properties(NameIndexStageTests PROPERTIES TIMEOUT 60)
+
 # ctest starts the executable without the environment of the Conan build, so the shared libraries it needs (sysmllib and its
 # dependencies, Qt) are put on the PATH of the test. The directories come from the variables the Conan CMake generator sets
 # for every package (<package>_BIN_DIRS_<CONFIG>); only directories that exist are used.
@@ -167,7 +281,21 @@ if(WIN32 AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.22)
         list(APPEND _modifications "PATH=path_list_prepend:${_qt_bin}")
     endif()
     list(REMOVE_DUPLICATES _modifications)
-    set_tests_properties(LibraryWorkspaceTests OnlineSyncTests OnlineDocumentTests CodeEditAssistTests CompletionEngineTests PROPERTIES ENVIRONMENT_MODIFICATION "${_modifications}")
+    set_tests_properties(LibraryWorkspaceTests OnlineSyncTests OnlineDocumentTests CodeEditAssistTests CompletionEngineTests StandardFormatTests NameIndexStageTests PROPERTIES ENVIRONMENT_MODIFICATION "${_modifications}")
 endif()
 
 
+
+# The status of the warm-up of the standard library shown in the status bar (texts, progress, hand-over from the warm-up thread).
+qt_add_executable(LibraryWarmUpStatusTests
+        tst_LibraryWarmUpStatus.cpp
+        ${SRC}/ViewModels/LibraryWarmUpStatus.cpp
+        ${SRC}/ViewModels/LibraryWarmUpStatus.h)
+
+target_link_libraries(LibraryWarmUpStatusTests PRIVATE
+        Qt6::Core
+        Qt6::Qml
+        Qt6::Test
+        sysmllib::sysmllib)
+
+add_test(NAME LibraryWarmUpStatusTests COMMAND LibraryWarmUpStatusTests)

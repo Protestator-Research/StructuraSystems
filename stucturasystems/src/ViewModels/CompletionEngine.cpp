@@ -2,6 +2,7 @@
 // Created by Moritz Herzog on 30.10.26.
 //
 
+#include <kerml/root/elements/NameEscaping.h>
 #include "CompletionEngine.h"
 
 #include <algorithm>
@@ -445,45 +446,65 @@ namespace StructuraSystems::Client {
 
     // ---------------------------------------------------------------------------------------------- NameIndex
 
-    NameIndex::NameIndex(QList<NameEntry> entries) : Entries(std::move(entries)) {
+    NameIndex::NameIndex(QList<NameEntry> entries) : NameIndex(nullptr, std::move(entries)) {}
+
+    NameIndex::NameIndex(std::shared_ptr<const NameIndex> base, QList<NameEntry> entries)
+        : Base(std::move(base)), BaseCount(Base ? Base->count() : 0), Entries(std::move(entries)) {
+        if (Base) {
+            Types = Base->types();
+            Namespaces = Base->namespaces();
+        }
         Lower.reserve(Entries.size());
         for (int i = 0; i < Entries.size(); ++i) {
             const auto &entry = Entries.at(i);
+            const int index = static_cast<int>(BaseCount) + i;
             Lower.append(entry.Name.toLower());
-            ByOwner[entry.Owner].append(i);
-            ByQualifiedName[entry.QualifiedName].append(i);
+            auto owner = ByOwner.find(entry.Owner);
+            if (owner == ByOwner.end())
+                owner = ByOwner.insert(entry.Owner, Base ? Base->members(entry.Owner) : QList<int>());   // (the members of the base come first)
+            owner.value().append(index);
+            ByQualifiedName[entry.QualifiedName].append(index);
             if (entry.IsType)
-                Types.append(i);
+                Types.append(index);
             if (entry.IsNamespace)
-                Namespaces.append(i);
+                Namespaces.append(index);
         }
     }
 
     const QList<int> &NameIndex::members(const QString &owner) const {
         static const QList<int> None;
         const auto found = ByOwner.constFind(owner);
-        return found == ByOwner.constEnd() ? None : found.value();
+        if (found != ByOwner.constEnd())
+            return found.value();
+        return Base ? Base->members(owner) : None;
+    }
+
+    QList<int> NameIndex::withQualifiedName(const QString &qualifiedName) const {
+        QList<int> result;
+        if (Base)
+            result = Base->withQualifiedName(qualifiedName);
+        const auto found = ByQualifiedName.constFind(qualifiedName);
+        if (found != ByQualifiedName.constEnd())
+            result.append(found.value());
+        return result;
     }
 
     QList<int> NameIndex::findNamespaces(const QString &qualifier) const {
         QList<int> result;
         QSet<QString> seen;
-        const auto exact = ByQualifiedName.constFind(qualifier);
-        if (exact != ByQualifiedName.constEnd()) {
-            for (const int index : exact.value()) {
-                if (Entries.at(index).IsNamespace && !seen.contains(qualifier)) {
-                    seen.insert(qualifier);
-                    result.append(index);
-                }
+        for (const int index : withQualifiedName(qualifier)) {
+            if (entry(index).IsNamespace && !seen.contains(qualifier)) {
+                seen.insert(qualifier);
+                result.append(index);
             }
         }
         if (!result.isEmpty())
             return result;
         const QString suffix = QStringLiteral("::") + qualifier;
         for (const int index : Namespaces) {
-            const auto &entry = Entries.at(index);
-            if (entry.QualifiedName.endsWith(suffix) && !seen.contains(entry.QualifiedName)) {
-                seen.insert(entry.QualifiedName);
+            const auto &candidate = entry(index);
+            if (candidate.QualifiedName.endsWith(suffix) && !seen.contains(candidate.QualifiedName)) {
+                seen.insert(candidate.QualifiedName);
                 result.append(index);
             }
         }
@@ -495,11 +516,8 @@ namespace StructuraSystems::Client {
         QSet<QString> done{owner};
         QStringList pending;
         const auto addExports = [this, &pending](const QString &name) {
-            const auto found = ByQualifiedName.constFind(name);
-            if (found == ByQualifiedName.constEnd())
-                return;
-            for (const int index : found.value())
-                pending.append(Entries.at(index).Exports);
+            for (const int index : withQualifiedName(name))
+                pending.append(entry(index).Exports);
         };
         addExports(owner);
         while (!pending.isEmpty()) {
@@ -519,7 +537,8 @@ namespace StructuraSystems::Client {
         bool plain = !name.isEmpty() && isIdentifierStart(name.front());
         for (qsizetype i = 1; plain && i < name.size(); ++i)
             plain = isIdentifierPart(name[i]);
-        if (plain && !force)
+        // (a reserved word of KerML or SysML v2 is no basic name: `not` is written 'not')
+        if (plain && !force && !KerML::Names::isReservedWord(name.toStdString()))
             return name;
         QString escaped = name;
         escaped.replace(QLatin1Char('\\'), QLatin1String("\\\\"));

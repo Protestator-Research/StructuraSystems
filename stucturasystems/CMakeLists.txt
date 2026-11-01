@@ -50,7 +50,6 @@ set(SOURCES
         src/Models/Parser/Markdown/CommonmarkParser/utf8.h
         src/Models/Parser/Markdown/CommonmarkParser/xml.c
         resources/Resources.qrc
-        ../resources/sysml.qrc
         src/Models/Libraries/CodeScanner.cpp
         src/Models/Libraries/CodeScanner.h
         src/Models/Libraries/DocumentWorkspace.cpp
@@ -159,6 +158,8 @@ qt_add_qml_module(StructuraSystems
             src/ViewModels/ProjectFilterModel.h
             src/ViewModels/LibraryController.cpp
             src/ViewModels/LibraryController.h
+            src/ViewModels/LibraryWarmUpStatus.cpp
+            src/ViewModels/LibraryWarmUpStatus.h
             src/ViewModels/LocalProjectTreeModel.cpp
             src/ViewModels/LocalProjectTreeModel.h
             src/ViewModels/SettingsController.cpp
