@@ -24,7 +24,7 @@ class CppStructuraSystemsRecipe(ConanFile):
     default_options = {"shared": True, "fPIC": False}
 
     # Sources are located in the same place as this recipe, copy them to the recipe
-    exports_sources = "CMakeLists.txt", "structurasystems/*"
+    exports_sources = "CMakeLists.txt", "stucturasystems/*"
 
     def requirements(self):
         self.requires("glib/2.85.3", override=True)
@@ -33,7 +33,7 @@ class CppStructuraSystemsRecipe(ConanFile):
         self.requires("nlohmann_json/[>=3.11.3 <3.13]")
         self.requires("md4c/0.5.2")
         self.requires("pcre2/10.44")
-        self.requires("sysmllib/2611.5")
+        self.requires("sysmllib/2611.1")
         self.requires("yaml-cpp/0.8.0")
         self.requires("openssl/3.6.3")
         self.requires("antlr4-cppruntime/4.13.2", transitive_headers=True)

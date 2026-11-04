@@ -40,8 +40,9 @@ endif()
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Qml Quick QuickControls2 Concurrent)
 if(RUN_TESTS)
     # Qt Test is optional: without it the tests are skipped, the application still builds.
+    # The target is checked because the Conan generated Qt6 config does not set Qt6Test_FOUND.
     find_package(Qt6 QUIET COMPONENTS Test)
-    if(NOT Qt6Test_FOUND)
+    if(NOT TARGET Qt6::Test)
         message(WARNING "RUN_TESTS is ON but Qt6 Test was not found: the tests are not built.")
         set(RUN_TESTS OFF)
     endif()
@@ -53,6 +54,8 @@ include(FetchContent)
 set(BUILD_WITH_QT6 ON)
 set(BUILD_TRANSLATIONS OFF)
 set(BUILD_TEST_APPLICATION OFF)
+# Otherwise the QtKeychain autotest is registered with ctest, but EXCLUDE_FROM_ALL never builds it ("Not Run").
+set(BUILD_TESTING OFF)
 set(QTKEYCHAIN_BUILD_SHARED_BACKUP ${BUILD_SHARED_LIBS})
 set(BUILD_SHARED_LIBS OFF)
 # QtKeychain links Qt via the legacy Qt6Core_LIBRARIES / Qt6DBus_LIBRARIES variables, which the Conan
@@ -81,6 +84,7 @@ endif()
 FetchContent_MakeAvailable(qtkeychain)
 set(BUILD_SHARED_LIBS ${QTKEYCHAIN_BUILD_SHARED_BACKUP})
 unset(QTKEYCHAIN_BUILD_SHARED_BACKUP)
+unset(BUILD_TESTING)
 # QtKeychain sets CMAKE_CXX_STANDARD to 11 and relies on Qt6::Core to raise it to C++17,
 # which the Conan generated Qt6::Core target does not do.
 set_target_properties(qt6keychain PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)

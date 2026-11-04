@@ -187,7 +187,7 @@ target_link_libraries(StructuraSystems PUBLIC
         yaml-cpp::yaml-cpp
         Qt6Keychain::Qt6Keychain)
 
-if (!UNIX)
+if(WIN32 OR APPLE)
 set_target_properties(StructuraSystems PROPERTIES
         WIN32_EXECUTABLE ON
         MACOSX_BUNDLE ON
