@@ -82,9 +82,15 @@ qt_add_executable(StructuraSystems ${SOURCES})
 
 set_source_files_properties(qml/Theme.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
 
+# NO_GENERATE_QTCONF: since Qt 6.12 the generated qt.conf part depends on the ${target}_qmlimportscan target,
+# which the Qt6::Qml deploy finalizer creates. The Conan generated Qt6 config never registers that finalizer
+# (Qt6QmlConfigExtras.cmake checks __qt_Qml_targets_file_included), so the target is missing and the build fails.
+# The module lives in the executable itself and has no QML module dependencies, so no qt.conf is needed
+# (Qt <= 6.11 did not generate one for it either).
 qt_add_qml_module(StructuraSystems
         URI StructuraSystems
         VERSION 1.0
+        NO_GENERATE_QTCONF
         QML_FILES
             qml/Main.qml
             qml/Theme.qml

@@ -27,19 +27,20 @@ class CppStructuraSystemsRecipe(ConanFile):
     exports_sources = "CMakeLists.txt", "stucturasystems/*"
 
     def requirements(self):
-        self.requires("glib/2.85.3", override=True)
+        self.requires("pcre2/10.49", override=True)
+        self.requires("glib/2.86.5", override=True)
         self.requires("boost/[>=1.86.0 <2]")
         self.requires("libcurl/[>=8.4.0 <9]")
         self.requires("nlohmann_json/[>=3.11.3 <3.13]")
         self.requires("md4c/0.5.2")
-        self.requires("pcre2/10.44")
+        # self.requires("pcre2/[>=10.44 <11]")
         self.requires("sysmllib/2611.1")
-        self.requires("yaml-cpp/0.8.0")
-        self.requires("openssl/3.6.3")
+        self.requires("yaml-cpp/0.9.0")
+        self.requires("openssl/3.6.5")
         self.requires("antlr4-cppruntime/4.13.2", transitive_headers=True)
         
         if self.settings.os == "Linux":
-            self.requires("qt/6.11.1")
+            self.requires("qt/6.12.0")
 
     def config_options(self):
         if self.settings.os == "Windows":
@@ -82,6 +83,9 @@ class CppStructuraSystemsRecipe(ConanFile):
             # QtKeychain's libsecret backend reports its results through GLib callbacks, which are only
             # dispatched when Qt runs the GLib event loop.
             self.options["qt/*"].with_glib = True
+            # Qt locates GLib by path without its transitive dependencies, and every module and libsecret must
+            # share one GLib main loop, so GLib has to be a shared library here.
+            self.options["glib/*"].shared = True
   
 
     
@@ -104,7 +108,7 @@ class CppStructuraSystemsRecipe(ConanFile):
 
     def build_requirements(self):
         if self.settings.os == "Linux":
-            self.tool_requires("qt/6.11.1", options={"qtdeclarative": True, "qtshadertools": True, "with_pq": False, "with_odbc": False, "with_dbus": True})
+            self.tool_requires("qt/6.12.0", options={"qtdeclarative": True, "qtshadertools": True, "with_pq": False, "with_odbc": False, "with_dbus": True})
         
         self.tool_requires("cmake/[>=3.30.0 <5]")
 
