@@ -222,6 +222,15 @@ target_link_libraries(StructuraSystems PUBLIC
         Qt6Keychain::Qt6Keychain
         StructuraDiagramCore)
 
+# The sysmllib headers (KerMLLexer.h, used by the highlighter) include antlr4-runtime.h; the Conan package does not
+# pass the ANTLR headers on, so the runtime required in conanfile.py is linked directly.
+find_package(antlr4-runtime QUIET)
+if(TARGET antlr4_shared)
+    target_link_libraries(StructuraSystems PUBLIC antlr4_shared)
+elseif(TARGET antlr4_static)
+    target_link_libraries(StructuraSystems PUBLIC antlr4_static)
+endif()
+
 # Core of the graphical diagram editor (plain C++20, no Qt) and its unit tests.
 add_subdirectory(src/Diagram)
 if(RUN_TESTS)

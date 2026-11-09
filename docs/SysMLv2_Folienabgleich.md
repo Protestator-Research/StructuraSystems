@@ -192,7 +192,8 @@ package Spezialisierung {
   `cargoMass :>> cargoMass default 0 [kg]` (redefiniert), `color1 : Colors = Colors::blue`, `^velocity` (geerbt).
 - ports: `^pwrCmdPort`, perform actions: `^providePower`, exhibit states: `^vehicleStates` – alles geerbt.
 - `«enum def» Colors` mit dem Kompartiment **enums** (`red`, `blue`, `green`), `DiameterChoices` mit
-  `= 60 [mm]`, `= 70 [mm]` (Werte mit Einheiten werden jetzt als Werte gelesen, F.31).
+  `d60 = 60 [mm]`, `d70 = 70 [mm]` (Werte mit Einheiten werden als Werte gelesen, F.31). Die Folie schreibt
+  `enum = 60 [mm];` ohne Namen – das ist SysML v2, der Parser der App liest es aber nur mit Namen (siehe unten).
 
 ```sysml
 package Usages {
@@ -212,8 +213,8 @@ package Usages {
         green;
     }
     enum def DiameterChoices :> ISQ::LengthValue {
-        enum = 60 [mm];
-        enum = 70 [mm];
+        enum d60 = 60 [mm];
+        enum d70 = 70 [mm];
     }
     part vehicle_b : Vehicle {
         attribute :>> mass = dryMass + cargoMass;
@@ -487,6 +488,9 @@ package ActionFlow {
 ## 11. States (F.64–67)
 **Ansicht:** Behavior, Kontext „state States::vehicleStates“.
 
+Der Anfangszustand steht hier als `entry; if true then off;`. SysML v2 schreibt `entry; then off;` – das liest der
+Parser der App noch nicht (siehe unten). Beide Formen zeigt der Editor als Startpunkt mit Pfeil.
+
 **Das solltest du sehen** (F.65/66)
 - Rahmen **„state vehicleStates : VehicleStates «parallel»“**.
 - `operatingStates` und `healthStates` **nebeneinander** (parallel) und ihre States **darin** gezeichnet.
@@ -513,7 +517,7 @@ package States {
     state vehicleStates : VehicleStates parallel {
         state operatingStates {
             entry;
-            then off;
+            if true then off;
             state off;
             state starting {
                 do action startEngine;
@@ -533,7 +537,7 @@ package States {
         }
         state healthStates {
             entry;
-            then normal;
+            if true then normal;
             state normal;
             state maintenance;
             state degraded;
@@ -759,8 +763,8 @@ package Constraints {
   `^require {…}` und `^assume {…}` (F.92).
 - `vehicle_b` → `vehicleSpecification`: gestrichelter Pfeil `«satisfy»`.
 
-**Nur Text:** `#derivation connection { end #original ::> …; end #derive ::> …; }` (F.95) wird verlustfrei als
-Textknoten gezeigt.
+`#derivation connection { end #original ::> …; end #derive ::> …; }` (F.95) ist hier weggelassen: der Parser der App
+liest es nicht (siehe unten); StructuraSystems würde es verlustfrei als Textknoten zeigen.
 
 ```sysml
 package Requirements {
@@ -787,10 +791,6 @@ package Requirements {
     part vehicle_b : Vehicle {
         attribute :>> mass = 1500 [kg];
         satisfy vehicleSpecification;
-    }
-    #derivation connection {
-        end #original ::> vehicleSpecification.massReqt;
-        end #derive ::> engineSpecification;
     }
     requirement engineSpecification;
 }
@@ -855,7 +855,7 @@ package Cases {
 package Relationships {
     item marketSurvey;
     requirement vehicleSpecification;
-    dependency from vehicleSpecification to marketSurvey;
+    dependency vehicleSpecification to marketSurvey;
     part torqueGenerator {
         perform action generateTorque;
     }
@@ -897,7 +897,7 @@ package Annotations {
             }
         }
         doc /* A vehicle with safety features */
-        comment /* Dies ist ein Kommentar */
+        comment hinweis /* Dies ist ein Kommentar */
     }
     package SafetyFeatures {
         private import vehicle::**;
@@ -931,6 +931,29 @@ package Annotations {
 | F.85 | `assert constraint` stand unter „constraints“ mit „assert“ davor | Kompartiment **assert constraints** `{…}`, geerbt `^{…}` |
 | Pfeile allgemein | | Fluss: gefülltes Dreieck in der Mitte, `: Fuel`; Interface ohne Ball/Socket, `: Typ`; Bindung `=`; Komposition/Referenz/Timeslice als rechtwinkliger Baum; ref gestrichelt |
 | weitere | | Port def „directed features“, Action def „parameters“, enum „enums“ und `enum = 60 [mm]`, Requirement „constraints“ mit `require`/`assume`, Items auf Paketebene, `succession flow`, Flüsse an geerbte Merkmale (`fuelTank.p1.fuel`) und zwischen Aktionsparametern |
+
+## Strenger Parser der App (sysmllib 2610.2)
+
+Alle Beispiele oben werden vom Parser der App (Grammatik `SysMLv2.g4` der sysmllib) ohne Fehler gelesen; das wurde
+mit genau diesem Parser geprüft. Einige Schreibweisen, die nach der SysML-v2-Spezifikation (und auf den Folien) gültig
+sind, lehnt diese Grammatik noch ab. In den Beispielen steht deshalb die gleichwertige Form, die beide akzeptieren:
+
+| SysML v2 (Folie / Spezifikation) | liest der Parser nicht | stattdessen (gültig für beide) |
+|---|---|---|
+| `entry; then off;` (Anfangszustand) | Grammatik verlangt nach `then` ein zweites `then` | `entry; if true then off;` |
+| `accept when x > 1` / `accept after 5 [s]` | Name vor `when`/`after` Pflicht | `accept overheat when x > 1` |
+| `enum = 60 [mm];` | Name Pflicht | `enum d60 = 60 [mm];` |
+| `comment /* … */` | Name nach `comment` Pflicht | `comment hinweis /* … */` oder nur `/* … */` |
+| `dependency from a to b;` | `from` nur nach einem Namen | `dependency a to b;` oder `dependency d1 from a to b;` |
+| `end logical : Function;` (Allocation def) | Schlüsselwort Pflicht | `end part logical : Function;` |
+| `stakeholder s : Person;` | Grammatik verlangt `#…` statt einer Usage | – (keine gleichwertige Form; im Twin durch `actor` ersetzt) |
+| `allocation m : A allocate a to b;` | Grammatik erwartet zweimal `allocation` | – (getrennt: `allocation m : A;` und `allocate a to b;`) |
+| `action s1 send v via p;` (benannte Send-Aktion) | nur unbenannt `send v via p;` | – (unbenannt, kann dann nicht referenziert werden) |
+| `#derivation connection { end #original ::> … }` | nicht unterstützt | – |
+
+Der Diagramm-Editor schreibt Abhängigkeiten jetzt als `dependency a::b to c;` (qualifizierte Namen statt `a.b`, wie es
+die Spezifikation verlangt; `from` nur nach einem Namen). Den Anfangszustand schreibt er weiter wie die Spezifikation
+(`entry; then off;`) – das zeigt die App so lange als Fehler an, bis die Grammatik korrigiert ist.
 
 ## Bekannte Lücken (bleiben verlustfrei als Text, werden aber nicht gezeichnet)
 

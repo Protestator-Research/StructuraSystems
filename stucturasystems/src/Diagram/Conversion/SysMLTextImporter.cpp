@@ -4,6 +4,7 @@
 
 #include "SysMLTextImporter.h"
 #include "../Semantic/RelationshipRules.h"
+#include "SysMLCodeGenerator.h"
 
 #include <algorithm>
 #include <exception>
@@ -179,7 +180,11 @@ namespace StructuraSystems::Diagram {
                 MessageThen, ///< then message ...;
                 Allocation, ///< allocate First to Second (refining allocations: see AllocationParent)
                 Dependency, ///< dependency [name] from First to Second;
-                Frame       ///< Source = requirement (= Scope), First = framed concern
+                Frame,      ///< Source = requirement (= Scope), First = framed concern
+                Exhibit,    ///< "exhibit s;": Source = part (= Scope), First = state
+                Assert,     ///< "assert c;": Source = owner (= Scope), First = constraint
+                Assume,     ///< "assume c;": Source = requirement (= Scope), First = constraint / requirement
+                Require     ///< "require c;": Source = requirement (= Scope), First = constraint / requirement
             };
             Type Kind = Type::Specialization;
             ElementId Source = RootId;          ///< Specialization: the specializing element
@@ -202,6 +207,13 @@ namespace StructuraSystems::Diagram {
             std::optional<ElementId> TargetId;
             /// Flow: flow definition after ':' ("flow : FuelFlow of Fuel from ...")
             std::string Definition;
+            /// n-ary connection "connect (a, b, c)": the ends after the second; dependency: further clients / suppliers
+            std::vector<std::vector<std::string>> MoreFirst{};
+            std::vector<std::vector<std::string>> MoreSecond{};
+            bool Nary = false;
+            /// "connect [0..1] a to [1] b": the multiplicities as written
+            std::string FirstMultiplicity{};
+            std::string SecondMultiplicity{};
         };
 
         std::string joinPath(const std::vector<std::string> &path) {
@@ -651,6 +663,7 @@ namespace StructuraSystems::Diagram {
             std::optional<Multiplicity> readMultiplicity(bool &valid) {
                 // current token is '['
                 take();
+                const std::size_t from = peek().Begin;
                 valid = false;
                 std::optional<Multiplicity> result;
                 const auto number = [&](std::optional<std::size_t> &value) {
@@ -687,16 +700,55 @@ namespace StructuraSystems::Diagram {
                         valid = true;
                     }
                 }
-                // up to and including ']'
+                // up to and including ']'; bounds that are expressions ("[m]", "[1..n]") are kept as text
                 int depth = 0;
+                std::string expression;
+                bool simple = !valid;
                 while (!atEnd()) {
                     const Token token = take();
-                    if (token.Type != TokenType::Symbol)
-                        continue;
-                    if (token.Text == "[")
-                        ++depth;
-                    else if (token.Text == "]" && depth-- == 0)
+                    if (token.Type == TokenType::Symbol && token.Text == "]" && depth == 0) {
+                        if (token.Begin > from)
+                            expression = Source.substr(from, token.Begin - from);
                         break;
+                    }
+                    if (token.Type == TokenType::Symbol && token.Text == "[")
+                        ++depth;
+                    else if (token.Type == TokenType::Symbol && token.Text == "]")
+                        --depth;
+                    if (token.Type == TokenType::Comment || token.Type == TokenType::String || token.Text.find('\n') != std::string::npos)
+                        simple = false;
+                }
+                // one line, single spaces
+                {
+                    std::string compact;
+                    for (const char c: expression) {
+                        if (c == '\n' || c == '\r') {
+                            simple = false;
+                            break;
+                        }
+                        if (c == ' ' || c == '\t') {
+                            if (!compact.empty() && compact.back() != ' ')
+                                compact += ' ';
+                        } else {
+                            compact += c;
+                        }
+                    }
+                    while (!compact.empty() && compact.back() == ' ')
+                        compact.pop_back();
+                    expression = compact;
+                }
+                if (valid && result && !expression.empty() && result->toString() != "[" + expression + "]" &&
+                    expression.find_first_not_of("0123456789.* ") == std::string::npos) {
+                    // "[0..*]" written as such (the doc figures), not as the equal "[*]": spelled as written
+                    result->Text = expression;
+                }
+                if (!valid && simple && !expression.empty()) {
+                    // only names, numbers, '..', '*', '::', '.', '(', ')', ',' and arithmetic
+                    static const std::string allowed = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_.:*()+-/, ";
+                    if (expression.find_first_not_of(allowed) == std::string::npos) {
+                        result = Multiplicity::expression(expression);
+                        valid = true;
+                    }
                 }
                 return valid ? result : std::nullopt;
             }
@@ -878,13 +930,18 @@ namespace StructuraSystems::Diagram {
                 }
 
                 const std::string keyword = peek().Text;
+                if (parseReferenceStatement(owner, keyword, prefixes, begin, line))
+                    return; // exhibit s; assert c; assume c; require c;
                 if (parseNamespaceMember(owner, keyword, prefixes, begin, line))
                     return; // import, alias, expose, render, filter, metadata, view
                 const bool kerml = Dialect == SysMLTextImporter::Dialect::KerML;
                 if (keyword == "package") {
                     take();
                     parsePackage(owner, prefixes, begin, line);
-                } else if ((keyword == "doc" || keyword == "comment") && prefixes.empty()) {
+                } else if ((keyword == "doc" || keyword == "comment" || keyword == "rep" ||
+                            (keyword == "language" && peek(1).Type == TokenType::String)) &&
+                           prefixes.empty()) {
+                    // comment / doc / rep ... /* text */, also "language "Python" /* ... */" (a rep without keyword)
                     parseComment();
                     keepText(owner, begin, LastEnd, line, true);
                 } else if (!kerml && keyword == "constraint" && isWord("def", 1)) {
@@ -1186,8 +1243,11 @@ namespace StructuraSystems::Diagram {
             }
 
             void parseComment() {
-                // doc / comment [name] [about a, b] [locale "..."] /* text */
+                // doc / comment [name] [about a, b] [locale "..."] /* text */, rep [name] language "..." /* text */
+                const bool bareLanguage = isWord("language");
                 take();
+                if (bareLanguage && peek().Type == TokenType::String)
+                    take();
                 // The comment text must be taken before peek() would skip it as an ordinary comment.
                 const auto takeComment = [this] {
                     if (Tokens[Position].Type != TokenType::Comment)
@@ -1200,7 +1260,7 @@ namespace StructuraSystems::Diagram {
                 };
                 if (takeComment())
                     return;
-                if (isNameToken() && !isWord("about") && !isWord("locale"))
+                if (isNameToken() && !isWord("about") && !isWord("locale") && !isWord("language"))
                     take();
                 if (takeComment())
                     return;
@@ -1210,7 +1270,7 @@ namespace StructuraSystems::Diagram {
                     if (takeComment())
                         return;
                 }
-                if (isWord("locale")) {
+                if (isWord("locale") || isWord("language")) {
                     take();
                     if (peek().Type == TokenType::String)
                         take();
@@ -1412,6 +1472,8 @@ namespace StructuraSystems::Diagram {
                 std::optional<Multiplicity> multiplicity;
                 std::vector<Reference> specializations;
                 std::string specializationKeyword; // "subsets" instead of ":>"
+                std::string referencesKeyword;     // "references" / "::>"
+                std::string referencedFeature;
                 std::string valueOperator;
                 std::string value;
                 std::string qualifiers; // ordered, nonunique
@@ -1438,6 +1500,12 @@ namespace StructuraSystems::Diagram {
                     } else if ((isSymbol(":>>") || isWord("redefines")) && redefinitions.empty() &&
                                Dialect == SysMLTextImporter::Dialect::SysML) {
                         readRedefinitions(); // "part smallEng : SmallEngine redefines eng;"
+                    } else if ((isSymbol("::>") || isWord("references")) && referencedFeature.empty() &&
+                               Dialect == SysMLTextImporter::Dialect::SysML) {
+                        // reference subsetting: "perform action a1 references action3", "part p ::> q"
+                        referencesKeyword = take().Text;
+                        referencedFeature = readReferenceText();
+                        plain = !referencedFeature.empty();
                     } else if ((isWord("ordered") || isWord("nonunique")) && qualifiers.empty()) {
                         qualifiers = take().Text;
                         if (qualifiers == "ordered" && isWord("nonunique"))
@@ -1543,6 +1611,8 @@ namespace StructuraSystems::Diagram {
                         Model.setNamedInBody(*id, true);
                     if (!specializationKeyword.empty())
                         Model.setSpecializationKeyword(*id, specializationKeyword);
+                    if (!referencedFeature.empty())
+                        Model.setReferencedFeature(*id, referencesKeyword, referencedFeature);
                 } catch (const std::exception &exception) {
                     lost(std::string(exception.what()) + " (" + name + ")", line);
                 }
@@ -1670,6 +1740,8 @@ namespace StructuraSystems::Diagram {
                 std::optional<Multiplicity> multiplicity;
                 std::vector<Reference> specializations;
                 std::string specializationKeyword; // "subsets" / "specializes" instead of ":>"
+                std::string referencesKeyword;     // "references" / "::>"
+                std::string referencedFeature;
                 // "require constraint { ... }" / "assume constraint { ... }" are usually unnamed
                 const bool unnamedAllowed = declaredKeyword == "require constraint" || declaredKeyword == "assume constraint" ||
                                             declaredKeyword == "assert constraint";
@@ -1685,6 +1757,11 @@ namespace StructuraSystems::Diagram {
                         plain = valid;
                     } else if (!definition && sysml && redefinitions.empty() && (isSymbol(":>>") || isWord("redefines"))) {
                         plain = readRedefinitions();
+                    } else if (!definition && sysml && referencedFeature.empty() && (isSymbol("::>") || isWord("references"))) {
+                        // reference subsetting: "perform action a1 references action3", "::> part1"
+                        referencesKeyword = take().Text;
+                        referencedFeature = readReferenceText();
+                        plain = !referencedFeature.empty();
                     } else if (isSymbol(":>") || (definition && (isWord("specializes") || isWord("subclassifies"))) ||
                                (!definition && sysml && isWord("subsets"))) {
                         if (specializations.empty() && (isWord("specializes") || isWord("subsets")))
@@ -1722,6 +1799,8 @@ namespace StructuraSystems::Diagram {
                         Model.setRedefinitions(*id, redefinitionKeyword, redefinitions, nameFromRedefinition);
                     if (!specializationKeyword.empty())
                         Model.setSpecializationKeyword(*id, specializationKeyword);
+                    if (!referencedFeature.empty())
+                        Model.setReferencedFeature(*id, referencesKeyword, referencedFeature);
                 } catch (const std::exception &exception) {
                     lost(std::string(exception.what()) + " (" + name + ")", line);
                 }
@@ -1732,21 +1811,70 @@ namespace StructuraSystems::Diagram {
                 finishDeclaration(*id);
             }
 
+            /// The ends after "connect" up to ';': "a to b", "[0..1] a to [1] b" or "(a, b, c)" (false if none of them).
+            bool readConnectEnds(Pending &pending) {
+                if (isSymbol("(")) {
+                    take();
+                    std::vector<std::vector<std::string>> ends;
+                    while (true) {
+                        auto end = readPath();
+                        if (end.empty())
+                            return false;
+                        ends.push_back(std::move(end));
+                        if (isSymbol(",")) {
+                            take();
+                            continue;
+                        }
+                        break;
+                    }
+                    if (!isSymbol(")") || ends.size() < 2)
+                        return false;
+                    take();
+                    if (!isSymbol(";"))
+                        return false;
+                    take();
+                    pending.First = std::move(ends[0]);
+                    pending.Second = std::move(ends[1]);
+                    pending.MoreSecond.assign(std::make_move_iterator(ends.begin() + 2), std::make_move_iterator(ends.end()));
+                    pending.Nary = true;
+                    return true;
+                }
+                const auto multiplicity = [&](std::string &text) {
+                    if (!isSymbol("["))
+                        return true;
+                    const std::size_t from = peek().Begin;
+                    while (!atEnd() && !isSymbol("]") && !isSymbol(";"))
+                        take();
+                    if (!isSymbol("]"))
+                        return false;
+                    take();
+                    text = Source.substr(from, LastEnd - from);
+                    return true;
+                };
+                if (!multiplicity(pending.FirstMultiplicity))
+                    return false;
+                pending.First = readPath();
+                if (pending.First.empty() || !isWord("to"))
+                    return false;
+                take();
+                if (!multiplicity(pending.SecondMultiplicity))
+                    return false;
+                pending.Second = readPath();
+                if (pending.Second.empty() || !isSymbol(";"))
+                    return false;
+                take();
+                return true;
+            }
+
             void parseConnect(ElementId owner, std::size_t begin, std::size_t line) {
-                auto source = readPath();
-                if (source.empty() || !isWord("to")) {
+                Pending pending{Pending::Type::Connection, RootId, owner, {}, {}, line, std::string(), begin, 0, {}, {}, {}, {},
+                                {}, std::nullopt, std::nullopt, {}};
+                if (!readConnectEnds(pending)) {
                     fallBackToText(owner, begin, line);
                     return;
                 }
-                take();
-                auto target = readPath();
-                if (target.empty() || !isSymbol(";")) {
-                    fallBackToText(owner, begin, line);
-                    return;
-                }
-                take();
-                Pendings.push_back({Pending::Type::Connection, RootId, owner, std::move(source), std::move(target), line,
-                                    std::string(), begin, LastEnd, {}, {}, {}, {}, {}, std::nullopt, std::nullopt, {}});
+                pending.End = LastEnd;
+                Pendings.push_back(std::move(pending));
                 reserve();
             }
 
@@ -2216,30 +2344,46 @@ namespace StructuraSystems::Diagram {
                 reserve();
             }
 
-            /// dependency [name] from a to b;   (after "dependency"; several clients / suppliers are kept as text)
+            /// dependency [[name] from] a to b;   (after "dependency"; several clients / suppliers are kept as text)
             void parseDependency(ElementId owner, std::size_t begin, std::size_t line) {
                 std::string name;
-                if (isNameToken() && !isWord("from"))
+                if (isNameToken() && !isWord("from") && isWord("from", 1))
                     name = Source.substr(peek().Begin, peek().End - peek().Begin), take();
-                if (!isWord("from")) {
+                if (isWord("from"))
+                    take();
+                else if (!name.empty()) {
+                    fallBackToText(owner, begin, line);
+                    return;
+                }
+                // "a, b to c, d": several clients and suppliers
+                const auto readList = [&](std::vector<std::vector<std::string>> &list) {
+                    while (true) {
+                        auto path = readPath();
+                        if (path.empty())
+                            return false;
+                        list.push_back(std::move(path));
+                        if (!isSymbol(","))
+                            return true;
+                        take();
+                    }
+                };
+                std::vector<std::vector<std::string>> clients;
+                std::vector<std::vector<std::string>> suppliers;
+                if (!readList(clients) || !isWord("to")) {
                     fallBackToText(owner, begin, line);
                     return;
                 }
                 take();
-                auto source = readPath();
-                if (source.empty() || !isWord("to")) {
+                if (!readList(suppliers) || !isSymbol(";")) {
                     fallBackToText(owner, begin, line);
                     return;
                 }
                 take();
-                auto target = readPath();
-                if (target.empty() || !isSymbol(";")) {
-                    fallBackToText(owner, begin, line);
-                    return;
-                }
-                take();
-                Pendings.push_back({Pending::Type::Dependency, RootId, owner, std::move(source), std::move(target), line,
-                                    std::string(), begin, LastEnd, name, {}, {}, {}, {}, std::nullopt, std::nullopt, {}});
+                Pending pending{Pending::Type::Dependency, RootId, owner, std::move(clients[0]), std::move(suppliers[0]), line,
+                                std::string(), begin, LastEnd, name, {}, {}, {}, {}, std::nullopt, std::nullopt, {}};
+                pending.MoreFirst.assign(std::make_move_iterator(clients.begin() + 1), std::make_move_iterator(clients.end()));
+                pending.MoreSecond.assign(std::make_move_iterator(suppliers.begin() + 1), std::make_move_iterator(suppliers.end()));
+                Pendings.push_back(std::move(pending));
                 reserve();
             }
 
@@ -2369,6 +2513,40 @@ namespace StructuraSystems::Diagram {
                 pending.Placeholder = keepText(pending.Scope, pending.Begin, pending.End, pending.Line);
             }
 
+            /// "exhibit s;" (in a part), "assert c;", "assume c;" / "require c;" (in a requirement): a relationship from
+            /// the owner to an element declared elsewhere (kept as text if it cannot be resolved).
+            bool parseReferenceStatement(ElementId owner, const std::string &keyword, const std::vector<std::string> &prefixes,
+                                         std::size_t begin, std::size_t line) {
+                if (Dialect != SysMLTextImporter::Dialect::SysML || !prefixes.empty() || owner == RootId)
+                    return false;
+                Pending::Type type;
+                if (keyword == "exhibit" && !isWord("state", 1))
+                    type = Pending::Type::Exhibit;
+                else if (keyword == "assert" && !isWord("constraint", 1) && !isWord("not", 1))
+                    type = Pending::Type::Assert;
+                else if ((keyword == "assume" || keyword == "require") && !isWord("constraint", 1) &&
+                         isRequirementKind(ownerKind(owner)))
+                    type = keyword == "assume" ? Pending::Type::Assume : Pending::Type::Require;
+                else
+                    return false;
+                // exactly "keyword path;"
+                std::size_t k = 1;
+                if (!isNameToken(k))
+                    return false;
+                ++k;
+                while ((isSymbol("::", k) || isSymbol(".", k)) && isNameToken(k + 1))
+                    k += 2;
+                if (!isSymbol(";", k))
+                    return false;
+                take();
+                auto target = readPath();
+                take(); // ;
+                Pendings.push_back({type, owner, owner, std::move(target), {}, line, std::string(),
+                                    begin, LastEnd, {}, {}, {}, {}, {}, std::nullopt, std::nullopt, {}});
+                reserve();
+                return true;
+            }
+
             /// Statements of requirements, use cases and verifications; false if the statement is none of them.
             bool parseRequirementOrCase(ElementId owner, const std::string &keyword, const std::vector<std::string> &prefixes,
                                         std::size_t begin, std::size_t line) {
@@ -2478,6 +2656,14 @@ namespace StructuraSystems::Diagram {
                     reserve();
                     return true;
                 }
+                if (keyword == "satisfy" && isWord("requirement", 1) && !isWord("by", 3) && !isWord("by", 2)) {
+                    // "satisfy requirement s : R references r;": a satisfy requirement usage (table 20, longhand)
+                    take();
+                    take();
+                    parseUsage(owner, ElementKind::RequirementUsage, prefixes, begin, line, PerformStyle::DeclareAction,
+                               std::string("satisfy requirement"));
+                    return true;
+                }
                 if (keyword == "satisfy" && prefixes.empty() && !isWord("requirement", 1)) {
                     take();
                     auto requirement = readPath();
@@ -2527,21 +2713,14 @@ namespace StructuraSystems::Diagram {
                     return;
                 }
                 take();
-                auto source = readPath();
-                if (source.empty() || !isWord("to")) {
+                Pending pending{interface ? Pending::Type::Interface : Pending::Type::Connection, RootId, owner, {}, {}, line,
+                                std::string(), begin, 0, name, typeName, {}, {}, {}, std::nullopt, std::nullopt, {}};
+                if (!readConnectEnds(pending) || (interface && pending.Nary)) {
                     fallBackToText(owner, begin, line);
                     return;
                 }
-                take();
-                auto target = readPath();
-                if (target.empty() || !isSymbol(";")) {
-                    fallBackToText(owner, begin, line);
-                    return;
-                }
-                take();
-                Pendings.push_back({interface ? Pending::Type::Interface : Pending::Type::Connection, RootId, owner,
-                                    std::move(source), std::move(target), line, std::string(), begin, LastEnd, name,
-                                    typeName, {}, {}, {}, std::nullopt, std::nullopt, {}});
+                pending.End = LastEnd;
+                Pendings.push_back(std::move(pending));
                 reserve();
             }
 
@@ -2695,7 +2874,9 @@ namespace StructuraSystems::Diagram {
                         continue;
                     }
                     if (pending.Kind == Pending::Type::Satisfy || pending.Kind == Pending::Type::Verify ||
-                        pending.Kind == Pending::Type::Include || pending.Kind == Pending::Type::Frame) {
+                        pending.Kind == Pending::Type::Include || pending.Kind == Pending::Type::Frame ||
+                        pending.Kind == Pending::Type::Exhibit || pending.Kind == Pending::Type::Assert ||
+                        pending.Kind == Pending::Type::Assume || pending.Kind == Pending::Type::Require) {
                         resolveRequirementRelationship(pending);
                         continue;
                     }
@@ -2724,9 +2905,15 @@ namespace StructuraSystems::Diagram {
                         for (std::size_t length = path.size() - 1; length >= 1 && path.size() > 1; --length) {
                             const std::vector<std::string> prefix(path.begin(), path.begin() + std::ptrdiff_t(length));
                             // the end, or (flow) an action whose payload / parameter is meant ("trigger1.vs")
+                            // the end, (flow) an action whose payload / parameter is meant ("trigger1.vs"), or
+                            // (interface) a part whose port is meant ("tank.fuelOut", a port of its definition)
                             const Accept endOrAction = [&](ElementId id) {
-                                return isEnd(id) || (pending.Kind == Pending::Type::Flow &&
-                                                     Model.element(id).kind() == ElementKind::ActionUsage);
+                                const ElementKind kind = Model.element(id).kind();
+                                return isEnd(id) ||
+                                       (pending.Kind == Pending::Type::Flow && kind == ElementKind::ActionUsage) ||
+                                       (pending.Kind == Pending::Type::Interface &&
+                                        (kind == ElementKind::PartUsage || kind == ElementKind::ItemUsage ||
+                                         kind == ElementKind::OccurrenceUsage));
                             };
                             const auto found = resolve(pending.Scope, prefix, false, endOrAction);
                             if (!found)
@@ -2749,13 +2936,47 @@ namespace StructuraSystems::Diagram {
                                                   : pending.Kind == Pending::Type::Connection ? RelationshipKind::Connection
                                                   : pending.Kind == Pending::Type::Interface ? RelationshipKind::Interface
                                                                                              : RelationshipKind::Flow;
-                    if (!source || !target || !RelationshipRules::canRelate(Model, kind, *source, *target)) {
+                    const bool nary = pending.Nary || !pending.MoreSecond.empty();
+                    if (!source || !target ||
+                        !(nary ? RelationshipRules::canRelateAgain(Model, kind, *source, *target)
+                               : RelationshipRules::canRelate(Model, kind, *source, *target, sourceFeature, targetFeature))) {
                         continue; // kept as written (placeholder)
                     }
-                    release(pending);
+                    // the further ends of "connect (a, b, c)": all of them, or the statement stays text
+                    std::vector<ElementId> more;
+                    bool complete = true;
+                    for (const auto &path: pending.MoreSecond) {
+                        std::string feature;
+                        const auto end = endOf(path, feature);
+                        if (!end || !feature.empty())
+                            complete = false;
+                        else
+                            more.push_back(*end);
+                    }
+                    if (!complete || ((pending.Nary || !more.empty()) && (!sourceFeature.empty() || !targetFeature.empty())))
+                        continue;
+                    const std::size_t before = Model.relationships().size();
+                    const auto previousLost = Report.SkippedConstructs.size();
                     addRelationship(kind, *source, *target, label, pending.Line, pending.Name, pending.TypeName,
                                     pending.Definition, sourceFeature, targetFeature,
-                                    kind == RelationshipKind::Flow && pending.Text == "succession");
+                                    kind == RelationshipKind::Flow && pending.Text == "succession", nary);
+                    if (Model.relationships().size() == before) {
+                        Report.SkippedConstructs.resize(previousLost); // not added: the statement stays text
+                        continue;
+                    }
+                    const RelationshipId added = Model.relationships().back().Id;
+                    try {
+                        if (pending.Nary || !more.empty())
+                            Model.setExtraEnds(added, {}, more, pending.Nary);
+                        if (!pending.FirstMultiplicity.empty() || !pending.SecondMultiplicity.empty())
+                            Model.setEndMultiplicities(added, pending.FirstMultiplicity, pending.SecondMultiplicity);
+                    } catch (const std::exception &) {
+                        Model.removeRelationship(added); // kept as written
+                        --Report.ImportedRelationships;
+                        Report.SkippedConstructs.resize(previousLost);
+                        continue;
+                    }
+                    release(pending);
                 }
                 for (auto &[id, references]: External) {
                     try {
@@ -2805,17 +3026,34 @@ namespace StructuraSystems::Diagram {
                 const auto source = resolve(pending.Scope, pending.First, false, isEnd);
                 const auto target = resolve(pending.Scope, pending.Second, false, isEnd);
                 const RelationshipKind kind = dependency ? RelationshipKind::Dependency : RelationshipKind::Message;
-                if (!source || !target || !RelationshipRules::canRelate(Model, kind, *source, *target))
+                const bool nary = !pending.MoreFirst.empty() || !pending.MoreSecond.empty();
+                if (!source || !target ||
+                    !(nary ? RelationshipRules::canRelateAgain(Model, kind, *source, *target)
+                           : RelationshipRules::canRelate(Model, kind, *source, *target)))
                     return; // kept as written (placeholder)
+                // further clients and suppliers: all of them, or the statement stays text
+                std::vector<ElementId> moreSources;
+                std::vector<ElementId> moreTargets;
+                for (const auto *list: {&pending.MoreFirst, &pending.MoreSecond}) {
+                    for (const auto &path: *list) {
+                        const auto end = resolve(pending.Scope, path, false, isEnd);
+                        if (!end)
+                            return;
+                        (list == &pending.MoreFirst ? moreSources : moreTargets).push_back(*end);
+                    }
+                }
                 release(pending);
                 const std::string label = (dependency ? "dependency from " : "message from ") + joinPath(pending.First) +
                                           " to " + joinPath(pending.Second);
                 try {
-                    const auto id = Model.addRelationship(kind, *source, *target);
+                    const auto id = nary ? Model.addFurtherRelationship(kind, *source, *target)
+                                         : Model.addRelationship(kind, *source, *target);
                     if (!pending.Name.empty() || !pending.TypeName.empty())
                         Model.setRelationshipLabel(id, pending.Name, pending.TypeName);
                     if (pending.Kind == Pending::Type::MessageThen)
                         Model.setSequenced(id, true);
+                    if (!moreSources.empty() || !moreTargets.empty())
+                        Model.setExtraEnds(id, moreSources, moreTargets, false);
                     Model.setRelationshipContext(id, pending.Scope); // stays where it was declared
                     ++Report.ImportedRelationships;
                 } catch (const std::exception &exception) {
@@ -2900,6 +3138,24 @@ namespace StructuraSystems::Diagram {
                         label = "frame " + joinPath(pending.First);
                         break;
                     }
+                    case Pending::Type::Exhibit:
+                    case Pending::Type::Assert:
+                    case Pending::Type::Assume:
+                    case Pending::Type::Require: {
+                        kind = pending.Kind == Pending::Type::Exhibit ? RelationshipKind::Exhibit
+                               : pending.Kind == Pending::Type::Assert ? RelationshipKind::Assert
+                               : pending.Kind == Pending::Type::Assume ? RelationshipKind::Assume : RelationshipKind::Require;
+                        source = Model.contains(pending.Source) ? std::optional<ElementId>(pending.Source) : std::nullopt;
+                        const auto accepted = kind == RelationshipKind::Exhibit
+                                              ? ofKind({ElementKind::StateUsage})
+                                              : ofKind({ElementKind::ConstraintUsage, ElementKind::RequirementUsage});
+                        target = resolve(pending.Scope, pending.First, false, [&](ElementId id) {
+                            return accepted(id) && id != pending.Source && !Model.isAncestor(id, pending.Source) &&
+                                   !Model.isAncestor(pending.Source, id);
+                        });
+                        label = std::string(sourceKeyword(kind)) + " " + joinPath(pending.First);
+                        break;
+                    }
                     case Pending::Type::Verify:
                         kind = RelationshipKind::Verify;
                         source = Model.contains(pending.Source) ? std::optional<ElementId>(pending.Source) : std::nullopt;
@@ -2928,15 +3184,14 @@ namespace StructuraSystems::Diagram {
             void addRelationship(RelationshipKind kind, ElementId source, ElementId target, const std::string &label,
                                  std::size_t line, const std::string &name = {}, const std::string &typeName = {},
                                  const std::string &definition = {}, const std::string &sourceFeature = {},
-                                 const std::string &targetFeature = {}, bool successionFlow = false) {
+                                 const std::string &targetFeature = {}, bool successionFlow = false, bool further = false) {
                 try {
-                    const auto id = Model.addRelationship(kind, source, target);
+                    const auto id = further ? Model.addFurtherRelationship(kind, source, target)
+                                            : Model.addRelationship(kind, source, target, sourceFeature, targetFeature);
                     if (!name.empty() || !typeName.empty())
                         Model.setRelationshipLabel(id, name, typeName);
                     if (!definition.empty())
                         Model.setFlowDefinition(id, definition);
-                    if (!sourceFeature.empty() || !targetFeature.empty())
-                        Model.setEndFeatures(id, sourceFeature, targetFeature);
                     if (successionFlow)
                         Model.setSuccessionFlow(id, true);
                     ++Report.ImportedRelationships;
@@ -3040,6 +3295,17 @@ namespace StructuraSystems::Diagram {
                 continue;
             }
             break;
+        }
+        // "rep r1 language "Python" /* ... */", "language "Python" /* ... */": a textual representation
+        if (i < tokens.size() && tokens[i].Type == TokenType::Identifier &&
+            (tokens[i].Text == "rep" || (tokens[i].Text == "language" && i + 1 < tokens.size() &&
+                                         tokens[i + 1].Type == TokenType::String))) {
+            std::string name;
+            if (tokens[i].Text == "rep" && i + 1 < tokens.size() &&
+                (tokens[i + 1].Type == TokenType::Name ||
+                 (tokens[i + 1].Type == TokenType::Identifier && tokens[i + 1].Text != "language")))
+                name = tokens[i + 1].Text;
+            return {"rep", name};
         }
         std::string keyword;
         while (i < tokens.size() && tokens[i].Type == TokenType::Identifier && StatementKeywords.count(tokens[i].Text) > 0) {
@@ -3510,6 +3776,127 @@ namespace StructuraSystems::Diagram {
             start = end + 1;
         }
         return result + "\n */";
+    }
+
+    AnnotationStatement SysMLTextImporter::describeAnnotation(const std::string &statement) {
+        AnnotationStatement result;
+        const auto tokens = tokenize(statement);
+        std::size_t i = 0;
+        if (tokens.empty() || tokens[0].Type == TokenType::End)
+            return result;
+        if (tokens[0].Type == TokenType::Comment) {
+            if (tokens[0].Text.rfind("/*", 0) != 0)
+                return result; // "// a note": no element of the model
+            result.Keyword = "comment";
+            result.KeywordWritten = false;
+            result.Body = commentBody(tokens[0].Text);
+            return result;
+        }
+        if (tokens[0].Type == TokenType::Identifier && tokens[0].Text == "language" && tokens.size() > 2 &&
+            tokens[1].Type == TokenType::String) {
+            // "language "Python" /* ... */": a textual representation written without "rep"
+            if (tokens[2].Type != TokenType::Comment || tokens[2].Text.rfind("/*", 0) != 0)
+                return result;
+            result.Keyword = "rep";
+            result.KeywordWritten = false;
+            result.Language = tokens[1].Text;
+            result.Body = commentBody(tokens[2].Text);
+            return result;
+        }
+        if (tokens[0].Type != TokenType::Identifier ||
+            (tokens[0].Text != "comment" && tokens[0].Text != "doc" && tokens[0].Text != "rep"))
+            return result;
+        const std::string keyword = tokens[0].Text;
+        i = 1;
+        const auto isName = [&](std::size_t k) {
+            return k < tokens.size() && (tokens[k].Type == TokenType::Name ||
+                                         (tokens[k].Type == TokenType::Identifier && tokens[k].Text != "about" &&
+                                          tokens[k].Text != "locale" && tokens[k].Text != "language"));
+        };
+        if (i + 2 < tokens.size() && tokens[i].Type == TokenType::Symbol && tokens[i].Text == "<") {
+            result.ShortName = tokens[i + 1].Text;
+            i += 3; // < name >
+        }
+        if (isName(i))
+            result.Name = tokens[i++].Text;
+        if (keyword == "comment" && i < tokens.size() && tokens[i].Type == TokenType::Identifier && tokens[i].Text == "about") {
+            ++i;
+            std::string reference;
+            for (; i < tokens.size(); ++i) {
+                const Token &token = tokens[i];
+                if (token.Type == TokenType::Symbol && token.Text == ",") {
+                    result.About.push_back(reference);
+                    reference.clear();
+                    continue;
+                }
+                if (token.Type == TokenType::Symbol && (token.Text == "::" || token.Text == ".")) {
+                    reference += token.Text;
+                    continue;
+                }
+                if (token.Type == TokenType::Name) {
+                    reference += SysMLCodeGenerator::formatName(token.Text);
+                    continue;
+                }
+                if (token.Type == TokenType::Identifier && token.Text != "locale") {
+                    reference += token.Text;
+                    continue;
+                }
+                break;
+            }
+            if (!reference.empty())
+                result.About.push_back(reference);
+        }
+        if (i + 1 < tokens.size() && tokens[i].Type == TokenType::Identifier &&
+            (tokens[i].Text == "locale" || tokens[i].Text == "language") && tokens[i + 1].Type == TokenType::String) {
+            (tokens[i].Text == "locale" ? result.Locale : result.Language) = tokens[i + 1].Text;
+            i += 2;
+        }
+        if (i >= tokens.size() || tokens[i].Type != TokenType::Comment || tokens[i].Text.rfind("/*", 0) != 0)
+            return result; // not one of the forms shown as note
+        result.Keyword = keyword;
+        result.Body = commentBody(tokens[i].Text);
+        return result;
+    }
+
+    std::string SysMLTextImporter::annotationStatement(const AnnotationStatement &annotation) {
+        std::string body = annotation.Body;
+        for (std::size_t at = body.find("*/"); at != std::string::npos; at = body.find("*/", at))
+            body.replace(at, 2, "* /");
+        while (!body.empty() && (body.back() == '\n' || body.back() == ' '))
+            body.pop_back();
+        std::string text;
+        if (annotation.KeywordWritten) {
+            text = annotation.Keyword;
+            if (!annotation.ShortName.empty())
+                text += " <" + SysMLCodeGenerator::formatName(annotation.ShortName) + ">";
+            if (!annotation.Name.empty())
+                text += " " + SysMLCodeGenerator::formatName(annotation.Name);
+            if (!annotation.About.empty()) {
+                text += " about ";
+                for (std::size_t k = 0; k < annotation.About.size(); ++k)
+                    text += (k > 0 ? ", " : "") + annotation.About[k];
+            }
+            if (!annotation.Locale.empty())
+                text += " locale \"" + annotation.Locale + "\"";
+            if (!annotation.Language.empty())
+                text += " language \"" + annotation.Language + "\"";
+            text += " ";
+        } else if (!annotation.Language.empty()) {
+            text = "language \"" + annotation.Language + "\" "; // a rep written without its keyword
+        }
+        if (body.find('\n') == std::string::npos)
+            return text + "/* " + body + " */";
+        text += "/*";
+        std::size_t start = 0;
+        while (start <= body.size()) {
+            std::size_t end = body.find('\n', start);
+            if (end == std::string::npos)
+                end = body.size();
+            const std::string line = body.substr(start, end - start);
+            text += "\n *" + (line.empty() ? std::string() : " " + line);
+            start = end + 1;
+        }
+        return text + "\n */";
     }
 
     std::optional<ElementId> SysMLTextImporter::docOf(const SemanticModel &model, ElementId id) {

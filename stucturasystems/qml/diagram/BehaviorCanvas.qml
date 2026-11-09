@@ -233,6 +233,66 @@ FocusScope {
                 }
             }
 
+            // swimlanes: a dashed lane per performer with «performer» name and "perform actions" on top
+            Repeater {
+                model: canvas.controller.lanes
+                Item {
+                    id: lane
+                    required property var modelData
+                    objectName: "swimlane"
+                    x: modelData.x
+                    y: modelData.y
+                    width: modelData.width
+                    height: modelData.height
+                    z: 1
+                    Canvas {
+                        id: laneOutline
+                        anchors.fill: parent
+                        onPaint: {
+                            const context = getContext("2d")
+                            context.reset()
+                            context.strokeStyle = Theme.textSecondary
+                            context.lineWidth = 1.2
+                            context.setLineDash([6, 4])
+                            context.strokeRect(0.5, 0.5, width - 1, height - 1)
+                            context.beginPath()
+                            context.moveTo(0, 44); context.lineTo(width, 44)
+                            context.stroke()
+                        }
+                        onWidthChanged: requestPaint()
+                        onHeightChanged: requestPaint()
+                    }
+                    Column {
+                        x: 0
+                        y: 4
+                        width: lane.width
+                        Label {
+                            width: parent.width
+                            horizontalAlignment: Text.AlignHCenter
+                            text: "«performer»"
+                            font.pixelSize: 10
+                            color: Theme.textSecondary
+                        }
+                        Label {
+                            width: parent.width
+                            horizontalAlignment: Text.AlignHCenter
+                            text: lane.modelData.title
+                            font.pixelSize: 12
+                            font.weight: Font.Medium
+                            color: Theme.textPrimary
+                        }
+                        Label {
+                            width: parent.width
+                            horizontalAlignment: Text.AlignHCenter
+                            text: qsTr("perform actions")
+                            font.pixelSize: 9
+                            font.italic: true
+                            color: Theme.textSecondary
+                        }
+                    }
+                }
+            }
+
             Repeater {
                 model: canvas.controller.nodes
 

@@ -167,12 +167,24 @@ TEST_CASE("Importer: references that are not in the block are kept as written") 
 }
 TEST_CASE("Importer: rule violations and duplicates are kept as text") {
     SemanticModel model;
-    const std::string text = "attribute loose;\npart a {\n    part b;\n    part b;\n}\npart def D {\n    package P;\n}\n";
+    const std::string text = "enum loose;\npart a {\n    part b;\n    part b;\n}\npart def D {\n    package P;\n}\n";
     const auto report = SysMLTextImporter::importText(text, model);
     CHECK(report.lossless());
     CHECK(model.element(model.children(RootId).at(0)).kind() == ElementKind::Textual);
     CHECK_EQ(SysMLCodeGenerator().generate(model), text);
 }
+TEST_CASE("Importer: attributes and ports on package level are elements (tables 5 and 10)") {
+    SemanticModel model;
+    const std::string text = "package P {\n    port def FuelPort;\n    attribute mass : Mass;\n    attribute speed : Real = 5;\n"
+                             "    port fuel : FuelPort;\n}\n";
+    CHECK(SysMLTextImporter::importText(text, model).lossless());
+    const ElementId package = model.children(RootId).at(0);
+    CHECK(model.element(model.children(package).at(1)).kind() == ElementKind::Attribute);
+    CHECK(model.element(model.children(package).at(2)).kind() == ElementKind::Attribute);
+    CHECK(model.element(model.children(package).at(3)).kind() == ElementKind::PortUsage);
+    CHECK_EQ(SysMLCodeGenerator().generate(model), text);
+}
+
 TEST_CASE("Importer: comments, doc and imports are kept") {
     SemanticModel model;
     const std::string text = "// note\nprivate import ScalarValues::*;\npart def A {\n    doc /* the A */\n    attribute x;\n    /* block\n     * comment */\n}\n";
@@ -247,6 +259,8 @@ TEST_CASE("Importer: random models survive generate -> import -> generate") {
     int shadowed = 0;
     std::map<RelationshipKind, int> relationshipKinds;
     int unnamed = 0;
+    int nary = 0;
+    int multiplicities = 0;
     int shortNames = 0;
     for (int run = 0; run < 1000; ++run) {
         SemanticModel model;
@@ -255,7 +269,7 @@ TEST_CASE("Importer: random models survive generate -> import -> generate") {
             const auto kind = static_cast<ElementKind>(random() % 47); // every kind but Textual
             const ElementId owner = ids.empty() || random() % 3 == 0 ? RootId : ids[random() % ids.size()];
             std::string name = names[random() % std::size(names)] + std::to_string(random() % 3);
-            if ((mayBeUnnamed(kind) && random() % 5 == 0) || isAnonymousKind(kind) ||
+            if ((mayBeUnnamed(kind) && kind != ElementKind::EnumerationLiteral && random() % 5 == 0) || isAnonymousKind(kind) ||
                 (kind == ElementKind::MetadataUsage && random() % 2))
                 name.clear(); // "require constraint { ... }", "objective { ... }", "import a::*;", "@Safety;"
             try {
@@ -479,7 +493,7 @@ TEST_CASE("Importer: random models survive generate -> import -> generate") {
             } catch (const ModelError &) {
             }
         }
-        for (int step = 0; step < 20 && ids.size() > 1; ++step) {
+        for (int step = 0; step < 24 && ids.size() > 1; ++step) {
             ElementId source = ids[random() % ids.size()];
             ElementId target = ids[random() % ids.size()];
             // steps 13 - 15: connection, interface, binding (rare by chance with so many kinds)
@@ -501,6 +515,20 @@ TEST_CASE("Importer: random models survive generate -> import -> generate") {
                     return isUsageKind(kind) && kind != ElementKind::EnumerationLiteral && kind != ElementKind::ControlNode;
                 };
                 const auto any = [](ElementKind kind) { return kind != ElementKind::Textual; };
+                const auto state = [](ElementKind kind) { return kind == ElementKind::StateUsage; };
+                const auto constraint = [](ElementKind kind) {
+                    return kind == ElementKind::ConstraintUsage || kind == ElementKind::RequirementUsage;
+                };
+                const auto partLike = [](ElementKind kind) {
+                    return kind == ElementKind::PartUsage || kind == ElementKind::PartDefinition;
+                };
+                const auto requirementLike = [](ElementKind kind) { return isRequirementKind(kind); };
+                if (step >= 20) {
+                    target = pick(step == 20 ? +state : +constraint);
+                    source = pick(step == 20 ? +partLike : step == 21 ? +usage : +requirementLike);
+                    if (source == RootId || target == RootId)
+                        continue;
+                } else {
                 target = pick(step == 19 ? +requirement
                               : step == 12 ? [](ElementKind kind) { return kind == ElementKind::UseCaseUsage; }
                               : step == 13 ? +connectable : step == 14 ? +port : step == 15 ? +attribute
@@ -514,6 +542,7 @@ TEST_CASE("Importer: random models survive generate -> import -> generate") {
                               : step == 16 ? +messageEnd : step == 17 ? +usage : +any);
                 if (source == RootId || target == RootId)
                     continue;
+                }
             }
             try {
                 const auto relationship = model.addRelationship(
@@ -522,7 +551,9 @@ TEST_CASE("Importer: random models survive generate -> import -> generate") {
                         : step == 13 ? RelationshipKind::Connection : step == 14 ? RelationshipKind::Interface
                         : step == 15 ? RelationshipKind::Binding : step == 16 ? RelationshipKind::Message
                         : step == 17 ? RelationshipKind::Allocation : step == 18 ? RelationshipKind::Dependency
-                        : step == 19 ? RelationshipKind::Frame
+                        : step == 19 ? RelationshipKind::Frame : step == 20 ? RelationshipKind::Exhibit
+                        : step == 21 ? RelationshipKind::Assert : step == 22 ? RelationshipKind::Assume
+                        : step == 23 ? RelationshipKind::Require
                         : static_cast<RelationshipKind>(random() % 14), source, target);
                 const auto kind = model.relationship(relationship).Kind;
                 if (kind == RelationshipKind::Succession && random() % 2)
@@ -537,6 +568,32 @@ TEST_CASE("Importer: random models survive generate -> import -> generate") {
                     model.setRelationshipLabel(relationship, random() % 2 ? "link" : "", random() % 2 ? "Fuel" : "");
                 if (kind == RelationshipKind::Dependency && random() % 2)
                     model.setRelationshipLabel(relationship, "uses", "");
+                // n-ary connections and dependencies, end multiplicities
+                const auto third = [&](auto accept) -> std::optional<ElementId> {
+                    for (int attempt = 0; attempt < 10; ++attempt) {
+                        const ElementId id = ids[random() % ids.size()];
+                        const auto &chosen = model.relationship(relationship);
+                        if (model.contains(id) && id != chosen.Source && id != chosen.Target && accept(model.element(id).kind()) &&
+                            !model.element(id).name().empty())
+                            return id;
+                    }
+                    return std::nullopt;
+                };
+                try {
+                    if ((kind == RelationshipKind::Connection || kind == RelationshipKind::Interface) && random() % 4 == 0)
+                        model.setEndMultiplicities(relationship, "[0..1]", random() % 2 ? "[1]" : "");
+                    else if (kind == RelationshipKind::Connection && random() % 3 == 0) {
+                        if (const auto end = third([](ElementKind k) { return k == ElementKind::PartUsage || k == ElementKind::PortUsage; }))
+                            model.setExtraEnds(relationship, {}, {*end}, true);
+                        else
+                            model.setExtraEnds(relationship, {}, {}, true); // "connect (a, b)"
+                    } else if (kind == RelationshipKind::Dependency && random() % 3 == 0) {
+                        if (const auto end = third([](ElementKind k) { return k != ElementKind::Textual; }))
+                            model.setExtraEnds(relationship, random() % 2 ? std::vector<ElementId>{*end} : std::vector<ElementId>{},
+                                               random() % 2 ? std::vector<ElementId>() : std::vector<ElementId>{*end}, false);
+                    }
+                } catch (const ModelError &) {
+                }
                 if (kind == RelationshipKind::Message && random() % 3 == 0)
                     model.setSequenced(relationship, true);
                 if (kind == RelationshipKind::Flow && random() % 2)
@@ -588,8 +645,11 @@ TEST_CASE("Importer: random models survive generate -> import -> generate") {
             } catch (const ModelError &) {
             }
         }
-        for (const auto &relationship: model.relationships())
+        for (const auto &relationship: model.relationships()) {
             ++relationshipKinds[relationship.Kind];
+            nary += relationship.Nary || !relationship.ExtraSources.empty() || !relationship.ExtraTargets.empty() ? 1 : 0;
+            multiplicities += relationship.SourceMultiplicity.empty() ? 0 : 1;
+        }
         for (const ElementId id: ids) {
             if (model.contains(id)) {
                 unnamed += model.element(id).name().empty() ? 1 : 0;
@@ -645,6 +705,12 @@ TEST_CASE("Importer: random models survive generate -> import -> generate") {
     CHECK(relationshipKinds[RelationshipKind::Allocation] > 20);
     CHECK(relationshipKinds[RelationshipKind::Dependency] > 20);
     CHECK(relationshipKinds[RelationshipKind::Frame] > 10);
+    CHECK(relationshipKinds[RelationshipKind::Exhibit] > 10);
+    CHECK(relationshipKinds[RelationshipKind::Assert] > 10);
+    CHECK(relationshipKinds[RelationshipKind::Assume] > 10);
+    CHECK(relationshipKinds[RelationshipKind::Require] > 10);
+    CHECK(nary > 10);
+    CHECK(multiplicities > 3); // connections are rare (their ends need parts or ports)
     CHECK(unnamed > 20);
     CHECK(shortNames > 100);
 }
@@ -720,7 +786,7 @@ TEST_CASE("Importer: allocations with refining allocations, allocation definitio
             "        allocate LogicalModel::torqueGenerator.generateTorque to powerTrain.engine.generateTorque;\n"
             "        allocation detail : LogicalToPhysical allocate LogicalModel::torqueGenerator to powerTrain.engine;\n"
             "    }\n"
-            "    dependency from powerTrain.engine to LogicalModel;\n"
+            "    dependency powerTrain::engine to LogicalModel;\n"
             "}\n"
             // kept as text (several suppliers): statements kept as text come before the relationships of a body
             "dependency Schemata from PhysicalModel to LogicalModel::LogicalElement, LogicalModel::torqueGenerator;\n"
@@ -736,7 +802,7 @@ TEST_CASE("Importer: allocations with refining allocations, allocation definitio
     }
     CHECK_EQ(kinds[RelationshipKind::Allocation], 4);
     CHECK_EQ(refining, 2);
-    CHECK_EQ(kinds[RelationshipKind::Dependency], 1); // several suppliers: kept as written
+    CHECK_EQ(kinds[RelationshipKind::Dependency], 2); // also the one with several suppliers (n-ary)
     const ElementId physical = model.children(RootId)[1];
     const ElementId definition = model.children(physical)[2];
     CHECK(model.element(definition).kind() == ElementKind::AllocationDefinition);
@@ -1985,4 +2051,140 @@ TEST_CASE("Importer: succession flow (slide 57)") {
     CHECK_EQ(SysMLCodeGenerator().generate(model), text);
     model.setSuccessionFlow(model.relationships().front().Id, false);
     CHECK(SysMLCodeGenerator().generate(model).find("    flow of Torque from") != std::string::npos);
+}
+
+TEST_CASE("Importer: dependencies as the strict grammar reads them (qualified names, \"from\" only after a name)") {
+    SemanticModel model;
+    CHECK(SysMLTextImporter::importText("part vehicle {\n    part ecu;\n    part engine;\n}\npackage Requirements;\n"
+                                        "dependency vehicle::ecu to Requirements;\n"
+                                        "dependency trace from vehicle::engine to Requirements;\n"
+                                        "dependency from vehicle.ecu to vehicle.engine;\n", model).lossless());
+    CHECK_EQ(model.relationships().size(), std::size_t(3));
+    const std::string text = SysMLCodeGenerator().generate(model);
+    CHECK(text.find("dependency vehicle::ecu to Requirements;\n") != std::string::npos);
+    CHECK(text.find("dependency trace from vehicle::engine to Requirements;\n") != std::string::npos);
+    CHECK(text.find("vehicle.ecu") == std::string::npos);
+    CHECK(text.find("dependency from") == std::string::npos);
+}
+
+TEST_CASE("Importer: comments, documentation and textual representations taken apart (table 2)") {
+    const auto comment = SysMLTextImporter::describeAnnotation("comment c2 about part1::attribute1, Vehicle /* The annotated element. */");
+    CHECK_EQ(comment.Keyword, std::string("comment"));
+    CHECK_EQ(comment.Name, std::string("c2"));
+    CHECK_EQ(comment.About, std::vector<std::string>({"part1::attribute1", "Vehicle"}));
+    CHECK_EQ(comment.Body, std::string("The annotated element."));
+    CHECK_EQ(SysMLTextImporter::annotationStatement(comment),
+             std::string("comment c2 about part1::attribute1, Vehicle /* The annotated element. */"));
+
+    const auto bare = SysMLTextImporter::describeAnnotation("/* This is a comment. */");
+    CHECK_EQ(bare.Keyword, std::string("comment"));
+    CHECK(!bare.KeywordWritten);
+    CHECK_EQ(SysMLTextImporter::annotationStatement(bare), std::string("/* This is a comment. */"));
+    CHECK(SysMLTextImporter::describeAnnotation("// a note").Keyword.empty());
+
+    const auto doc = SysMLTextImporter::describeAnnotation("doc Document1 locale \"fr_BE\" /*\n * Ceci n'est pas\n * une pipe.\n */");
+    CHECK_EQ(doc.Keyword, std::string("doc"));
+    CHECK_EQ(doc.Name, std::string("Document1"));
+    CHECK_EQ(doc.Locale, std::string("fr_BE"));
+    CHECK_EQ(doc.Body, std::string("Ceci n'est pas\nune pipe."));
+    CHECK_EQ(SysMLTextImporter::annotationStatement(doc),
+             std::string("doc Document1 locale \"fr_BE\" /*\n * Ceci n'est pas\n * une pipe.\n */"));
+
+    const auto rep = SysMLTextImporter::describeAnnotation("rep r1 language \"Python\" /* def square(x): return x*x */");
+    CHECK_EQ(rep.Keyword, std::string("rep"));
+    CHECK_EQ(rep.Language, std::string("Python"));
+    CHECK_EQ(rep.Body, std::string("def square(x): return x*x"));
+
+    // "language "language1" /* body1 */": a rep written without its keyword
+    const auto bareRep = SysMLTextImporter::describeAnnotation("language \"language1\" /* body1 */");
+    CHECK_EQ(bareRep.Keyword, std::string("rep"));
+    CHECK(!bareRep.KeywordWritten);
+    CHECK_EQ(bareRep.Language, std::string("language1"));
+    CHECK_EQ(SysMLTextImporter::annotationStatement(bareRep), std::string("language \"language1\" /* body1 */"));
+}
+
+TEST_CASE("Importer: unnamed rep, bare language and comment about stay statements of their own") {
+    // without ';' they end at their comment, not at the next ';' or '}' (table 2, also as last statement of a calc)
+    const std::string text =
+            "rep language \"language1\" /* body1 */\n"
+            "language \"language1\" /* body1 */\n"
+            "comment about part1 /* The annotated element. */\n"
+            "part part1 {\n"
+            "    port p1;\n"
+            "}\n"
+            "calc def square {\n"
+            "    in attribute x : Real;\n"
+            "    rep square language \"Python\" /* return x**2 */\n"
+            "}\n";
+    SemanticModel model;
+    CHECK(SysMLTextImporter::importText(text, model).lossless());
+    int notes = 0;
+    std::optional<ElementId> square;
+    for (const ElementId id: model.children(RootId)) {
+        const auto &element = model.element(id);
+        if (element.kind() == ElementKind::Textual) {
+            CHECK(!SysMLTextImporter::describeAnnotation(element.text()).Keyword.empty());
+            ++notes;
+        }
+        if (element.name() == "square")
+            square = id;
+    }
+    CHECK_EQ(notes, 3);
+    CHECK(square.has_value());
+    if (square)
+        CHECK(model.element(*square).expression().empty()); // the rep is no expression of the calc
+    CHECK_EQ(SysMLCodeGenerator().generate(model), text);
+}
+
+TEST_CASE("Importer: exhibit, assert, assume and require of elements declared elsewhere") {
+    const std::string text =
+            "package P {\n"
+            "    state def StateDef1;\n"
+            "    state compositeState1;\n"
+            "    constraint constraint1 {\n"
+            "        true\n"
+            "    }\n"
+            "    requirement requirement2 {\n"
+            "        assume constraint1;\n"
+            "        require constraint1;\n"
+            "    }\n"
+            "    part part1 {\n"
+            "        exhibit state es1 : StateDef1;\n"
+            "        exhibit compositeState1;\n"
+            "        assert constraint1;\n"
+            "    }\n"
+            "}\n";
+    SemanticModel model;
+    CHECK(SysMLTextImporter::importText(text, model).lossless());
+    std::map<RelationshipKind, int> kinds;
+    for (const auto &relationship: model.relationships())
+        ++kinds[relationship.Kind];
+    CHECK_EQ(kinds[RelationshipKind::Exhibit], 1);
+    CHECK_EQ(kinds[RelationshipKind::Assert], 1);
+    CHECK_EQ(kinds[RelationshipKind::Assume], 1);
+    CHECK_EQ(kinds[RelationshipKind::Require], 1);
+    CHECK_EQ(SysMLCodeGenerator().generate(model), text);
+}
+
+TEST_CASE("Importer: multiplicities with expressions as bounds ([m], [1..n]) are kept in the element (table 4)") {
+    const std::string text = "part def Base {\n"
+                             "    attribute m : ScalarValues::Integer;\n"
+                             "    part part1 : PartDef1[*];\n"
+                             "    part part1S : PartDef1S[m] subsets part1;\n"
+                             "    part wheels : Wheel[1..m];\n"
+                             "}\n"
+                             "part def Special :> Base {\n"
+                             "    part part2 : PartDef1R;\n"
+                             "    part part1R : PartDef1R[m] redefines part1 = part2;\n"
+                             "}\n";
+    CHECK_EQ(roundTrip(text), text);
+    SemanticModel model;
+    CHECK(SysMLTextImporter::importText(text, model).lossless());
+    const ElementId base = model.children(RootId).front();
+    const auto &subsetted = model.element(model.children(base).at(2));
+    CHECK(subsetted.kind() == ElementKind::PartUsage);
+    CHECK(subsetted.multiplicity().has_value());
+    if (subsetted.multiplicity())
+        CHECK_EQ(subsetted.multiplicity()->toString(), std::string("[m]"));
+    CHECK(model.element(model.children(base).at(3)).kind() == ElementKind::PartUsage);
 }

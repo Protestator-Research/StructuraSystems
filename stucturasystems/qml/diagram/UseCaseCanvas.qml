@@ -62,7 +62,7 @@ FocusScope {
         canvas.forceActiveFocus()
     }
 
-    /** Double-click: a use case in the element dialog, an actor / boundary in the group dialog. */
+    /** Double-click: a use case in the element dialog, an actor / subject in the group dialog. */
     function editNode(nodeId) {
         const element = controller.elementFor(nodeId)
         if (element.length > 0)

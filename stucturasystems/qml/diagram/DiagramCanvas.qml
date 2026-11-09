@@ -61,6 +61,49 @@ FocusScope {
         canvas.forceActiveFocus()
         if (tool === DiagramTypes.ToolStatement && id.length > 0)
             editDialog.openFor(id) // the text is what this element is about
+        else if (id.length > 0)
+            askNotation(id, point)
+    }
+
+    /** [{header, text} | {subject, group, value, text, checked, enabled}] for the notation menu. */
+    function notationItems(choices) {
+        const items = []
+        for (let c = 0; c < choices.length; ++c) {
+            const choice = choices[c]
+            const individual = choice.mode === "individual"
+            items.push({ header: true, text: choice.label + (individual ? "" : qsTr(" (set for all in the toolbar)")) })
+            for (let o = 0; o < choice.options.length; ++o) {
+                const option = choice.options[o]
+                items.push({ header: false, text: option.label, subject: choice.subject, group: choice.group,
+                             value: option.value, checked: option.value === choice.value, enabled: individual })
+            }
+        }
+        return items
+    }
+
+    /** Right after creating an element: how it (or its owner) is drawn, where the specification offers a choice. */
+    function askNotation(id, point) {
+        const choices = controller.creationChoices(id)
+        if (choices.length === 0)
+            return
+        notationMenu.title_ = qsTr("How shall it be drawn?")
+        notationMenu.items = notationItems(choices)
+        const at = canvas.mapFromItem(world, point.x, point.y)
+        notationMenu.popup(canvas, at.x, at.y)
+    }
+
+    /** Context menu: the notations of an element (and of the entry under the mouse). */
+    function openNotationMenu(ids) {
+        let choices = []
+        for (let i = 0; i < ids.length; ++i) {
+            if (ids[i].length > 0)
+                choices = choices.concat(controller.notationChoices(ids[i]))
+        }
+        if (choices.length === 0)
+            return
+        notationMenu.title_ = qsTr("Notation")
+        notationMenu.items = notationItems(choices)
+        notationMenu.popup()
     }
 
     /** Palette click: parts and packages appear in the middle of the view, entries go to the selected part. */
@@ -70,6 +113,8 @@ FocusScope {
         canvas.forceActiveFocus()
         if (tool === DiagramTypes.ToolStatement && id.length > 0)
             editDialog.openFor(id)
+        else if (id.length > 0)
+            askNotation(id, point)
     }
 
     function editElement(id) {
@@ -102,6 +147,20 @@ FocusScope {
         if (source.length === 0)
             return
         const choice = controller.arrowReleased(source, point.x, point.y)
+        if (choice.kinds !== undefined && choice.kinds.length === 1 && choice.kinds[0] === DiagramTypes.Annotation) {
+            // from a comment or metadata: right away the choice what it is about
+            const targets = controller.annotationTargets(source, choice.target)
+            if (targets.length <= 1) {
+                controller.createEdge(DiagramTypes.Annotation, source, choice.target)
+                return
+            }
+            annotationMenu.source = source
+            annotationMenu.target = choice.target
+            annotationMenu.targets = targets
+            const near = canvas.mapFromItem(world, point.x, point.y)
+            annotationMenu.popup(canvas, near.x, near.y)
+            return
+        }
         if (choice.kinds !== undefined && choice.kinds.length > 0) {
             edgeKindMenu.source = source
             edgeKindMenu.target = choice.target
@@ -195,6 +254,8 @@ FocusScope {
                             edgeMenu.popup()
                         } else {
                             backgroundMenu.point = Qt.point(mouse.x, mouse.y)
+                            // inside a package frame: its own entries too (edit, notation)
+                            backgroundMenu.frameId = canvas.controller.nodeAt(mouse.x, mouse.y, true)
                             backgroundMenu.popup()
                         }
                         return
@@ -203,6 +264,69 @@ FocusScope {
                         canvas.controller.selectEdge(edge, (mouse.modifiers & (Qt.ControlModifier | Qt.ShiftModifier)) !== 0)
                     else
                         canvas.controller.clearSelection()
+                }
+            }
+
+            // a view rendered (framed view, graphical BNF view-frame): «view» name : Def in the tab, the expose /
+            // filter / render lines in the info compartment at the top right
+            Item {
+                id: viewFrame
+                objectName: "viewFrame"
+                readonly property rect bounds: canvas.controller.viewTitle.length > 0 && canvas.controller.geometryRevision >= 0
+                                               ? canvas.controller.contentBounds() : Qt.rect(0, 0, 0, 0)
+                visible: canvas.controller.viewTitle.length > 0
+                x: bounds.x - 30
+                y: bounds.y - 70 - Math.max(0, infoColumn.height - 30)
+                width: Math.max(bounds.width + 60, viewTitleLabel.implicitWidth + infoBox.width + 80)
+                height: bounds.y + bounds.height + 30 - y
+                z: -1
+
+                Rectangle {
+                    anchors.fill: parent
+                    color: "transparent"
+                    border.width: 1.4
+                    border.color: Theme.textPrimary
+                }
+                Rectangle {
+                    id: viewTab
+                    width: viewTitleLabel.implicitWidth + 24
+                    height: 26
+                    color: Theme.card
+                    border.width: 1.4
+                    border.color: Theme.textPrimary
+                    Label {
+                        id: viewTitleLabel
+                        anchors.centerIn: parent
+                        text: canvas.controller.viewTitle
+                        font.pixelSize: 13
+                        font.weight: Font.Medium
+                        color: Theme.textPrimary
+                    }
+                }
+                Rectangle {
+                    id: infoBox
+                    anchors.right: parent.right
+                    width: infoColumn.implicitWidth + 16
+                    height: infoColumn.height + 10
+                    visible: canvas.controller.viewInfo.length > 0
+                    color: Theme.card
+                    border.width: 1.2
+                    border.color: Theme.textPrimary
+                    Column {
+                        id: infoColumn
+                        x: 8
+                        y: 5
+                        Repeater {
+                            model: canvas.controller.viewInfo
+                            Label {
+                                required property string modelData
+                                text: modelData
+                                font.pixelSize: 11
+                                font.family: Theme.monoFamily
+                                color: Theme.textPrimary
+                            }
+                        }
+                    }
                 }
             }
 
@@ -302,6 +426,15 @@ FocusScope {
             text: qsTr("Delete %1 (with owned elements)").arg(nodeMenu.nodeLabel)
             onTriggered: canvas.controller.deleteElement(nodeMenu.nodeId)
         }
+        MenuItem {
+            // where the specification draws it in more than one way: how this one is drawn
+            visible: nodeMenu.nodeId.length > 0 && canvas.controller.notationRevision >= 0
+                     && (canvas.controller.notationChoices(nodeMenu.nodeId).length > 0
+                         || (nodeMenu.entryId.length > 0 && canvas.controller.notationChoices(nodeMenu.entryId).length > 0))
+            height: visible ? implicitHeight : 0
+            text: qsTr("Notation...")
+            onTriggered: canvas.openNotationMenu([nodeMenu.entryId, nodeMenu.nodeId])
+        }
     }
 
     Menu {
@@ -318,8 +451,44 @@ FocusScope {
             onTriggered: edgeDialog.openFor(edgeMenu.edgeKey)
         }
         MenuItem {
+            readonly property string subject: edgeMenu.edgeKey.length > 0 ? canvas.controller.notationSubject(edgeMenu.edgeKey) : ""
+            visible: subject.length > 0
+            height: visible ? implicitHeight : 0
+            text: qsTr("Notation...")
+            onTriggered: canvas.openNotationMenu([subject])
+        }
+        MenuItem {
             text: qsTr("Delete relationship")
             onTriggered: canvas.controller.deleteEdge(edgeMenu.edgeKey)
+        }
+    }
+
+    // the notations offered for an element (table 2, 3, 4, 9): a header per group, its options to tick
+    Menu {
+        id: notationMenu
+        objectName: "notationMenu"
+        property string title_
+        property var items: []
+
+        MenuItem {
+            text: notationMenu.title_
+            enabled: false
+        }
+        MenuSeparator {}
+        Repeater {
+            model: notationMenu.items
+            MenuItem {
+                required property var modelData
+                text: modelData.header ? modelData.text : "    " + modelData.text
+                font.bold: modelData.header
+                enabled: !modelData.header && modelData.enabled
+                checkable: !modelData.header
+                checked: modelData.checked === true
+                onTriggered: {
+                    if (!modelData.header)
+                        canvas.controller.setNotation(modelData.subject, modelData.group, modelData.value)
+                }
+            }
         }
     }
 
@@ -327,6 +496,26 @@ FocusScope {
         id: backgroundMenu
 
         property point point
+        property string frameId
+        readonly property string frameLabel: frameId.length > 0 ? canvas.controller.kindLabel(frameId) : ""
+
+        MenuItem {
+            visible: backgroundMenu.frameId.length > 0
+            height: visible ? implicitHeight : 0
+            text: qsTr("Edit %1...").arg(backgroundMenu.frameLabel)
+            onTriggered: canvas.editElement(backgroundMenu.frameId)
+        }
+        MenuItem {
+            visible: backgroundMenu.frameId.length > 0 && canvas.controller.notationRevision >= 0
+                     && canvas.controller.notationChoices(backgroundMenu.frameId).length > 0
+            height: visible ? implicitHeight : 0
+            text: qsTr("Notation...")
+            onTriggered: canvas.openNotationMenu([backgroundMenu.frameId])
+        }
+        MenuSeparator {
+            visible: backgroundMenu.frameId.length > 0
+            height: visible ? implicitHeight : 0
+        }
 
         MenuItem {
             text: qsTr("Add part here")
@@ -346,6 +535,36 @@ FocusScope {
         id: edgeKindMenu
         objectName: "edgeKindMenu"
         controller: canvas.controller
+        onAnnotationChosen: (source, target) => {
+            annotationMenu.source = source
+            annotationMenu.target = target
+            annotationMenu.targets = canvas.controller.annotationTargets(source, target)
+            Qt.callLater(() => annotationMenu.popup(canvas, edgeKindMenu.x, edgeKindMenu.y))
+        }
+    }
+
+    // a note is about the element or one of the features in its compartments ("about part1::attribute1", table 2)
+    Menu {
+        id: annotationMenu
+        objectName: "annotationTargetMenu"
+        property string source
+        property string target
+        property var targets: []
+
+        MenuItem {
+            text: qsTr("The comment is about")
+            enabled: false
+        }
+        MenuSeparator {}
+        Repeater {
+            model: annotationMenu.targets
+            MenuItem {
+                required property var modelData
+                required property int index
+                text: index === 0 ? modelData.label + qsTr(" (the element itself)") : modelData.label
+                onTriggered: canvas.controller.createAnnotation(annotationMenu.source, annotationMenu.target, modelData.path)
+            }
+        }
     }
 
     EdgeEditDialog {

@@ -34,6 +34,46 @@ namespace StructuraSystems::Client {
         constexpr qreal Inset = 16.0;           ///< nested states inside their state
         constexpr qreal FramePadding = 24.0;
         constexpr qreal EdgeHitDistance = 6.0;
+        constexpr qreal PinSize = 12.0;
+
+        bool isPartLike(ElementKind kind) {
+            return kind == ElementKind::PartUsage || kind == ElementKind::PartDefinition;
+        }
+        constexpr qreal LanePadding = 24.0;     ///< inside a swimlane, left and right of its actions
+        constexpr qreal LaneHeader = 46.0;      ///< «performer» name and "perform actions" on top of a lane
+        constexpr qreal PinSpacing = 70.0;      ///< between the pins on one side of an action
+
+        /// in / out / inout of a parameter (empty if it is none): "in item fuelIn : Fuel;"
+        std::string directionOf(const Diagram::SysMLElement &element) {
+            std::string direction;
+            for (const auto &prefix: element.prefixes()) {
+                if (prefix == "in" || prefix == "out" || prefix == "inout")
+                    direction = prefix;
+            }
+            return direction;
+        }
+
+        /// The parameters of an action shown as pins: its directed features (items, attributes, parts, ...).
+        std::vector<ElementId> parametersOf(const Diagram::SemanticModel &model, ElementId action) {
+            std::vector<ElementId> result;
+            for (const ElementId child: model.children(action)) {
+                const auto &element = model.element(child);
+                if (directionOf(element).empty() || element.name().empty())
+                    continue;
+                switch (element.kind()) {
+                    case ElementKind::ItemUsage:
+                    case ElementKind::Attribute:
+                    case ElementKind::PartUsage:
+                    case ElementKind::OccurrenceUsage:
+                    case ElementKind::PortUsage:
+                        result.push_back(child);
+                        break;
+                    default:
+                        break;
+                }
+            }
+            return result;
+        }
 
         QString q(const std::string &text) {
             return QString::fromStdString(text);
@@ -67,6 +107,19 @@ namespace StructuraSystems::Client {
             return text;
         }
 
+        /// What the view can show the inside of: actions, states, cases, and "perform action x { ... }" with a body.
+        bool isBehaviorContext(const Diagram::SemanticModel &model, ElementId id) {
+            const auto &element = model.element(id);
+            if (Diagram::isBehaviorKind(element.kind()))
+                return true;
+            if (element.kind() != ElementKind::ActionPerformance || element.performStyle() != Diagram::PerformStyle::DeclareAction)
+                return false;
+            const auto &children = model.children(id);
+            return std::any_of(children.begin(), children.end(), [&](ElementId child) {
+                return Diagram::isSuccessionEnd(model.element(child).kind());
+            });
+        }
+
         bool isState(ElementKind kind) {
             return kind == ElementKind::StateDefinition || kind == ElementKind::StateUsage;
         }
@@ -76,6 +129,30 @@ namespace StructuraSystems::Client {
             if (!element.typeName().empty())
                 title += QStringLiteral(" : ") + q(element.typeName());
             return title;
+        }
+
+        /// One step of the body of an if / loop in its compartment: "assign y := 2*x", "action charge : Charge",
+        /// "then decide" (empty for what is no step).
+        QString bodyText(const Diagram::SemanticModel &model, ElementId id) {
+            const auto &element = model.element(id);
+            QString text;
+            if (element.kind() == ElementKind::ActionUsage) {
+                text = formText(element);
+                if (!text.isEmpty() && !element.name().empty())
+                    text = q(element.name()) + QStringLiteral(": ") + text;
+                if (text.isEmpty())
+                    text = QStringLiteral("action ") + usageTitle(element);
+            } else if (element.kind() == ElementKind::ActionPerformance) {
+                text = QStringLiteral("perform ") + usageTitle(element);
+            } else if (element.kind() == ElementKind::ControlNode) {
+                const std::string keyword = keywordOf(element);
+                if (Diagram::isImplicitControlKeyword(keyword))
+                    return {};
+                text = (q(keyword) + QLatin1Char(' ') + q(element.name())).trimmed();
+            } else {
+                return {};
+            }
+            return (element.declaredWithThen() ? QStringLiteral("then ") : QString()) + text.trimmed();
         }
     }
 
@@ -96,7 +173,7 @@ namespace StructuraSystems::Client {
     // --- context -------------------------------------------------------------------------------------
 
     std::optional<ElementId> BehaviorController::context() const {
-        if (ContextElement && Model.contains(*ContextElement) && Diagram::isBehaviorKind(Model.element(*ContextElement).kind()))
+        if (ContextElement && Model.contains(*ContextElement) && isBehaviorContext(Model, *ContextElement))
             return ContextElement;
         return std::nullopt;
     }
@@ -114,7 +191,7 @@ namespace StructuraSystems::Client {
     void BehaviorController::setContextId(const QString &id) {
         bool ok = false;
         const auto value = id.toULongLong(&ok);
-        if (!ok || !Model.contains(value) || !Diagram::isBehaviorKind(Model.element(value).kind()) || ContextElement == value)
+        if (!ok || !Model.contains(value) || !isBehaviorContext(Model, value) || ContextElement == value)
             return;
         saveContextLayout();
         ContextElement = value;
@@ -136,7 +213,7 @@ namespace StructuraSystems::Client {
                 const bool flowless = element.kind() == ElementKind::ActionUsage &&
                                       element.actionForm() != Diagram::ActionForm::Plain &&
                                       !Diagram::isControlStructure(element.actionForm()) && element.ownedElements().empty();
-                if (Diagram::isBehaviorKind(element.kind()) && !isStateAction(element) && !flowless) {
+                if (isBehaviorContext(Model, child) && !isStateAction(element) && !flowless) {
                     // "action def ChargeBattery", "loop ChargeBattery::charging", "if ChargeBattery::charging::(if c)"
                     QString path;
                     for (const ElementId step: Model.ownershipPath(child)) {
@@ -233,11 +310,22 @@ namespace StructuraSystems::Client {
             case DiagramTypes::StartNode:
                 return {22, 22};
             case DiagramTypes::DoneNode:
+            case DiagramTypes::TerminateNode:
                 return {26, 26};
+            case DiagramTypes::PortNode:
+                return {PinSize, PinSize};
             default:
                 break;
         }
         qreal width = std::max(node.Title.size() * 7.8, node.Keyword.size() * 6.6) + 32;
+        // room for its pins side by side (in on top, out at the bottom)
+        if (Model.contains(node.Id) && node.Kind == DiagramTypes::ActionNode) {
+            int in = 0;
+            int out = 0;
+            for (const ElementId parameter: parametersOf(Model, node.Id))
+                ++(directionOf(Model.element(parameter)) == "in" ? in : out);
+            width = std::max(width, qreal(std::max(in, out)) * PinSpacing / 0.6 + 20);
+        }
         int entries = 0;
         for (const auto &compartment: node.Compartments) {
             for (const auto &entry: compartment.toMap().value(QStringLiteral("entries")).toList()) {
@@ -245,7 +333,7 @@ namespace StructuraSystems::Client {
                 ++entries;
             }
         }
-        width = std::clamp<qreal>(width, 120, 360);
+        width = std::clamp<qreal>(width, 120, 520);
         const qreal height = HeaderHeight + (node.Keyword.isEmpty() ? 0 : 6) +
                              (entries > 0 ? entries * EntryHeight + qreal(node.Compartments.size()) * CaptionHeight + 8 : 0);
         return {std::round(width), height};
@@ -258,6 +346,8 @@ namespace StructuraSystems::Client {
 
         std::vector<DiagramNode> nodes;
         std::vector<DiagramEdge> edges;
+        std::vector<DiagramNode> pins;
+        PinOwners.clear();
         if (const auto start = context()) {
             const auto entryOf = [](ElementId id, const QString &text) {
                 return QVariantMap{{QStringLiteral("entryId"), QString::number(id)}, {QStringLiteral("text"), text},
@@ -325,11 +415,55 @@ namespace StructuraSystems::Client {
                                 node.Keyword = QStringLiteral("«perform»");
                             else
                                 node.Keyword = QStringLiteral("«") + q(element.declaredKeyword().value_or("action")) + QStringLiteral("»");
-                            if (const QString form = formText(element); !form.isEmpty()) {
-                                // «send» new Show(p) to screen, «if» x > 0, «loop» charging until c
+                            if (element.kind() == ElementKind::ActionUsage && Diagram::isControlStructure(element.actionForm())) {
+                                // graphical BNF: «if» with the compartments 'if condition', 'then body', 'else body';
+                                // «loop» (while, loop ... until, for) with 'while condition' / 'for iterator', 'loop body',
+                                // 'until condition'
+                                const auto form = element.actionForm();
+                                node.Keyword = form == Diagram::ActionForm::If ? QStringLiteral("«if»") : QStringLiteral("«loop»");
+                                node.Title = usageTitle(element);
+                                const auto compartment = [&](const QString &title, const QVariantList &entries) {
+                                    if (!entries.isEmpty())
+                                        node.Compartments.append(QVariantMap{{QStringLiteral("title"), title},
+                                                                             {QStringLiteral("entries"), entries}});
+                                };
+                                const QString clause = q(element.actionClause());
+                                if (form == Diagram::ActionForm::If)
+                                    compartment(QStringLiteral("if condition"), {entryOf(child, clause)});
+                                else if (form == Diagram::ActionForm::While)
+                                    compartment(QStringLiteral("while condition"), {entryOf(child, clause)});
+                                else if (form == Diagram::ActionForm::For)
+                                    compartment(QStringLiteral("for iterator"), {entryOf(child, clause)});
+                                QVariantList body;
+                                QVariantList elseBody;
+                                for (const ElementId owned: element.ownedElements()) {
+                                    const auto &ownedElement = Model.element(owned);
+                                    if (ownedElement.kind() == ElementKind::ActionUsage && ownedElement.isElseBranch()) {
+                                        for (const ElementId inner: ownedElement.ownedElements())
+                                            if (const QString text = bodyText(Model, inner); !text.isEmpty())
+                                                elseBody.append(entryOf(inner, text));
+                                        continue;
+                                    }
+                                    if (const QString text = bodyText(Model, owned); !text.isEmpty())
+                                        body.append(entryOf(owned, text));
+                                }
+                                compartment(form == Diagram::ActionForm::If ? QStringLiteral("then body") : QStringLiteral("loop body"), body);
+                                compartment(QStringLiteral("else body"), elseBody);
+                                if (!element.untilCondition().empty())
+                                    compartment(QStringLiteral("until condition"), {entryOf(child, q(element.untilCondition()))});
+                            } else if (element.kind() == ElementKind::ActionUsage &&
+                                       element.actionForm() == Diagram::ActionForm::Terminate) {
+                                // terminate-node: a circle with a cross
+                                node.Kind = DiagramTypes::TerminateNode;
+                                node.Keyword = QStringLiteral("terminate");
+                                node.Title = element.name().empty() ? q(element.actionClause()) : usageTitle(element);
+                            } else if (const QString form = formText(element); !form.isEmpty()) {
+                                // «send action» new Show(p) to screen, «accept action» scene : Scene via viewPort, «assign» x := 1
                                 const QString keyword = form.section(QLatin1Char(' '), 0, 0);
                                 const QString rest = form.section(QLatin1Char(' '), 1);
-                                node.Keyword = QStringLiteral("«") + keyword + QStringLiteral("»");
+                                node.Keyword = QStringLiteral("«") + keyword +
+                                               (keyword == QLatin1String("send") || keyword == QLatin1String("accept")
+                                                ? QStringLiteral(" action") : QString()) + QStringLiteral("»");
                                 node.Title = element.name().empty() ? rest : usageTitle(element) +
                                                                              (rest.isEmpty() ? QString() : QStringLiteral(": ") + rest);
                             }
@@ -341,6 +475,92 @@ namespace StructuraSystems::Client {
                 }
             };
             collect(*start, 0);
+            // swimlanes: the parts that perform the actions of the context ("perform action0.action1;" in part1)
+            LaneOf.clear();
+            LaneTitles.clear();
+            {
+                std::set<ElementId> topLevel;
+                for (const auto &node: nodes) {
+                    if (Model.element(node.Id).owner() == *start)
+                        topLevel.insert(node.Id);
+                }
+                // "a.b.c" seen from where it is written: the first name in the scopes outwards, then down
+                const auto resolvePath = [&](ElementId scope, const std::string &path) -> std::optional<ElementId> {
+                    const auto segments = Diagram::SysMLTextImporter::splitReference(path);
+                    if (segments.empty())
+                        return std::nullopt;
+                    std::optional<ElementId> current;
+                    for (ElementId candidate = scope;; candidate = Model.element(candidate).owner()) {
+                        for (const ElementId child: Model.children(candidate)) {
+                            const auto &element = Model.element(child);
+                            if (element.name() == segments.front() && element.kind() != ElementKind::ActionPerformance) {
+                                current = child;
+                                break;
+                            }
+                        }
+                        if (current || candidate == RootId)
+                            break;
+                    }
+                    for (std::size_t i = 1; current && i < segments.size(); ++i) {
+                        std::optional<ElementId> next;
+                        for (const ElementId child: Model.children(*current)) {
+                            if (Model.element(child).name() == segments[i])
+                                next = child;
+                        }
+                        current = next;
+                    }
+                    return current;
+                };
+                std::map<ElementId, int> laneOfPerformer;
+                std::function<void(ElementId)> visit = [&](ElementId owner) {
+                    for (const ElementId child: Model.children(owner)) {
+                        const auto &perform = Model.element(child);
+                        if (perform.kind() == ElementKind::ActionPerformance &&
+                            perform.performStyle() == Diagram::PerformStyle::ReferenceAction &&
+                            perform.declaredKeyword().value_or("").empty() && perform.owner() != RootId &&
+                            isPartLike(Model.element(perform.owner()).kind())) {
+                            const auto action = resolvePath(perform.owner(), perform.name());
+                            if (action && topLevel.count(*action) && !LaneOf.count(*action)) {
+                                const ElementId performer = perform.owner();
+                                auto lane = laneOfPerformer.find(performer);
+                                if (lane == laneOfPerformer.end()) {
+                                    // «performer» part0.part1: the path of nested parts
+                                    QStringList names;
+                                    for (ElementId current = performer; current != RootId &&
+                                                                        isPartLike(Model.element(current).kind());
+                                         current = Model.element(current).owner())
+                                        names.prepend(q(Model.element(current).name()));
+                                    LaneTitles.push_back(names.join(QLatin1Char('.')));
+                                    lane = laneOfPerformer.emplace(performer, int(LaneTitles.size()) - 1).first;
+                                }
+                                LaneOf[*action] = lane->second;
+                            }
+                        }
+                        visit(child);
+                    }
+                };
+                visit(RootId);
+            }
+            // parameters as pins: on the border of their action, those of the context on the frame (graphical BNF:
+            // param-t / param-b; the action-flow compartment of an action with its parameters around it)
+            const auto addPins = [&](ElementId owner, int depth) {
+                for (const ElementId parameter: parametersOf(Model, owner)) {
+                    const auto &element = Model.element(parameter);
+                    DiagramNode pin;
+                    pin.Id = parameter;
+                    pin.Kind = DiagramTypes::PortNode;
+                    pin.Depth = depth;
+                    pin.Keyword = q(directionOf(element));
+                    pin.Title = usageTitle(element);
+                    PinOwners[parameter] = owner;
+                    pins.push_back(pin);
+                }
+            };
+            for (const auto &node: nodes) {
+                if (node.Kind == DiagramTypes::ActionNode)
+                    addPins(node.Id, node.Depth + 1);
+            }
+            addPins(*start, 0);
             // input / output flows between the parameters of the actions shown (slide 57): an arrow between the actions
             const auto nodeOf = [&](ElementId end) -> std::optional<ElementId> {
                 for (ElementId current = end; current != RootId && Model.contains(current); current = Model.element(current).owner()) {
@@ -349,22 +569,63 @@ namespace StructuraSystems::Client {
                 }
                 return std::nullopt;
             };
+            // the way a line leaves a pin: away from its action, into the frame for those of the context
+            const auto pinOutward = [&](ElementId pin) -> QPointF {
+                const QString side = pinSideOf(pin);
+                const bool frame = PinOwners.count(pin) && PinOwners.at(pin) == *start;
+                if (side == QLatin1String("top"))
+                    return {0, -1};
+                if (side == QLatin1String("bottom"))
+                    return frame ? QPointF(0, -1) : QPointF(0, 1);
+                if (side == QLatin1String("left"))
+                    return frame ? QPointF(1, 0) : QPointF(-1, 0);
+                if (side == QLatin1String("right"))
+                    return frame ? QPointF(-1, 0) : QPointF(1, 0);
+                return {};
+            };
+            const auto endOf = [&](ElementId end, const std::string &feature) -> std::optional<ElementId> {
+                if (feature.empty() && isPin(end))
+                    return end; // the parameter: its pin
+                return nodeOf(end);
+            };
             for (const auto &relationship: Model.relationships()) {
-                if (relationship.Kind != RelationshipKind::Flow)
+                if (relationship.Kind != RelationshipKind::Flow && relationship.Kind != RelationshipKind::Binding)
                     continue;
-                const auto source = nodeOf(relationship.Source);
-                const auto target = nodeOf(relationship.Target);
+                const auto source = endOf(relationship.Source, relationship.SourceFeature);
+                const auto target = endOf(relationship.Target, relationship.TargetFeature);
                 if (!source || !target || *source == *target)
                     continue;
+                const bool pinToPin = isPin(*source) && isPin(*target);
+                if (relationship.Kind == RelationshipKind::Binding) {
+                    // "bind x = pump.cmd": a line with "=" between the pins (binding-connection)
+                    if (!pinToPin)
+                        continue;
+                    DiagramEdge edge;
+                    edge.Kind = DiagramTypes::Binding;
+                    edge.Source = *source;
+                    edge.Target = *target;
+                    edge.Key = QStringLiteral("r:%1").arg(relationship.Id);
+                    edge.Selected = SelectedEdges.count(edge.Key) > 0;
+                    edge.Label = QStringLiteral("=");
+                    edge.SourceOut = pinOutward(*source);
+                    edge.TargetOut = pinOutward(*target);
+                    edges.push_back(edge);
+                    continue;
+                }
                 DiagramEdge edge;
                 edge.Kind = DiagramTypes::Flow;
                 edge.Source = *source;
                 edge.Target = *target;
+                // between pins: a filled head at the target; "succession flow": dashed
+                edge.FilledHead = isPin(*source) || isPin(*target);
+                edge.Dashed = relationship.SuccessionFlow;
+                edge.SourceOut = pinOutward(*source);
+                edge.TargetOut = pinOutward(*target);
                 edge.Key = QStringLiteral("r:%1").arg(relationship.Id);
                 edge.Selected = SelectedEdges.count(edge.Key) > 0;
                 QString label = q(relationship.Name);
                 if (!relationship.TypeName.empty())
-                    label += QStringLiteral(" : ") + q(relationship.TypeName);
+                    label += QStringLiteral(" of ") + q(relationship.TypeName); // flow-label: ... ('of' payload)?
                 edge.Label = label.trimmed();
                 edges.push_back(edge);
             }
@@ -379,8 +640,16 @@ namespace StructuraSystems::Client {
                 edge.Key = QStringLiteral("r:%1").arg(relationship.Id);
                 edge.Selected = SelectedEdges.count(edge.Key) > 0;
                 QString label = q(relationship.Trigger);
-                if (!relationship.Guard.empty())
+                // "entry; if true then off;" (written so for the parser of the app): the initial transition, no guard
+                const bool initial = Model.element(relationship.Source).kind() == ElementKind::ControlNode &&
+                                     keywordOf(Model.element(relationship.Source)) == "entry" && relationship.Guard == "true";
+                if (!relationship.Guard.empty() && !initial)
                     label += QStringLiteral(" [") + q(relationship.Guard) + QStringLiteral("]");
+                // in a state machine the start leads into the first state with a solid arrow (table 17)
+                if (Model.element(relationship.Source).kind() == ElementKind::ControlNode &&
+                    keywordOf(Model.element(relationship.Source)) == "entry" &&
+                    Model.element(relationship.Target).kind() == ElementKind::StateUsage)
+                    edge.Kind = DiagramTypes::Transition;
                 if (!relationship.Effect.empty())
                     label += QStringLiteral(" / ") + q(relationship.Effect);
                 if (!relationship.Name.empty())
@@ -393,6 +662,8 @@ namespace StructuraSystems::Client {
         std::set<ElementId> wanted;
         for (const auto &node: nodes)
             wanted.insert(node.Id);
+        for (const auto &[pin, owner]: PinOwners)
+            wanted.insert(pin);
         for (int row = Nodes->count() - 1; row >= 0; --row) {
             if (wanted.count(Nodes->nodes()[std::size_t(row)].Id) == 0)
                 Nodes->removeAt(row);
@@ -407,11 +678,16 @@ namespace StructuraSystems::Client {
         if (missing && AutoLayout && context()) {
             std::map<ElementId, QPointF> relative;
             layoutLevel(*context(), nodes, edges, relative);
+            // room on the left for the in-parameters of the context on its frame
+            const bool framePins = std::any_of(PinOwners.begin(), PinOwners.end(), [&](const auto &pin) {
+                return pin.second == *context() && directionOf(Model.element(pin.first)) == "in";
+            });
+            const QPointF origin(Margin + (framePins ? 70.0 : 0.0), Margin);
             // absolute: parents first (the nodes are collected parents before their nested states)
             for (const auto &node: nodes) {
                 const auto parent = parentNode(node.Id);
                 if (!parent) {
-                    Positions[node.Id] = relative[node.Id] + QPointF(Margin, Margin);
+                    Positions[node.Id] = relative[node.Id] + origin;
                     continue;
                 }
                 const auto own = std::find_if(nodes.begin(), nodes.end(), [&](const DiagramNode &other) { return other.Id == *parent; });
@@ -435,6 +711,17 @@ namespace StructuraSystems::Client {
             }
         }
 
+        for (auto &pin: pins) {
+            pin.Selected = SelectedNodes.count(pin.Id) > 0;
+            const int row = Nodes->indexOf(pin.Id);
+            if (row >= 0) {
+                Nodes->updateContent(row, pin);
+                Nodes->setSelected(row, pin.Selected);
+            } else {
+                pin.Rect = QRectF(0, 0, PinSize, PinSize); // placed on the border by applyRects
+                Nodes->append(pin);
+            }
+        }
         for (auto &node: nodes) {
             node.Selected = SelectedNodes.count(node.Id) > 0;
             const QRectF rect(Positions[node.Id], sizeOf(node));
@@ -532,6 +819,45 @@ namespace StructuraSystems::Client {
                 width += sizes[node->Id].width() + ColumnGap;
             widest = std::max(widest, width);
         }
+        if (owner == *context() && !LaneTitles.empty()) {
+            // swimlanes: a column per performer (after those without one), the rows along the arrows across all
+            const int laneCount = int(LaneTitles.size());
+            const auto laneOf = [&](ElementId id) {
+                const auto found = LaneOf.find(id);
+                return found == LaneOf.end() ? -1 : found->second;
+            };
+            std::vector<qreal> laneWidth(std::size_t(laneCount + 1), 0.0); // index 0: no lane
+            for (const auto &[row, inRow]: rows) {
+                std::vector<qreal> width(std::size_t(laneCount + 1), -ColumnGap);
+                for (const auto *node: inRow)
+                    width[std::size_t(laneOf(node->Id) + 1)] += sizes[node->Id].width() + ColumnGap;
+                for (std::size_t lane = 0; lane < width.size(); ++lane)
+                    laneWidth[lane] = std::max(laneWidth[lane], width[lane]);
+            }
+            std::vector<qreal> laneLeft(laneWidth.size(), 0.0);
+            qreal left = 0;
+            for (std::size_t lane = 0; lane < laneWidth.size(); ++lane) {
+                if (lane > 0)
+                    laneWidth[lane] = std::max(laneWidth[lane], LaneTitles[lane - 1].size() * 7.5 + 20);
+                laneLeft[lane] = left + (lane > 0 ? LanePadding : 0);
+                if (laneWidth[lane] > 0 || lane > 0)
+                    left = laneLeft[lane] + std::max<qreal>(laneWidth[lane], 0) + (lane > 0 ? LanePadding : ColumnGap);
+            }
+            qreal y = LaneHeader;
+            for (const auto &[row, inRow]: rows) {
+                qreal height = 0;
+                std::vector<qreal> x(laneLeft);
+                for (const auto *node: inRow) {
+                    const auto lane = std::size_t(laneOf(node->Id) + 1);
+                    const QSizeF size = sizes[node->Id];
+                    relative[node->Id] = QPointF(x[lane], y + (size.height() < 60 ? (60 - size.height()) / 2 : 0));
+                    x[lane] += size.width() + ColumnGap;
+                    height = std::max(height, size.height());
+                }
+                y += std::max<qreal>(height, 60) + RowGap;
+            }
+            return {left, std::max<qreal>(y - RowGap, 0)};
+        }
         qreal y = 0;
         for (const auto &[row, inRow]: rows) {
             qreal width = -ColumnGap;
@@ -556,8 +882,10 @@ namespace StructuraSystems::Client {
     void BehaviorController::applyRects() {
         // nested states first: their state grows around them
         std::vector<const DiagramNode *> order;
-        for (const auto &node: Nodes->nodes())
-            order.push_back(&node);
+        for (const auto &node: Nodes->nodes()) {
+            if (!isPin(node.Id))
+                order.push_back(&node);
+        }
         std::stable_sort(order.begin(), order.end(), [](const DiagramNode *a, const DiagramNode *b) { return a->Depth > b->Depth; });
         std::map<ElementId, QRectF> rects;
         for (const auto *node: order) {
@@ -581,6 +909,36 @@ namespace StructuraSystems::Client {
                 Nodes->setRect(row, rect);
             bounds = bounds.isNull() ? rect : bounds.united(rect);
         }
+        // swimlanes around the actions of each performer, all of the same height and side by side
+        QVariantList lanes;
+        if (!LaneTitles.empty() && !bounds.isNull()) {
+            std::vector<QRectF> areas(LaneTitles.size());
+            for (const auto &[id, lane]: LaneOf) {
+                const auto found = rects.find(id);
+                if (found == rects.end() || lane < 0 || lane >= int(areas.size()))
+                    continue;
+                areas[std::size_t(lane)] = areas[std::size_t(lane)].isNull() ? found->second : areas[std::size_t(lane)].united(found->second);
+            }
+            const qreal top = bounds.top() - LaneHeader - 6;
+            const qreal bottom = bounds.bottom() + 16;
+            qreal previousRight = -1e9;
+            for (std::size_t lane = 0; lane < areas.size(); ++lane) {
+                if (areas[lane].isNull())
+                    continue;
+                qreal left = areas[lane].left() - LanePadding;
+                if (left < previousRight + 0.5 && left > previousRight - LanePadding * 2)
+                    left = previousRight; // attached to the lane before it
+                const qreal right = std::max(areas[lane].right() + LanePadding, left + LaneTitles[lane].size() * 7.5 + 20);
+                previousRight = right;
+                const QRectF area(QPointF(left, top), QPointF(right, bottom));
+                bounds = bounds.united(area);
+                lanes.append(QVariantMap{{QStringLiteral("title"), LaneTitles[lane]}, {QStringLiteral("x"), area.x()},
+                                         {QStringLiteral("y"), area.y()}, {QStringLiteral("width"), area.width()},
+                                         {QStringLiteral("height"), area.height()}});
+            }
+        }
+        const bool lanesChanged = lanes != Lanes;
+        Lanes = lanes;
         // the frame of the context: "action transportPassenger", "state vehicleStates"
         QRectF frame;
         QString title;
@@ -594,12 +952,93 @@ namespace StructuraSystems::Client {
             frame = bounds.isNull() ? QRectF(Margin - FramePadding, Margin - FramePadding - 20, 320, 200)
                                     : bounds.adjusted(-FramePadding, -FramePadding - 20, FramePadding, FramePadding);
             frame.setWidth(std::max(frame.width(), title.size() * 8.0 + 60));
+            // room for the parameters of the context on the frame and their names inside it
+            bool in = false;
+            bool out = false;
+            for (const auto &[pin, owner]: PinOwners) {
+                if (owner != *start)
+                    continue;
+                const std::string direction = directionOf(Model.element(pin));
+                in = in || direction == "in";
+                out = out || direction == "out";
+            }
+            frame.adjust(in ? -70 : 0, 0, out ? 90 : 0, 0);
         }
-        if (frame != FrameRect || title != FrameTitle) {
+        placePins(frame);
+        if (frame != FrameRect || title != FrameTitle || lanesChanged) {
             FrameRect = frame;
             FrameTitle = title;
             emit frameChanged();
         }
+    }
+
+    void BehaviorController::placePins(QRectF &frame) {
+        // per owner: "in" on the top border, "out" at the bottom, "inout" on the right, evenly spread
+        std::map<ElementId, std::vector<ElementId>> byOwner;
+        for (const auto &node: Nodes->nodes()) {
+            if (const auto owner = PinOwners.find(node.Id); owner != PinOwners.end())
+                byOwner[owner->second].push_back(node.Id);
+        }
+        const auto start = context();
+        for (const auto &[owner, pins]: byOwner) {
+            const bool onFrame = start && owner == *start;
+            QRectF rect;
+            if (onFrame) {
+                if (frame.isNull())
+                    continue;
+                // the frame's own parameters: room beside the title tab, the frame wide enough for them
+                rect = frame;
+            } else if (const auto *node = Nodes->find(owner)) {
+                rect = node->Rect;
+            } else {
+                continue;
+            }
+            std::map<std::string, std::vector<ElementId>> sides;
+            for (const ElementId pin: pins)
+                sides[directionOf(Model.element(pin))].push_back(pin);
+            for (const auto &[direction, onSide]: sides) {
+                const int count = int(onSide.size());
+                for (int i = 0; i < count; ++i) {
+                    QPointF center;
+                    const qreal along = qreal(i + 1) / qreal(count + 1);
+                    if (onFrame) {
+                        // the parameters of the context on the frame: in on the left border, out on the right,
+                        // inout at the bottom (below the title tab, the start is at the top)
+                        const qreal top = rect.top() + 40;
+                        if (direction == "in")
+                            center = QPointF(rect.left(), top + (rect.bottom() - top) * along);
+                        else if (direction == "out")
+                            center = QPointF(rect.right(), top + (rect.bottom() - top) * along);
+                        else
+                            center = QPointF(rect.left() + rect.width() * along, rect.bottom());
+                    } else if (direction == "inout") {
+                        center = QPointF(rect.right(), rect.top() + rect.height() * along);
+                    } else {
+                        // in on top, out at the bottom; right of the middle, where the successions run
+                        const qreal x = rect.left() + rect.width() * (0.4 + 0.6 * along);
+                        center = QPointF(x, direction == "in" ? rect.top() : rect.bottom());
+                    }
+                    const int row = Nodes->indexOf(onSide[std::size_t(i)]);
+                    if (row >= 0)
+                        Nodes->setRect(row, QRectF(center - QPointF(PinSize / 2, PinSize / 2), QSizeF(PinSize, PinSize)));
+                }
+            }
+        }
+    }
+
+    QString BehaviorController::pinSide(const QString &id) const {
+        const auto pin = toNode(id);
+        return pin ? pinSideOf(*pin) : QString();
+    }
+
+    QString BehaviorController::pinSideOf(ElementId pin) const {
+        const auto owner = PinOwners.find(pin);
+        if (owner == PinOwners.end() || !Model.contains(pin))
+            return {};
+        const std::string direction = directionOf(Model.element(pin));
+        if (context() && owner->second == *context())
+            return direction == "in" ? QStringLiteral("left") : direction == "out" ? QStringLiteral("right") : QStringLiteral("bottom");
+        return direction == "in" ? QStringLiteral("top") : direction == "out" ? QStringLiteral("bottom") : QStringLiteral("right");
     }
 
     void BehaviorController::updateCanvasSize() {
@@ -696,6 +1135,11 @@ namespace StructuraSystems::Client {
     QString BehaviorController::nodeAt(qreal x, qreal y) const {
         const QPointF point(x, y);
         const auto &nodes = Nodes->nodes();
+        // the pins on the border before the action they are on
+        for (const auto &node: nodes) {
+            if (isPin(node.Id) && node.Rect.adjusted(-4, -4, 4, 4).contains(point))
+                return QString::number(node.Id);
+        }
         for (auto it = nodes.rbegin(); it != nodes.rend(); ++it) {
             const qreal grow = it->Rect.height() < 20 ? 8 : 0; // the thin fork / join bars
             if (it->Rect.adjusted(-grow, -grow, grow, grow).contains(point))
@@ -786,7 +1230,7 @@ namespace StructuraSystems::Client {
 
     void BehaviorController::moveNode(const QString &node, qreal x, qreal y) {
         const auto id = toNode(node);
-        if (!id)
+        if (!id || isPin(*id)) // a pin stays on the border of its action
             return;
         AutoLayout = false;
         emit layoutEdited();
@@ -936,8 +1380,21 @@ namespace StructuraSystems::Client {
         const auto to = toNode(target);
         if (!from || !to)
             return tr("Draw the arrow onto another node.");
+        if (isPin(*from) || isPin(*to)) {
+            // from a parameter to a parameter: "flow from pump.fuelOut to burn.fuelIn;"
+            if (!isPin(*from) || !isPin(*to))
+                return tr("A flow goes from a parameter (pin) to another parameter.");
+            if (const auto rule = Diagram::RelationshipRules::canRelate(Model, RelationshipKind::Flow, *from, *to); !rule)
+                return QString::fromStdString(rule.Reason);
+            runModelChange([&] { Model.addRelationship(RelationshipKind::Flow, *from, *to); });
+            emit statusMessage(tr("Flow created."));
+            return {};
+        }
+        // state to state, and from a state into "done" (the final state): a transition
         const bool states = Model.element(*from).kind() == ElementKind::StateUsage &&
-                            Model.element(*to).kind() == ElementKind::StateUsage;
+                            (Model.element(*to).kind() == ElementKind::StateUsage ||
+                             (Model.element(*to).kind() == ElementKind::ControlNode &&
+                              Model.element(*to).declaredKeyword() == "done"));
         const RelationshipKind kind = states ? RelationshipKind::Transition : RelationshipKind::Succession;
         // an unnamed action ("send s to t;") that is not declared right after the source gets a name to be referenced
         const auto &targetElement = Model.element(*to);

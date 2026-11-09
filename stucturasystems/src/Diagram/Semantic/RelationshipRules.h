@@ -37,6 +37,15 @@ namespace StructuraSystems::Diagram {
 
         [[nodiscard]] static RuleResult canRelate(const SemanticModel &model, RelationshipKind kind,
                                                   ElementId source, ElementId target);
+        /// With end features: "connect tank.fuelOut to engine.fuelIn" connects features of tank and engine (ports
+        /// of their definitions), so their owners are the ends.
+        [[nodiscard]] static RuleResult canRelate(const SemanticModel &model, RelationshipKind kind, ElementId source,
+                                                  ElementId target, const std::string &sourceFeature,
+                                                  const std::string &targetFeature);
+        /// As canRelate, but a relationship of the same kind between the same ends is no reason against it (an n-ary
+        /// connection or dependency next to a binary one).
+        [[nodiscard]] static RuleResult canRelateAgain(const SemanticModel &model, RelationshipKind kind,
+                                                       ElementId source, ElementId target);
 
         /// The element before id among its siblings that a "then" in front of id continues from: the nearest one
         /// that a succession can start at (not the never written "done", not an else branch); std::nullopt if none.

@@ -378,11 +378,11 @@ namespace StructuraSystems::Client {
                 edge.Source = end(message->Source, 0);
                 edge.Target = end(message->Target, 1);
                 edge.Key = QStringLiteral("r:%1").arg(message->Id);
-                // "vs : VehicleStart", ": EngineStatus"
+                // message-label: UsageDeclaration? ('of' payload)? - "vs of VehicleStart", "of EngineStatus"
                 QString label = q(message->Name);
                 if (!message->TypeName.empty())
-                    label += (label.isEmpty() ? QString() : QStringLiteral(" ")) + QStringLiteral(": ") + q(message->TypeName);
-                edge.Label = (message->Sequenced ? QStringLiteral("then ") : QString()) + label;
+                    label += (label.isEmpty() ? QString() : QStringLiteral(" ")) + QStringLiteral("of ") + q(message->TypeName);
+                edge.Label = label;
                 edges.push_back(edge);
             }
             for (const auto *succession: successions) {

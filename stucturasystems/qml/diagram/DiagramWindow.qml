@@ -22,11 +22,12 @@ ApplicationWindow {
     readonly property UseCaseController useCases: editorModel.useCases
     readonly property SequenceController sequence: editorModel.sequence
     readonly property DiagramController interconnection: editorModel.interconnection
-    /** 0 structure, 1 parametric view, 2 behavior view, 3 use case view, 4 sequence view, 5 interconnection view */
+    /** 0 structure, 1 parametric view, 2 behavior view, 3 use case view, 4 sequence view, 5 interconnection view,
+     *  6 grid view (relationship matrix), 7 browser view (membership tree) - the standard views of table 34 */
     property int view: 0
     readonly property Item activeCanvas: view === 0 ? canvas : view === 1 ? parametricCanvas
                                          : view === 2 ? behaviorCanvas : view === 3 ? useCaseCanvas
-                                         : view === 4 ? sequenceCanvas : interconnectionCanvas
+                                         : view === 4 ? sequenceCanvas : view === 5 ? interconnectionCanvas : canvas
 
     /** Emitted when the window was closed; the main window destroys it then. */
     signal finished
@@ -169,9 +170,100 @@ ApplicationWindow {
             SegmentedControl {
                 objectName: "viewSwitch"
                 model: [qsTr("Structure"), qsTr("Parametric"), qsTr("Behavior"), qsTr("Use Cases"), qsTr("Sequence"),
-                        qsTr("Interconnection")]
+                        qsTr("Interconnection"), qsTr("Grid"), qsTr("Browser")]
                 currentIndex: window.view
                 onActivated: index => window.view = index
+            }
+            ComboBox {
+                id: viewBox
+                objectName: "renderedViewBox"
+                readonly property var entries: [{ id: "", title: qsTr("Whole model") }].concat(window.controller.views)
+                visible: window.view === 0 && window.controller.views.length > 0
+                Layout.preferredWidth: 180
+                model: entries
+                textRole: "title"
+                valueRole: "id"
+                currentIndex: {
+                    for (let i = 0; i < entries.length; ++i) {
+                        if (entries[i].id === window.controller.viewId)
+                            return i
+                    }
+                    return 0
+                }
+                onActivated: index => window.controller.viewId = entries[index].id
+                ToolTip.visible: hovered
+                ToolTip.text: qsTr("Show the model through a view: only what it exposes (and its filter lets through), in "
+                                   + "a frame with its expose and filter lines")
+                ToolTip.delay: 700
+            }
+            CheckBox {
+                objectName: "allCompartmentsBox"
+                visible: window.view === 0
+                text: qsTr("All compartments")
+                checked: window.controller.allCompartments
+                onToggled: window.controller.allCompartments = checked
+                ToolTip.visible: hovered
+                ToolTip.text: qsTr("Also the compartments relationships, connections, interfaces, flows, allocations, "
+                                   + "variants, occurrences, individuals, time slices and snapshots")
+                ToolTip.delay: 700
+            }
+            // where the specification has more than one notation: one for all, or "Individual" (as chosen per element)
+            Button {
+                id: notationButton
+                objectName: "notationButton"
+                visible: window.view === 0
+                flat: true
+                text: qsTr("Notation \u25be")
+                onClicked: notationPopup.open()
+                ToolTip.visible: hovered
+                ToolTip.text: qsTr("How packages in packages, imports, aliases, parts, ports, types and docs are drawn: "
+                                   + "one way for all, or individually (chosen when an element is created, or by right-click)")
+                ToolTip.delay: 700
+
+                Popup {
+                    id: notationPopup
+                    objectName: "notationPopup"
+                    y: notationButton.height
+                    padding: 12
+
+                    GridLayout {
+                        columns: 2
+                        rowSpacing: 4
+                        columnSpacing: 12
+                        Repeater {
+                            model: window.controller.notationRevision >= 0 ? window.controller.notationGroups() : []
+                            delegate: RowLayout {
+                                id: notationRow
+                                required property var modelData
+                                Layout.columnSpan: 2
+                                spacing: 12
+                                readonly property var entries: [{ value: "individual", label: qsTr("Individual") }]
+                                                               .concat(modelData.options)
+                                Label {
+                                    Layout.preferredWidth: 140
+                                    text: notationRow.modelData.label
+                                    color: Theme.textPrimary
+                                }
+                                ComboBox {
+                                    objectName: "notation_" + notationRow.modelData.group
+                                    Layout.preferredWidth: 220
+                                    model: notationRow.entries
+                                    textRole: "label"
+                                    valueRole: "value"
+                                    currentIndex: {
+                                        for (let i = 0; i < notationRow.entries.length; ++i) {
+                                            if (notationRow.entries[i].value === notationRow.modelData.mode)
+                                                return i
+                                        }
+                                        return 0
+                                    }
+                                    onActivated: index => window.controller.setNotationMode(notationRow.modelData.group,
+                                                                                            notationRow.entries[index].value)
+                                }
+                            }
+                        }
+                    }
+                }
             }
             ComboBox {
                 id: contextBox
@@ -379,6 +471,166 @@ ApplicationWindow {
                         id: interconnectionCanvas
                         controller: window.interconnection
                     }
+                    // grid view: a relationship matrix, a click into a cell adds / removes the relationship
+                    Pane {
+                        id: gridView
+                        objectName: "gridView"
+                        padding: 12
+                        Material.background: Theme.surface
+                        readonly property var matrix: window.controller.modelRevision >= 0 && matrixKindBox.currentIndex >= 0
+                                                      ? window.controller.relationshipMatrix(matrixKindBox.currentValue) : ({})
+                        ColumnLayout {
+                            anchors.fill: parent
+                            spacing: 8
+                            ComboBox {
+                                id: matrixKindBox
+                                objectName: "matrixKindBox"
+                                Layout.preferredWidth: 320
+                                model: window.controller.matrixKinds()
+                                textRole: "title"
+                                valueRole: "kind"
+                            }
+                            Label {
+                                visible: !gridView.matrix.rows || gridView.matrix.rows.length === 0
+                                         || gridView.matrix.columns.length === 0
+                                text: qsTr("Nothing to relate: the model has no elements for the rows or the columns of this matrix.")
+                                color: Theme.textSecondary
+                            }
+                            ScrollView {
+                                Layout.fillWidth: true
+                                Layout.fillHeight: true
+                                clip: true
+                                Grid {
+                                    id: matrixGrid
+                                    readonly property var matrixRows: gridView.matrix.rows || []
+                                    readonly property var matrixColumns: gridView.matrix.columns || []
+                                    columns: matrixColumns.length + 1
+                                    spacing: 0
+                                    Repeater {
+                                        // header row: an empty corner, then the column titles (rotated)
+                                        model: matrixGrid.matrixColumns.length + 1
+                                        Rectangle {
+                                            id: headerCell
+                                            required property int index
+                                            width: index === 0 ? 240 : 34
+                                            height: 150
+                                            color: Theme.panel
+                                            border.width: 0.5
+                                            border.color: Theme.outline
+                                            Label {
+                                                visible: headerCell.index > 0
+                                                text: headerCell.index > 0 ? matrixGrid.matrixColumns[headerCell.index - 1].title : ""
+                                                width: 146
+                                                elide: Text.ElideLeft
+                                                font.pixelSize: 11
+                                                color: Theme.textPrimary
+                                                rotation: -90
+                                                transformOrigin: Item.TopLeft
+                                                x: 9
+                                                y: 148
+                                            }
+                                        }
+                                    }
+                                    Repeater {
+                                        model: matrixGrid.matrixRows.length * (matrixGrid.matrixColumns.length + 1)
+                                        Rectangle {
+                                            id: matrixCell
+                                            required property int index
+                                            readonly property int row: Math.floor(index / (matrixGrid.matrixColumns.length + 1))
+                                            readonly property int column: index % (matrixGrid.matrixColumns.length + 1) - 1
+                                            readonly property bool related: column >= 0 && gridView.matrix.cells[row][column] === true
+                                            width: column < 0 ? 240 : 34
+                                            height: 26
+                                            color: column < 0 ? Theme.panel : cellArea.containsMouse ? Qt.alpha(Theme.accent, 0.12) : Theme.card
+                                            border.width: 0.5
+                                            border.color: Theme.outline
+                                            Label {
+                                                anchors.fill: parent
+                                                anchors.leftMargin: 6
+                                                visible: matrixCell.column < 0
+                                                verticalAlignment: Text.AlignVCenter
+                                                elide: Text.ElideLeft
+                                                text: matrixCell.column < 0 ? matrixGrid.matrixRows[matrixCell.row].title : ""
+                                                font.pixelSize: 11
+                                                color: Theme.textPrimary
+                                            }
+                                            Label {
+                                                anchors.centerIn: parent
+                                                visible: matrixCell.related
+                                                text: "\u2714"
+                                                font.pixelSize: 14
+                                                color: Theme.accent
+                                            }
+                                            MouseArea {
+                                                id: cellArea
+                                                anchors.fill: parent
+                                                enabled: matrixCell.column >= 0
+                                                hoverEnabled: true
+                                                onClicked: {
+                                                    const error = window.controller.toggleMatrixCell(matrixKindBox.currentValue,
+                                                                                                     matrixGrid.matrixRows[matrixCell.row].id,
+                                                                                                     matrixGrid.matrixColumns[matrixCell.column].id)
+                                                    if (error.length > 0)
+                                                        window.showStatus(error)
+                                                }
+                                                ToolTip.visible: containsMouse && matrixCell.column >= 0
+                                                ToolTip.delay: 500
+                                                ToolTip.text: matrixCell.column >= 0
+                                                              ? matrixGrid.matrixRows[matrixCell.row].title + " \u2190 "
+                                                                + matrixGrid.matrixColumns[matrixCell.column].title : ""
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    // browser view: the elements as a tree of ownership; a click shows the element in the structure view
+                    Pane {
+                        id: browserView
+                        objectName: "browserView"
+                        padding: 8
+                        Material.background: Theme.surface
+                        ListView {
+                            id: browserList
+                            anchors.fill: parent
+                            clip: true
+                            model: window.controller.modelRevision >= 0 ? window.controller.browserTree() : []
+                            ScrollBar.vertical: ScrollBar {}
+                            delegate: ItemDelegate {
+                                id: browserRow
+                                required property var modelData
+                                width: browserList.width
+                                height: 26
+                                leftPadding: 10 + modelData.depth * 18
+                                contentItem: Row {
+                                    spacing: 6
+                                    Label {
+                                        text: browserRow.modelData.children > 0 ? "\u25BE" : "\u2022"
+                                        color: Theme.textSecondary
+                                        font.pixelSize: 11
+                                        anchors.verticalCenter: parent.verticalCenter
+                                    }
+                                    Label {
+                                        text: browserRow.modelData.keyword
+                                        color: Theme.textSecondary
+                                        font.pixelSize: 11
+                                        anchors.verticalCenter: parent.verticalCenter
+                                    }
+                                    Label {
+                                        text: browserRow.modelData.name
+                                        color: Theme.textPrimary
+                                        font.pixelSize: 13
+                                        anchors.verticalCenter: parent.verticalCenter
+                                    }
+                                }
+                                onClicked: {
+                                    window.view = 0
+                                    window.controller.select(modelData.id, false)
+                                }
+                            }
+                        }
+                    }
                 }
                 Rectangle {
                     Layout.fillHeight: true
@@ -386,6 +638,7 @@ ApplicationWindow {
                     color: Theme.outline
                 }
                 ToolPalette {
+                    visible: window.view < 6 // not in the grid and browser view
                     Layout.fillHeight: true
                     Layout.preferredWidth: 224
                     controller: window.view === 5 ? window.interconnection : window.controller

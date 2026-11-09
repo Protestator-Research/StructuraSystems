@@ -24,7 +24,7 @@ TEST_CASE("Model: qualified names and ownership") {
 TEST_CASE("Model: invalid elements are rejected") {
     SemanticModel model;
     CHECK_THROWS_AS(model.addElement(ElementKind::PartUsage, ""), ModelError);
-    CHECK_THROWS_AS(model.addElement(ElementKind::Attribute, "mass"), ModelError); // needs a part as owner
+    CHECK_THROWS_AS(model.addElement(ElementKind::EnumerationLiteral, "red"), ModelError); // needs an enum def as owner
     const auto vehicle = model.addElement(ElementKind::PartUsage, "vehicle");
     const auto mass = model.addElement(ElementKind::Attribute, "mass", vehicle);
     CHECK_THROWS_AS(model.addElement(ElementKind::Attribute, "mass", vehicle), ModelError); // duplicate name

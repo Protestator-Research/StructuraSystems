@@ -30,9 +30,8 @@ namespace StructuraSystems::Client {
         constexpr qreal UseCaseColumn = 300.0;
         constexpr qreal RowGap = 34.0;
         constexpr qreal IncludeGap = 80.0;
-        constexpr qreal BoundaryPadding = 26.0;
-        constexpr qreal BoundaryTitle = 40.0;
-        constexpr qreal BoundaryGrip = 6.0;
+        constexpr qreal SubjectGap = 70.0;      ///< room above a row of use cases for their «subject» node
+        constexpr qreal SubjectHeight = 44.0;
         constexpr qreal EdgeHitDistance = 6.0;
 
         QString q(const std::string &text) {
@@ -172,6 +171,8 @@ namespace StructuraSystems::Client {
     QSizeF UseCaseController::sizeOf(const DiagramNode &node) {
         if (node.Kind == DiagramTypes::ActorNode)
             return {std::max<qreal>(70, node.Title.size() * 7.2 + 12), 92};
+        if (node.Kind == DiagramTypes::BoundaryNode) // «subject» system = system1 (table 23)
+            return {std::round(std::clamp<qreal>(node.Title.size() * 7.2 + 30, 120, 300)), SubjectHeight};
         const qreal width = std::clamp<qreal>(std::max(node.Title.size() * 7.6, node.Keyword.size() * 6.2) + 60, 150, 340);
         return {std::round(width), 64};
     }
@@ -322,19 +323,26 @@ namespace StructuraSystems::Client {
                 edge(QStringLiteral("a:%1").arg(group.Declarations[i]), DiagramTypes::Association, group.Node,
                      group.UseCases[i], QString());
         }
+        // the subject: a node «subject» with a line to each use case it is the subject of (SysML v2, table 23:
+        // distinguished-parameter-link), not a system boundary around them
         for (const auto &group: Subjects) {
             DiagramNode node;
             node.Id = group.Node;
             node.Kind = DiagramTypes::BoundaryNode;
             node.Keyword = QStringLiteral("«subject»");
             node.Title = usageTitle(Model.element(group.Node));
-            node.Depth = 0;
+            if (!Model.element(group.Node).value().empty())
+                node.Title += QStringLiteral(" = ") + q(Model.element(group.Node).value());
+            node.Depth = 2;
             nodes.push_back(node);
+            for (std::size_t i = 0; i < group.Declarations.size(); ++i)
+                edge(QStringLiteral("s:%1").arg(group.Declarations[i]), DiagramTypes::Association, group.Node,
+                     group.UseCases[i], QString());
         }
 
         // positions: automatic layout until something is moved, new nodes next to the others afterwards
         const bool missing = std::any_of(nodes.begin(), nodes.end(), [&](const DiagramNode &node) {
-            return node.Kind != DiagramTypes::BoundaryNode && Positions.count(node.Id) == 0;
+            return Positions.count(node.Id) == 0;
         });
         const auto sizeById = [&](ElementId id) {
             for (const auto &node: nodes) {
@@ -369,20 +377,46 @@ namespace StructuraSystems::Client {
                     y += height + RowGap;
             };
             for (const auto &group: Subjects) {
-                y += BoundaryTitle;
+                // the subject above the first of its use cases, the use cases below it
+                y += SubjectGap;
+                const qreal top = y;
                 for (const ElementId useCase: group.Members) {
                     if (IncludedBy.count(useCase) == 0 || !placed.count(IncludedBy.at(useCase)))
-                        placeRow(useCase, UseCaseColumn + BoundaryPadding);
+                        placeRow(useCase, UseCaseColumn);
                 }
-                y += BoundaryPadding + RowGap;
+                const ElementId first = group.UseCases.front();
+                const QSizeF size = sizeById(group.Node);
+                const QPointF at = Positions.count(first) ? Positions[first] : QPointF(UseCaseColumn, top);
+                Positions[group.Node] = QPointF(at.x() + (sizeById(first).width() - size.width()) / 2, at.y() - SubjectGap + 6);
+                y += RowGap;
+            }
+            // what a placed use case includes by reference: side by side in the row below it (table 23)
+            for (std::size_t index = 0; index < useCases.size(); ++index) {
+                const ElementId including = useCases[index];
+                if (!placed.count(including))
+                    continue;
+                qreal x = UseCaseColumn;
+                qreal height = 0;
+                for (const auto &line: edges) {
+                    if (line.Kind != DiagramTypes::Include || line.Source != including || placed.count(line.Target) ||
+                        !shown.count(line.Target) || IncludedBy.count(line.Target))
+                        continue;
+                    placed.insert(line.Target);
+                    const QSizeF size = sizeById(line.Target);
+                    Positions[line.Target] = QPointF(x, y);
+                    x += size.width() + IncludeGap;
+                    height = std::max(height, size.height());
+                }
+                if (height > 0)
+                    y += height + RowGap;
             }
             for (const ElementId useCase: useCases) {
                 if (!placed.count(useCase) && IncludedBy.count(useCase) == 0)
-                    placeRow(useCase, UseCaseColumn + BoundaryPadding);
+                    placeRow(useCase, UseCaseColumn);
             }
             for (const ElementId useCase: useCases) {
                 if (!placed.count(useCase))
-                    placeRow(useCase, UseCaseColumn + BoundaryPadding);
+                    placeRow(useCase, UseCaseColumn);
             }
             // actors on the left, at the height of their use cases
             std::vector<std::pair<qreal, ElementId>> actors;
@@ -403,8 +437,16 @@ namespace StructuraSystems::Client {
             const QRectF bounds = contentBounds();
             qreal x = bounds.isNull() ? UseCaseColumn : bounds.right() + IncludeGap;
             for (const auto &node: nodes) {
-                if (node.Kind == DiagramTypes::BoundaryNode || Positions.count(node.Id))
+                if (Positions.count(node.Id))
                     continue;
+                if (node.Kind == DiagramTypes::BoundaryNode) {
+                    // a new subject: above its use case
+                    if (const auto *group = groupOf(node.Id); group && Positions.count(group->UseCases.front())) {
+                        const QPointF at = Positions[group->UseCases.front()];
+                        Positions[node.Id] = QPointF(at.x(), std::max<qreal>(0, at.y() - SubjectGap));
+                        continue;
+                    }
+                }
                 Positions[node.Id] = QPointF(x, Margin);
                 x += sizeOf(node).width() + IncludeGap;
             }
@@ -422,19 +464,7 @@ namespace StructuraSystems::Client {
             it = wanted.count(*it) ? std::next(it) : SelectedNodes.erase(it);
         for (auto &node: nodes) {
             node.Selected = SelectedNodes.count(node.Id) > 0;
-            QRectF rect;
-            if (node.Kind == DiagramTypes::BoundaryNode) {
-                for (const auto &group: Subjects) {
-                    if (group.Node != node.Id)
-                        continue;
-                    for (const ElementId member: group.Members)
-                        rect = rect.isNull() ? QRectF(Positions[member], sizeById(member))
-                                             : rect.united(QRectF(Positions[member], sizeById(member)));
-                }
-                rect.adjust(-BoundaryPadding, -BoundaryTitle, BoundaryPadding, BoundaryPadding);
-            } else {
-                rect = QRectF(Positions[node.Id], sizeOf(node));
-            }
+            const QRectF rect(Positions[node.Id], sizeOf(node));
             const int row = Nodes->indexOf(node.Id);
             if (row >= 0) {
                 Nodes->updateContent(row, node);
@@ -455,17 +485,7 @@ namespace StructuraSystems::Client {
     }
 
     void UseCaseController::updateBoundaries() {
-        for (const auto &group: Subjects) {
-            const int row = Nodes->indexOf(group.Node);
-            if (row < 0)
-                continue;
-            QRectF rect;
-            for (const ElementId member: group.Members) {
-                if (const auto *node = Nodes->find(member))
-                    rect = rect.isNull() ? node->Rect : rect.united(node->Rect);
-            }
-            Nodes->setRect(row, rect.adjusted(-BoundaryPadding, -BoundaryTitle, BoundaryPadding, BoundaryPadding));
-        }
+        // the subject is a node of its own (SysML v2): nothing follows the use cases
     }
 
     void UseCaseController::updateCanvasSize() {
@@ -563,16 +583,7 @@ namespace StructuraSystems::Client {
         const QPointF point(x, y);
         const auto &nodes = Nodes->nodes();
         for (auto it = nodes.rbegin(); it != nodes.rend(); ++it) {
-            if (it->Kind != DiagramTypes::BoundaryNode && it->Rect.contains(point))
-                return QString::number(it->Id);
-        }
-        // a boundary at its title band and border (its inside stays free for the canvas)
-        for (auto it = nodes.rbegin(); it != nodes.rend(); ++it) {
-            if (it->Kind != DiagramTypes::BoundaryNode)
-                continue;
-            const QRectF outer = it->Rect.adjusted(-BoundaryGrip, -BoundaryGrip, BoundaryGrip, BoundaryGrip);
-            const QRectF inner = it->Rect.adjusted(BoundaryGrip, 30, -BoundaryGrip, -BoundaryGrip);
-            if (outer.contains(point) && !inner.contains(point))
+            if (it->Rect.contains(point))
                 return QString::number(it->Id);
         }
         return {};
@@ -657,23 +668,10 @@ namespace StructuraSystems::Client {
         AutoLayout = false;
         emit layoutEdited();
         const auto *found = Nodes->find(*id);
-        if (found->Kind == DiagramTypes::BoundaryNode) {
-            // the use cases inside move along
-            const QPointF delta = QPointF(std::max<qreal>(0, x), std::max<qreal>(0, y)) - found->Rect.topLeft();
-            if (const auto *group = groupOf(*id)) {
-                for (const ElementId member: group->Members) {
-                    Positions[member] += delta;
-                    const int row = Nodes->indexOf(member);
-                    if (row >= 0)
-                        Nodes->setRect(row, QRectF(Positions[member], Nodes->nodes()[std::size_t(row)].Rect.size()));
-                }
-            }
-        } else {
-            Positions[*id] = QPointF(std::max<qreal>(0, x), std::max<qreal>(0, y));
-            const int row = Nodes->indexOf(*id);
-            Nodes->setRect(row, QRectF(Positions[*id], Nodes->nodes()[std::size_t(row)].Rect.size()));
-        }
-        updateBoundaries();
+        Q_UNUSED(found)
+        Positions[*id] = QPointF(std::max<qreal>(0, x), std::max<qreal>(0, y));
+        const int row = Nodes->indexOf(*id);
+        Nodes->setRect(row, QRectF(Positions[*id], Nodes->nodes()[std::size_t(row)].Rect.size()));
     }
 
     // --- editing -------------------------------------------------------------------------------------
@@ -780,11 +778,11 @@ namespace StructuraSystems::Client {
                 const bool actor = tool == DiagramTypes::ToolActor;
                 if (!useCase) {
                     emit statusMessage(actor ? tr("Drop the actor onto a use case - SysML declares actors in the use case.")
-                                             : tr("Drop the subject onto a use case - it becomes the system boundary."));
+                                             : tr("Drop the subject onto a use case - the system it is about."));
                     return {};
                 }
                 if (!actor && subjectOf(*useCase)) {
-                    emit statusMessage(tr("The use case already has a subject (system boundary)."));
+                    emit statusMessage(tr("The use case already has a subject."));
                     return {};
                 }
                 if (!runModelChange([&] {
@@ -816,7 +814,7 @@ namespace StructuraSystems::Client {
                     }))
                     return {};
                 message = actor ? tr("Added an actor - draw a line from it to other use cases, double-click to rename.")
-                                : tr("Added a subject - double-click the boundary title to name the system.");
+                                : tr("Added a subject - double-click it to name the system, draw lines to more use cases.");
                 break;
             }
             default:
@@ -899,8 +897,9 @@ namespace StructuraSystems::Client {
         runModelChange([&] {
             if (key.startsWith(QStringLiteral("r:")) && Model.containsRelationship(id))
                 Model.removeRelationship(id);
-            else if ((key.startsWith(QStringLiteral("a:")) || key.startsWith(QStringLiteral("i:"))) && Model.contains(id))
-                Model.removeElement(id); // the actor declaration / the included use case
+            else if ((key.startsWith(QStringLiteral("a:")) || key.startsWith(QStringLiteral("i:")) ||
+                      key.startsWith(QStringLiteral("s:"))) && Model.contains(id))
+                Model.removeElement(id); // the actor / subject declaration, the included use case
         });
     }
 
@@ -921,7 +920,8 @@ namespace StructuraSystems::Client {
                 const auto id = key.mid(2).toULongLong();
                 if (key.startsWith(QStringLiteral("r:")) && Model.containsRelationship(id))
                     Model.removeRelationship(id);
-                else if ((key.startsWith(QStringLiteral("a:")) || key.startsWith(QStringLiteral("i:"))) && Model.contains(id))
+                else if ((key.startsWith(QStringLiteral("a:")) || key.startsWith(QStringLiteral("i:")) ||
+                          key.startsWith(QStringLiteral("s:"))) && Model.contains(id))
                     Model.removeElement(id);
             }
             for (const ElementId element: elements) {

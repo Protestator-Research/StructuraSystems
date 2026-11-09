@@ -66,6 +66,8 @@ namespace StructuraSystems::Diagram {
         void setExternalSpecializations(ElementId id, std::vector<std::string> references);
         /// ":>" (empty), "subsets" for a usage or "specializes" for a definition.
         void setSpecializationKeyword(ElementId id, const std::string &keyword);
+        /// "references x" / "::> x" of a usage (empty reference: none).
+        void setReferencedFeature(ElementId id, const std::string &keyword, const std::string &reference);
         /// Constraint/calc only: body expression (empty removes it).
         void setExpression(ElementId id, const std::string &expression);
         /// Keyword as written instead of the default one of the kind (std::nullopt = default), e.g. "function",
@@ -121,6 +123,12 @@ namespace StructuraSystems::Diagram {
 
         // --- relationships --------------------------------------------------------------
         RelationshipId addRelationship(RelationshipKind kind, ElementId source, ElementId target);
+        /// The same, also if a relationship of this kind between source and target exists (n-ary ones next to binary).
+        RelationshipId addFurtherRelationship(RelationshipKind kind, ElementId source, ElementId target);
+        /// "connect tank.fuelOut to engine.fuelIn": the ends are tank and engine, the features those of their
+        /// definitions that are connected (checked with RelationshipRules::canRelate with features).
+        RelationshipId addRelationship(RelationshipKind kind, ElementId source, ElementId target,
+                                       const std::string &sourceFeature, const std::string &targetFeature);
         void removeRelationship(RelationshipId id);
         /// Name and type of a connection, flow or interface (empty = none); a flow's type is its item ("flow of T").
         void setRelationshipLabel(RelationshipId id, const std::string &name, const std::string &typeName);
@@ -131,6 +139,11 @@ namespace StructuraSystems::Diagram {
         void setFlowDefinition(RelationshipId id, const std::string &definition);
         /// Connection, flow, interface, binding: the features of the ends meant ("fuel", "a.b"; empty = the end).
         void setEndFeatures(RelationshipId id, const std::string &sourceFeature, const std::string &targetFeature);
+        /// Further ends of an n-ary connection (targets only) or dependency (clients and suppliers); nary: a connection
+        /// written "connect (a, b, ...)".
+        void setExtraEnds(RelationshipId id, std::vector<ElementId> sources, std::vector<ElementId> targets, bool nary);
+        /// "[0..1]", "[1]" (or empty) at the ends of a binary connection or interface.
+        void setEndMultiplicities(RelationshipId id, const std::string &source, const std::string &target);
         /// Flow only: written as "succession flow ..." (after the source ends, before the target starts).
         void setSuccessionFlow(RelationshipId id, bool successionFlow);
         /// Message only: written as "then message ..." (true) or "message ..." (false).
@@ -156,6 +169,8 @@ namespace StructuraSystems::Diagram {
         void removeListener(ListenerToken token);
 
     private:
+        /// Every element on the way from where the relationship is written to each of its ends has a name.
+        [[nodiscard]] bool referenceable(const Relationship &relationship) const;
         SysMLElement &mutableElement(ElementId id);
         std::vector<ElementId> &mutableChildren(ElementId owner);
         void ensureUniqueSiblingName(ElementId owner, const std::string &name, ElementId ignore, ElementKind kind) const;

@@ -5,8 +5,8 @@ import QtQuick.Controls
 import QtQuick.Controls.Material
 import StructuraSystems
 
-// One node of the use case view: a use case (ellipse), an actor (stick figure with its name below) or the system
-// boundary (a frame with the subject as title, drawn behind its use cases). Lines are drawn by dragging the small
+// One node of the use case view (SysML v2, table 23): a use case (rounded box «use case»), an actor (stick figure
+// with its name below) or the subject («subject» box with a line to each of its use cases). Lines are drawn by dragging the small
 // handle at the lower right onto another node.
 Item {
     id: node
@@ -34,41 +34,45 @@ Item {
     y: nodeY
     width: nodeWidth
     height: nodeHeight
-    z: isBoundary ? 1 : 10
+    z: 10
 
     // ---------------------------------------------------------------- shapes
-    // system boundary: frame with the subject as title
+    // subject: a box «subject» system = system1
     Rectangle {
         visible: node.isBoundary
         anchors.fill: parent
-        color: Qt.alpha(Theme.card, 0.35)
+        radius: 6
+        color: Theme.card
         border.width: node.selected ? 2 : 1.2
         border.color: node.lineColor
 
-        Row {
-            x: 10
-            y: 8
-            spacing: 6
+        Column {
+            anchors.centerIn: parent
+            width: parent.width - 12
             Label {
+                width: parent.width
+                horizontalAlignment: Text.AlignHCenter
                 text: node.keyword
-                font.pixelSize: 11
+                font.pixelSize: 10
                 color: Theme.textSecondary
-                anchors.baseline: boundaryTitle.baseline
             }
             Label {
                 id: boundaryTitle
+                width: parent.width
+                horizontalAlignment: Text.AlignHCenter
+                elide: Text.ElideRight
                 text: node.title
-                font.pixelSize: 14
-                font.weight: Font.DemiBold
+                font.pixelSize: 12
+                font.weight: Font.Medium
                 color: Theme.textPrimary
             }
         }
     }
-    // use case: ellipse with keyword and name
+    // use case: rounded box with keyword and name
     Rectangle {
         visible: node.isUseCase
         anchors.fill: parent
-        radius: height / 2
+        radius: 10
         color: Theme.card
         border.width: node.selected ? 2 : 1.2
         border.color: node.lineColor
@@ -137,7 +141,6 @@ Item {
     }
 
     // ---------------------------------------------------------------- mouse
-    // the boundary only at its title band and border, so the canvas inside stays reachable
     component Grip: MouseArea {
         id: grip
 
@@ -189,35 +192,7 @@ Item {
 
     Grip {
         owner: node
-        visible: !node.isBoundary
         anchors.fill: parent
-    }
-    Grip {
-        owner: node
-        visible: node.isBoundary
-        width: parent.width
-        height: 30
-    }
-    Grip {
-        owner: node
-        visible: node.isBoundary
-        x: -4
-        width: 8
-        height: parent.height
-    }
-    Grip {
-        owner: node
-        visible: node.isBoundary
-        x: parent.width - 4
-        width: 8
-        height: parent.height
-    }
-    Grip {
-        owner: node
-        visible: node.isBoundary
-        y: parent.height - 4
-        width: parent.width
-        height: 8
     }
 
     // handle for new lines (lower right corner)
@@ -254,7 +229,7 @@ Item {
         ToolTip.visible: handleArea.containsMouse && !handleArea.pressed
         ToolTip.text: node.isActor ? qsTr("Drag onto a use case: the actor takes part in it")
                       : node.isBoundary ? qsTr("Drag onto a use case: it belongs to this system")
-                      : qsTr("Drag onto a use case («include»), an actor, or a boundary")
+                      : qsTr("Drag onto a use case («include»), an actor, or a subject")
         ToolTip.delay: 800
     }
     HoverHandler {

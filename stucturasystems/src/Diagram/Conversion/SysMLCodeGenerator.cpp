@@ -92,6 +92,27 @@ namespace StructuraSystems::Diagram {
             return reference;
         }
 
+        /// A qualified name seen from 'context' ("vehicle::ecu"): where SysML expects a QualifiedName and no feature chain
+        /// (the clients and suppliers of a dependency).
+        std::string qualifiedReferenceFrom(const SemanticModel &model, ElementId context, ElementId target) {
+            std::string reference = referenceFrom(model, context, target);
+            if (isImplicitControl(model.element(target)))
+                return reference;
+            std::string qualified;
+            const auto path = model.ownershipPath(target);
+            auto start = path.begin();
+            if (context == target)
+                context = model.element(target).owner();
+            if (context != RootId) {
+                const auto contextPosition = std::find(path.begin(), path.end(), context);
+                if (contextPosition != path.end())
+                    start = contextPosition + 1;
+            }
+            for (auto it = start; it != path.end(); ++it)
+                qualified += (qualified.empty() ? "" : "::") + SysMLCodeGenerator::formatName(model.element(*it).name());
+            return qualified;
+        }
+
         /// Reference used after ":>" – short name if both live in the same owner, else qualified.
         std::string specializationReference(const SemanticModel &model, ElementId source, ElementId target) {
             const auto &targetElement = model.element(target);
@@ -168,12 +189,18 @@ namespace StructuraSystems::Diagram {
             // verify / include are written into their source (see generateElement), refining allocations into the
             // body of the allocation they refine
             if (relationship.Kind == RelationshipKind::Specialization || isShorthand(model, relationship) ||
-                relationship.Kind == RelationshipKind::Verify || relationship.Kind == RelationshipKind::Include ||
-                relationship.Kind == RelationshipKind::Frame || relationship.Parent.has_value())
+                isWrittenInSource(relationship.Kind) || relationship.Parent.has_value())
                 return false;
             if (relationship.Context)
                 return *relationship.Context == context;
-            return commonOwner(model, relationship.Source, relationship.Target) == context;
+            ElementId common = commonOwner(model, relationship.Source, relationship.Target);
+            for (const ElementId end: endsOf(relationship)) { // n-ary: the owner of all ends
+                while (common != RootId && end != common && !model.isAncestor(common, end))
+                    common = model.element(common).owner();
+                if (common == end)
+                    common = model.element(common).owner();
+            }
+            return common == context;
         }
 
     }
@@ -314,7 +341,13 @@ namespace StructuraSystems::Diagram {
                                            objectiveOf(model, element.owner()) == id &&
                                            hasRelationshipFrom(model, RelationshipKind::Verify, element.owner());
         const bool includes = isUseCaseKind(element.kind()) && hasRelationshipFrom(model, RelationshipKind::Include, id);
-        const bool frames = hasRelationshipFrom(model, RelationshipKind::Frame, id); // "frame concern;"
+        // "frame concern;", "exhibit s;", "assert c;", "assume c;", "require c;"
+        const bool frames = std::any_of(model.relationships().begin(), model.relationships().end(), [&](const Relationship &relationship) {
+            return relationship.Source == id &&
+                   (relationship.Kind == RelationshipKind::Frame || relationship.Kind == RelationshipKind::Exhibit ||
+                    relationship.Kind == RelationshipKind::Assert || relationship.Kind == RelationshipKind::Assume ||
+                    relationship.Kind == RelationshipKind::Require);
+        });
         // if / while / loop / for and the else branch always have a body; "until c;" / "else ..." follow it
         const bool control = element.kind() == ElementKind::ActionUsage &&
                              (isControlStructure(element.actionForm()) || element.isElseBranch());
@@ -376,8 +409,19 @@ namespace StructuraSystems::Diagram {
         }
         if (includes)
             writeReferences(RelationshipKind::Include, id, id, "include", depth + 1);
-        if (frames)
-            writeReferences(RelationshipKind::Frame, id, id, "frame", depth + 1);
+        if (frames) {
+            // in the order they were declared
+            for (const auto &relationship: model.relationships()) {
+                if (relationship.Source == id &&
+                    (relationship.Kind == RelationshipKind::Frame || relationship.Kind == RelationshipKind::Exhibit ||
+                     relationship.Kind == RelationshipKind::Assert || relationship.Kind == RelationshipKind::Assume ||
+                     relationship.Kind == RelationshipKind::Require))
+                    // frame: as before; the others by the name seen from the namespace that holds both
+                    out += indent(depth + 1) + sourceKeyword(relationship.Kind) + " " +
+                           referenceFrom(model, relationship.Kind == RelationshipKind::Frame ? id
+                                                : commonOwner(model, id, relationship.Target), relationship.Target) + ";\n";
+            }
+        }
         generateOwnedRelationships(model, id, depth + 1, out);
         // Body expression of a constraint / calculation: last, without ';'.
         if (!expression.empty()) {
@@ -419,16 +463,28 @@ namespace StructuraSystems::Diagram {
                 label += " " + relationship.Name;
             switch (relationship.Kind) {
                 case RelationshipKind::Connection:
+                case RelationshipKind::Interface: {
                     if (!relationship.TypeName.empty())
                         label += " : " + relationship.TypeName;
-                    out += indent(depth) + (label.empty() ? "" : "connection" + label + " ") + "connect " + source + " to " +
-                           target + ";\n";
+                    std::string ends;
+                    if (relationship.Nary || !relationship.ExtraTargets.empty()) {
+                        // "connect (a, b, c)"
+                        ends = "(" + source + ", " + target;
+                        for (const ElementId end: relationship.ExtraTargets)
+                            ends += ", " + referenceFrom(model, owner, end);
+                        ends += ")";
+                    } else {
+                        // "connect [0..1] a to [1] b"
+                        ends = (relationship.SourceMultiplicity.empty() ? "" : relationship.SourceMultiplicity + " ") + source +
+                               " to " + (relationship.TargetMultiplicity.empty() ? "" : relationship.TargetMultiplicity + " ") +
+                               target;
+                    }
+                    if (relationship.Kind == RelationshipKind::Interface)
+                        out += indent(depth) + "interface" + label + " connect " + ends + ";\n";
+                    else
+                        out += indent(depth) + (label.empty() ? "" : "connection" + label + " ") + "connect " + ends + ";\n";
                     break;
-                case RelationshipKind::Interface:
-                    if (!relationship.TypeName.empty())
-                        label += " : " + relationship.TypeName;
-                    out += indent(depth) + "interface" + label + " connect " + source + " to " + target + ";\n";
-                    break;
+                }
                 case RelationshipKind::Binding:
                     out += indent(depth) + "bind " + source + " = " + target + ";\n";
                     break;
@@ -465,7 +521,18 @@ namespace StructuraSystems::Diagram {
                            source + " to " + target + ";\n";
                     break;
                 case RelationshipKind::Dependency:
-                    out += indent(depth) + "dependency" + label + " from " + source + " to " + target + ";\n";
+                    // clients and suppliers are qualified names ("vehicle::ecu", not "vehicle.ecu"); "from" only after a name
+                    {
+                        // "dependency a, b to c, d"
+                        std::string clients = qualifiedReferenceFrom(model, owner, relationship.Source);
+                        for (const ElementId end: relationship.ExtraSources)
+                            clients += ", " + qualifiedReferenceFrom(model, owner, end);
+                        std::string suppliers = qualifiedReferenceFrom(model, owner, relationship.Target);
+                        for (const ElementId end: relationship.ExtraTargets)
+                            suppliers += ", " + qualifiedReferenceFrom(model, owner, end);
+                        out += indent(depth) + "dependency" + label + (label.empty() ? " " : " from ") + clients + " to " +
+                               suppliers + ";\n";
+                    }
                     break;
                 case RelationshipKind::Allocation: {
                     if (!relationship.TypeName.empty())
@@ -488,6 +555,10 @@ namespace StructuraSystems::Diagram {
                 case RelationshipKind::Verify:
                 case RelationshipKind::Include:
                 case RelationshipKind::Frame:
+                case RelationshipKind::Exhibit:
+                case RelationshipKind::Assert:
+                case RelationshipKind::Assume:
+                case RelationshipKind::Require:
                     break;
             }
         }
@@ -544,6 +615,8 @@ namespace StructuraSystems::Diagram {
                 specializations += reference;
             }
             text += specializations;
+            if (!element.referencedFeature().empty()) // "references action3", "::> part1"
+                text += " " + element.referencesKeyword() + " " + element.referencedFeature();
             if (!element.nameFromRedefinition() && !element.redefinitions().empty())
                 text += " " + redefinitions();
             if (!element.value().empty())

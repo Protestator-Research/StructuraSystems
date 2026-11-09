@@ -35,12 +35,17 @@ namespace StructuraSystems::Client {
         bool Selected = false;
         bool Dashed = false; ///< a reference ("ref part", "ref item"): drawn with a dashed border
         bool Container = false; ///< interconnection view: a part drawn around its parts (sized by the layout)
+        /// Below the name: the alias names of the element ("«alias» Car, Auto", table 4)
+        QString Subtitle;
+        bool Folder = false; ///< drawn as a package symbol without contents (an alias of a package, table 3)
+        bool Derived = false; ///< an inherited usage drawn as node (^part1, table 4): no textual notation
 
         [[nodiscard]] bool sameContent(const DiagramNode &other) const {
             return Kind == other.Kind && Keyword == other.Keyword && Title == other.Title &&
                    Compartments == other.Compartments && Depth == other.Depth && InPins == other.InPins &&
                    OutPins == other.OutPins && Dashed == other.Dashed &&
-                   Container == other.Container;
+                   Container == other.Container && Subtitle == other.Subtitle &&
+                   Folder == other.Folder && Derived == other.Derived;
         }
     };
 
@@ -66,7 +71,10 @@ namespace StructuraSystems::Client {
             InPinsRole,
             OutPinsRole,
             DashedRole,
-            ContainerRole
+            ContainerRole,
+            SubtitleRole,
+            FolderRole,
+            DerivedRole
         };
         Q_ENUM(Roles)
 

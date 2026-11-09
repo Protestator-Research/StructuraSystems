@@ -260,7 +260,7 @@ TEST_CASE("Structure view: occurrences, events, allocations and dependencies") {
     view.setArrowDefault(DiagramTypes::AlwaysDependency);
     const QRectF target = view.nodeRect(key(powerTrain));
     view.arrowReleased(key(generator), target.center().x(), target.center().y());
-    CHECK(generated(allocations).find("dependency from torqueGenerator to powerTrain;\n") != std::string::npos);
+    CHECK(generated(allocations).find("dependency torqueGenerator to powerTrain;\n") != std::string::npos);
     CHECK(!view.allowedEdgeKinds(key(generator), key(powerTrain)).contains(int(DiagramTypes::Dependency))); // once
 
     // an allocation definition starts with its two ends
@@ -300,8 +300,8 @@ TEST_CASE("Sequence: «perform» on a lifeline, message labels with name and typ
     for (const auto &edge: sequence.edges()->edges())
         if (edge.Kind == DiagramTypes::Message)
             labels.append(edge.Label);
-    CHECK(labels.contains("vs : VehicleStart"));
-    CHECK(labels.contains(": EngineStatus"));
+    CHECK(labels.contains("vs of VehicleStart"));
+    CHECK(labels.contains("of EngineStatus"));
     const ElementId vehicle = *find(model, interaction, "vehicle_b");
     const DiagramNode *perform = nullptr;
     for (const auto &node: sequence.nodes()->nodes())

@@ -18,11 +18,13 @@ ColumnLayout {
     property string accessibleName: qsTr("Type")
     /** Create the definition of an unknown type (the tick below the field). */
     property bool createType: true
+    /** Offer to create an unknown type at all (not for the target of an alias: that must exist). */
+    property bool canCreate: true
 
     readonly property var status: check(field.text)
     readonly property bool unknown: field.text.trim().length > 0 && status.known === false
     /** Create a definition on apply. */
-    readonly property bool createsType: unknown && createType
+    readonly property bool createsType: unknown && createType && canCreate
 
     /** Enter in the field (without a suggestion chosen). */
     signal accepted
@@ -154,13 +156,15 @@ ColumnLayout {
         Layout.fillWidth: true
         wrapMode: Text.Wrap
         font.pixelSize: 12
-        color: Theme.textSecondary
-        text: typeInput.unknown ? qsTr("'%1' is not defined in this block.").arg(typeInput.status.name) : ""
+        color: typeInput.canCreate ? Theme.textSecondary : Theme.danger
+        text: !typeInput.unknown ? ""
+              : typeInput.status.message !== undefined ? typeInput.status.message
+              : qsTr("'%1' is not defined in this block.").arg(typeInput.status.name)
     }
     CheckBox {
         id: createCheck
 
-        visible: typeInput.unknown
+        visible: typeInput.unknown && typeInput.canCreate
         padding: 0
         checked: typeInput.createType
         onToggled: typeInput.createType = checked

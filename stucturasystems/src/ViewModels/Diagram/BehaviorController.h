@@ -59,6 +59,9 @@ namespace StructuraSystems::Client {
         /// The frame around the nodes with the name of the context: "action transportPassenger".
         Q_PROPERTY(QRectF frameRect READ frameRect NOTIFY frameChanged)
         Q_PROPERTY(QString frameTitle READ frameTitle NOTIFY frameChanged)
+        /// Swimlanes (perform-actions-swimlanes): one per part performing actions of the context,
+        /// [{title: "part0.part1", x, y, width, height}]
+        Q_PROPERTY(QVariantList lanes READ lanes NOTIFY frameChanged)
 
     public:
         explicit BehaviorController(Diagram::SemanticModel &model, QObject *parent = nullptr);
@@ -75,6 +78,7 @@ namespace StructuraSystems::Client {
         [[nodiscard]] qreal canvasHeight() const { return CanvasSize.height(); }
         [[nodiscard]] QRectF frameRect() const { return FrameRect; }
         [[nodiscard]] QString frameTitle() const { return FrameTitle; }
+        [[nodiscard]] QVariantList lanes() const { return Lanes; }
 
         /// A palette entry (DiagramTypes::ToolActionUsage, ToolDecision, ..., ToolState, ToolInitial) dropped at (x, y).
         /// An action dropped onto a state becomes its "do action".
@@ -92,6 +96,9 @@ namespace StructuraSystems::Client {
         Q_INVOKABLE void deleteEdge(const QString &key);
         /// Entry / do / exit action of a state shown at a point of the state node (for editing), empty if none.
         Q_INVOKABLE QString entryAt(const QString &node, qreal x, qreal y) const;
+        /// Where a parameter pin sits on its action ("top", "bottom", "right") or on the frame ("left", "right",
+        /// "bottom"); empty for other nodes.
+        Q_INVOKABLE QString pinSide(const QString &id) const;
         Q_INVOKABLE void layoutAll();
         /// Positions of the nodes of every context shown so far, by context and element key (see DiagramLayout);
         /// contexts with the automatic layout are left out.
@@ -148,9 +155,19 @@ namespace StructuraSystems::Client {
         void applyContextLayout();
         std::set<Diagram::ElementId> SelectedNodes;
         std::set<QString> SelectedEdges;
+        /// Parameters drawn as pins (graphical BNF: param-t/b/l/r) -> the action they are on, or the context (on the frame).
+        std::map<Diagram::ElementId, Diagram::ElementId> PinOwners;
+        [[nodiscard]] bool isPin(Diagram::ElementId id) const { return PinOwners.count(id) > 0; }
+        [[nodiscard]] QString pinSideOf(Diagram::ElementId pin) const;
+        /// Pin rectangles on the border of their action / the frame (after the node rectangles are known).
+        void placePins(QRectF &bounds);
         QSizeF CanvasSize{1600, 1000};
         QRectF FrameRect;
         QString FrameTitle;
+        QVariantList Lanes;
+        /// The lane of a node of the context (index into LaneTitles); nodes without a performer are in no lane.
+        std::map<Diagram::ElementId, int> LaneOf;
+        std::vector<QString> LaneTitles;
         bool SyncQueued = false;
         bool AutoLayout = true;
     };

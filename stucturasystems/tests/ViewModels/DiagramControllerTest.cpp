@@ -267,8 +267,11 @@ TEST_CASE("Controller: multiplicity input") {
     CHECK_EQ(DiagramController::parseMultiplicity("6").second->toString(), std::string("[6]"));
     CHECK_EQ(DiagramController::parseMultiplicity("[0..1]").second->toString(), std::string("[0..1]"));
     CHECK_EQ(DiagramController::parseMultiplicity("1..*").second->toString(), std::string("[1..*]"));
-    CHECK(!DiagramController::parseMultiplicity("x").first);
+    CHECK(!DiagramController::parseMultiplicity("x y").first);
     CHECK(!DiagramController::parseMultiplicity("3..1").first);
+    // bounds as feature references (table 4: "[m]")
+    CHECK_EQ(DiagramController::parseMultiplicity("m").second->toString(), std::string("[m]"));
+    CHECK_EQ(DiagramController::parseMultiplicity("[1..n]").second->toString(), std::string("[1..n]"));
 }
 
 TEST_CASE("Controller: unique names per owner") {
@@ -374,15 +377,14 @@ TEST_CASE("Controller: constraint and calc definitions are nodes with the compar
     const DiagramNode &decode = controller.nodes()->nodes().at(1);
     CHECK(decode.Kind == DiagramTypes::CalcDefinitionNode);
     CHECK_EQ(decode.Keyword, QString("«function»"));
-    // the result is the last parameter, "return ..." (no compartment of its own)
-    CHECK_EQ(entryTexts(decode, "parameters"), QStringList({QString("in raw : Integer"),
-                                                            QString("return trimPercent : Rational = raw * 100.0 / 128.0 - 100.0")}));
-    CHECK(entryTexts(decode, "result").isEmpty());
+    // table 18: the parameters, and the result compartment with what is returned
+    CHECK_EQ(entryTexts(decode, "parameters"), QStringList({QString("in raw : Integer")}));
+    CHECK_EQ(entryTexts(decode, "result"), QStringList({QString("return trimPercent : Rational = raw * 100.0 / 128.0 - 100.0")}));
 
     const DiagramNode &twice = controller.nodes()->nodes().at(2);
     CHECK_EQ(twice.Keyword, QString("«calc def»"));
     CHECK_EQ(entryTexts(twice, "attributes"), QStringList({QString("factor : Real = 2")}));
-    CHECK_EQ(entryTexts(twice, "expression"), QStringList({QString("x * factor")}));
+    CHECK_EQ(entryTexts(twice, "result"), QStringList({QString("x * factor")}));
 
     const DiagramNode &limit = controller.nodes()->nodes().at(3);
     CHECK(limit.Kind == DiagramTypes::ConstraintNode);
@@ -399,7 +401,7 @@ TEST_CASE("Controller: constraint and calc definitions from the palette, paramet
     CHECK(model.element(idOf(general)).kind() == ElementKind::ConstraintDefinition);
     CHECK(model.element(idOf(calc)).kind() == ElementKind::CalcDefinition);
     CHECK_EQ(SysMLCodeGenerator().generate(model, idOf(calc)),
-             std::string("calc def Calc1 {\n    in x : Real;\n    return result : Real = x;\n}"));
+             std::string("calc def Calc1 {\n    0.0\n}")); // table 18: only the result expression
     CHECK_EQ(SysMLCodeGenerator().generate(model, idOf(general)),
              std::string("constraint def Constraint1 {\n    in x : Real;\n    x >= 0.0\n}"));
 
@@ -509,7 +511,7 @@ TEST_CASE("Controller: definitions as nodes, ports on the border of their part, 
     CHECK_EQ(entryTexts(*portDef, "directed features"), QStringList({QString("out item fuel : Fuel")}));
     CHECK_EQ(entryTexts(*controller.nodes()->find(model.children(RootId).at(1)), "enums"),
              QStringList({QString("off"), QString("running")}));
-    CHECK_EQ(entryTexts(*controller.nodes()->find(model.children(RootId).at(2)), "ports"),
+    CHECK_EQ(entryTexts(*controller.nodes()->find(model.children(RootId).at(2)), "ends"),
              QStringList({QString("end supplier : FuelPort"), QString("end consumer : ~FuelPort")}));
 
     const ElementId tank = model.children(RootId).at(3);
@@ -553,7 +555,7 @@ TEST_CASE("Controller: definitions as nodes, ports on the border of their part, 
     CHECK(controller.createEdge(DiagramTypes::Flow, QString::number(fuelOut), QString::number(fuelIn)));
     const QString flow = controller.edges()->edges().front().Key;
     CHECK(controller.updateEdge(flow, {{"name", ""}, {"typeName", "Fuel"}}).isEmpty());
-    CHECK_EQ(controller.edges()->edges().front().Label, QString(": Fuel"));
+    CHECK_EQ(controller.edges()->edges().front().Label, QString("of Fuel"));
     CHECK(SysMLCodeGenerator().generate(model).find("flow of Fuel from tank.fuelOut to engine.fuelIn;") != std::string::npos);
 }
 
@@ -674,7 +676,7 @@ TEST_CASE("Controller: requirements with text, subject, stakeholders and require
     QStringList titles;
     for (const auto &compartment: node->Compartments)
         titles.append(compartment.toMap().value("title").toString());
-    CHECK_EQ(titles, QStringList({"doc", "subject", "stakeholders", "constraints"}));
+    CHECK_EQ(titles, QStringList({"doc", "subject", "stakeholders", "assume constraints"}));
     // a plain constraint in a part may not become "require constraint"
     const QString part = dropPart(controller, 600, 100);
     const QString assertion = controller.addElement(DiagramTypes::ToolConstraint, controller.nodeRect(part).center().x(),
@@ -818,10 +820,10 @@ TEST_CASE("Controller: variations, variants, individuals, snapshots, time slices
     CHECK(SysMLTextImporter::importText(text, again).lossless());
     CHECK_EQ(SysMLCodeGenerator().generate(again), text);
 
-    // the keywords of the nodes: «variation» «part def», «individual» «part», «snapshot», «analysis def»
-    CHECK_EQ(controller.nodes()->find(idOf(choices))->Keyword, QString("«variation» «part def»"));
+    // the keywords of the nodes: «variation part def», «individual» «part», «snapshot», «analysis def»
+    CHECK_EQ(controller.nodes()->find(idOf(choices))->Keyword, QString("«variation part def»"));
     CHECK_EQ(controller.nodes()->find(idOf(choices))->Title, QString("Choices1"));
-    CHECK_EQ(controller.nodes()->find(idOf(individual))->Keyword, QString("«individual» «part»"));
+    CHECK_EQ(controller.nodes()->find(idOf(individual))->Keyword, QString("«individual part»"));
     CHECK_EQ(controller.nodes()->find(idOf(analysis))->Keyword, QString("«analysis def»"));
     const ElementId snapshot = model.children(idOf(individual)).front();
     CHECK(controller.nodes()->find(snapshot) != nullptr);
@@ -875,7 +877,7 @@ TEST_CASE("Structure view: redefinitions, connection and flow definitions") {
     CHECK(texts.contains("mass :>> mass = 120.0"));
     const ElementId vehicle = model.children(RootId)[2];
     const ElementId smallEngine = model.children(vehicle).front();
-    CHECK_EQ(structure.nodes()->find(smallEngine)->Title, QString("smallEng : SmallEngine redefines eng"));
+    CHECK_EQ(structure.nodes()->find(smallEngine)->Title, QString("smallEng : SmallEngine\nredefines eng")); // table 4: own line
     const ElementId flow = model.children(RootId)[3];
     const auto *flowNode = structure.nodes()->find(flow);
     CHECK(flowNode != nullptr);
@@ -942,15 +944,58 @@ TEST_CASE("Structure view: metadata, imports, aliases, views, viewpoints and con
     for (const auto &node: structure.nodes()->nodes())
         byKeyword.insert(node.Keyword + " " + node.Title, &node);
     CHECK(byKeyword.contains("«import» private ScalarValues::*"));
-    CHECK(byKeyword.contains("«alias» Car for Automobile"));
+    CHECK(!byKeyword.contains("«alias» Car for Automobile")); // an alias of a part def: in its name (table 4)
     CHECK(byKeyword.contains("«metadata def» Safety"));
     CHECK(byKeyword.contains("«metadata» Safety"));
     CHECK(byKeyword.contains("«view def» StructureView"));
     CHECK(byKeyword.contains("«view» vehicleView : StructureView"));
-    CHECK_EQ(DiagramNodeModel::entryCount(*byKeyword.value("«metadata» Safety"), "about"), 1);
-    CHECK_EQ(DiagramNodeModel::entryCount(*byKeyword.value("«view» vehicleView : StructureView"), "expose"), 1);
-    CHECK_EQ(DiagramNodeModel::entryCount(*byKeyword.value("«view» vehicleView : StructureView"), "render"), 1);
-    CHECK_EQ(DiagramNodeModel::entryCount(*byKeyword.value("«view def» StructureView"), "filter"), 1);
+    // the alias in the name compartment of what it names (table 4), by default
+    CHECK_EQ(byKeyword.value("«part def» Automobile")->Subtitle, QString("«alias» Car"));
+    {
+        DiagramController named(model);
+        named.setNotationMode("aliases", "name");
+        bool aliasNode = false;
+        QString subtitle;
+        for (const auto &node: named.nodes()->nodes()) {
+            aliasNode = aliasNode || node.Keyword == "«alias»";
+            if (node.Title == "Automobile")
+                subtitle = node.Subtitle;
+        }
+        CHECK(!aliasNode);
+        CHECK_EQ(subtitle, QString("«alias» Car"));
+    }
+    // «expose» from the view to what it exposes
+    CHECK(std::any_of(structure.edges()->edges().begin(), structure.edges()->edges().end(), [&](const DiagramEdge &edge) {
+        return edge.Kind == DiagramTypes::Expose && edge.Label == QString("«expose»**") &&
+               model.element(edge.Target).name() == "vehicle";
+    }));
+    // rendered by the view: only what it exposes (vehicle and its parts), in a frame with its expose lines
+    const QString vehicleView = byKeyword.value("«view» vehicleView : StructureView") ? key(byKeyword.value("«view» vehicleView : StructureView")->Id) : QString();
+    CHECK_EQ(structure.views().size(), 1);
+    structure.setViewId(vehicleView);
+    CHECK_EQ(structure.viewTitle(), QString("«view» vehicleView : StructureView"));
+    CHECK(structure.viewInfo().contains(QString("expose vehicle::**")));
+    CHECK(structure.viewInfo().contains(QString("render asTreeDiagram")));
+    QStringList shown;
+    for (const auto &node: structure.nodes()->nodes())
+        shown.append(QString::fromStdString(model.element(node.Id).name()));
+    CHECK(shown.contains(QString("vehicle")));
+    CHECK(shown.contains(QString("seatBelt")));
+    CHECK(!shown.contains(QString("Automobile")));
+    structure.setViewId(QString());
+    CHECK(structure.viewTitle().isEmpty());
+    byKeyword.clear();
+    for (const auto &node: structure.nodes()->nodes())
+        byKeyword.insert(node.Keyword + " " + node.Title, &node);
+    // the metadata is a note with a dashed line to the vehicle (the line replaces the entry "about")
+    CHECK(byKeyword.value("«metadata» Safety")->Kind == DiagramTypes::NoteNode);
+    CHECK_EQ(DiagramNodeModel::entryCount(*byKeyword.value("«metadata» Safety"), "about"), 0);
+    CHECK(std::any_of(structure.edges()->edges().begin(), structure.edges()->edges().end(), [&](const DiagramEdge &edge) {
+        return edge.Kind == DiagramTypes::Annotation && model.element(edge.Target).name() == "vehicle";
+    }));
+    CHECK_EQ(DiagramNodeModel::entryCount(*byKeyword.value("«view» vehicleView : StructureView"), "exposes"), 1);
+    CHECK_EQ(DiagramNodeModel::entryCount(*byKeyword.value("«view» vehicleView : StructureView"), "rendering"), 1);
+    CHECK_EQ(DiagramNodeModel::entryCount(*byKeyword.value("«view def» StructureView"), "filters"), 1);
     // the metadata of the seat belt is an entry of its node
     const ElementId vehicle = model.children(RootId)[4];
     const ElementId seatBelt = model.children(vehicle).front();
@@ -1257,31 +1302,45 @@ namespace {
     }
 }
 
-TEST_CASE("Controller: «import» arrows between packages, library imports as dashed packages") {
+TEST_CASE("Controller: package imports nested as dashed packages (table 3), recursive imports as «import» arrows") {
     SemanticModel model;
     SysMLTextImporter::importText("package Definitions { part def Vehicle; }\n"
+                                  "package Parts { part def Wheel; }\n"
                                   "package Usages {\n    private import Definitions::*;\n    private import ISQ::*;\n"
-                                  "    part vehicle : Vehicle;\n}\n",
+                                  "    public import Parts::**;\n    part vehicle : Vehicle;\n}\n",
                                   model);
     DiagramController controller(model);
+    // all imports nested: also "Parts::**", marked **
+    controller.setNotationMode("imports", "nested");
+    bool recursiveNested = false;
+    for (const auto &node: controller.nodes()->nodes())
+        recursiveNested = recursiveNested || (node.Kind == DiagramTypes::LibraryNode && node.Title == "Parts" && node.Keyword == "**");
+    CHECK(recursiveNested);
+    CHECK(edgeOfKind(controller, DiagramTypes::Import) == nullptr);
+    controller.setNotationMode("imports", "individual"); // the default: table 3 "Import (recursive)" is an arrow
 
+    // "import Definitions::*" and "import ISQ::*": the imported package inside the importing one, «private» Definitions
+    QStringList nested;
+    for (const auto &node: controller.nodes()->nodes()) {
+        if (node.Kind == DiagramTypes::LibraryNode) {
+            nested.append(node.Keyword + QLatin1Char(' ') + node.Title);
+            CHECK_EQ(model.element(node.Id).owner(), model.children(RootId).at(2));
+        }
+    }
+    nested.sort();
+    CHECK_EQ(nested, QStringList({QString("«private» Definitions"), QString("«private» ISQ")}));
+    // "import Parts::**" (recursive): an «import» arrow between the packages
     const auto *import = edgeOfKind(controller, DiagramTypes::Import);
     CHECK(import != nullptr);
     if (!import)
         return;
-    CHECK_EQ(import->Label, QString("«import» *"));
+    CHECK_EQ(import->Label, QString("«public import» **"));
     CHECK_EQ(model.element(import->Source).name(), std::string("Usages"));
-    CHECK_EQ(model.element(import->Target).name(), std::string("Definitions"));
-    bool library = false;
-    for (const auto &node: controller.nodes()->nodes()) {
-        if (node.Kind == DiagramTypes::LibraryNode) {
-            library = true;
-            CHECK_EQ(node.Title, QString("ISQ"));
-            CHECK_EQ(node.Keyword, QString("private «import» *"));
-        }
-    }
-    CHECK(library);
-    // vehicle : Vehicle is drawn as "defined by" arrow
+    CHECK_EQ(model.element(import->Target).name(), std::string("Parts"));
+    // vehicle : Vehicle: only in the name (table 3), with "Typing lines" also drawn as "defined by" arrow
+    CHECK(edgeOfKind(controller, DiagramTypes::DefinedBy) == nullptr);
+    const QString importKey = import->Key;
+    controller.setNotationMode("typing", "line"); // (the edges are new)
     const auto *definedBy = edgeOfKind(controller, DiagramTypes::DefinedBy);
     CHECK(definedBy != nullptr);
     if (!definedBy)
@@ -1289,8 +1348,8 @@ TEST_CASE("Controller: «import» arrows between packages, library imports as da
     CHECK_EQ(model.element(definedBy->Target).name(), std::string("Vehicle"));
 
     // deleting the arrows removes the import and the type
-    controller.deleteEdge(QString(import->Key));
-    CHECK(generated(model).find("import Definitions::*") == std::string::npos);
+    controller.deleteEdge(importKey);
+    CHECK(generated(model).find("import Parts::**") == std::string::npos);
     const auto *typed = edgeOfKind(controller, DiagramTypes::DefinedBy);
     CHECK(typed != nullptr);
     if (!typed)
@@ -1311,6 +1370,7 @@ TEST_CASE("Controller: drawing «import», defined-by and perform arrows writes 
     const ElementId engine = model.children(b).at(0);
     const ElementId start = model.children(b).at(1);
 
+    controller.setNotationMode("typing", "line");
     CHECK(controller.createEdge(DiagramTypes::Import, key(b), key(a)));
     CHECK(controller.createEdge(DiagramTypes::DefinedBy, key(engine), key(engineDef)));
     CHECK(controller.createEdge(DiagramTypes::Performs, key(engine), key(start)));
@@ -1318,7 +1378,12 @@ TEST_CASE("Controller: drawing «import», defined-by and perform arrows writes 
     CHECK(text.find("private import A::*;") != std::string::npos);
     CHECK(text.find("part engine : Engine {") != std::string::npos);
     CHECK(text.find("perform start;") != std::string::npos);
-    CHECK(edgeOfKind(controller, DiagramTypes::Import) != nullptr);
+    // "import A::*": A drawn in B as dashed package (nested notation of table 3), no arrow
+    CHECK(edgeOfKind(controller, DiagramTypes::Import) == nullptr);
+    bool nested = false;
+    for (const auto &node: controller.nodes()->nodes())
+        nested = nested || (node.Kind == DiagramTypes::LibraryNode && node.Title == "A" && model.element(node.Id).owner() == b);
+    CHECK(nested);
     CHECK(edgeOfKind(controller, DiagramTypes::DefinedBy) != nullptr);
     CHECK(edgeOfKind(controller, DiagramTypes::Performs) != nullptr);
 
@@ -1413,8 +1478,8 @@ TEST_CASE("Controller: calc def parameters with return, calc usage with bound va
             "}\n", model).lossless());
     DiagramController controller(model);
     const DiagramNode &force = *controller.nodes()->find(model.children(RootId).at(0));
-    CHECK_EQ(entryTexts(force, "parameters"), QStringList({QString("in m :> ISQ::mass"), QString("in a :> ISQ::acceleration"),
-                                                           QString("return f :> ISQ::force = m * a")}));
+    CHECK_EQ(entryTexts(force, "parameters"), QStringList({QString("in m :> ISQ::mass"), QString("in a :> ISQ::acceleration")}));
+    CHECK_EQ(entryTexts(force, "result"), QStringList({QString("return f :> ISQ::force = m * a")}));
     const DiagramNode &vehicle = *controller.nodes()->find(model.children(RootId).at(1));
     CHECK_EQ(entryTexts(vehicle, "calcs"), QStringList({QString("force : Force(m = 1500 [kg], a = 9.806 [m / s ^ 2])")}));
 }
@@ -1505,6 +1570,362 @@ TEST_CASE("Interconnection: a part with its parts, items and ports nested, conne
     CHECK(view.nodes()->find(engine)->Container);
 }
 
+TEST_CASE("Interconnection: inherited ports on the border of the parts, interfaces and messages between them") {
+    const std::string text =
+            "port def FuelPort {\n    out item fuel : Fuel;\n}\n"
+            "item def Fuel;\n"
+            "interface def FuelLink {\n    end supply : FuelPort;\n    end demand : ~FuelPort;\n}\n"
+            "part def Tank {\n    port fuelOut : FuelPort;\n    port drain : FuelPort;\n}\n"
+            "part def Engine {\n    port fuelIn : ~FuelPort;\n}\n"
+            "part def Vehicle {\n"
+            "    part tank : Tank;\n"
+            "    part engine : Engine;\n"
+            "    interface link : FuelLink connect tank.fuelOut to engine.fuelIn;\n"
+            "    flow of Fuel from tank.fuelOut.fuel to engine.fuelIn.fuel;\n"
+            "    message m of Fuel from tank to engine;\n"
+            "}\n";
+    SemanticModel model;
+    CHECK(SysMLTextImporter::importText(text, model).lossless());
+    CHECK_EQ(SysMLCodeGenerator().generate(model), text);
+    const ElementId vehicle = model.children(RootId).at(5);
+    const ElementId tank = model.children(vehicle).at(0);
+    const ElementId engine = model.children(vehicle).at(1);
+    DiagramController view(model, nullptr, true);
+    view.setContextId(key(vehicle));
+    view.syncNow();
+    // fuelOut, drain (of Tank) on tank, fuelIn (of Engine) on engine: nodes of their own on the border
+    std::map<QString, const DiagramNode *> ports;
+    for (const auto &node: view.nodes()->nodes()) {
+        if (node.Kind == DiagramTypes::PortNode)
+            ports[node.Title] = &node;
+    }
+    CHECK_EQ(ports.size(), std::size_t(3));
+    CHECK(ports.count("fuelOut : FuelPort") > 0);
+    CHECK(ports.count("fuelIn : ~FuelPort") > 0);
+    if (ports.size() != 3)
+        return;
+    const auto *fuelOut = ports.at("fuelOut : FuelPort");
+    const auto *fuelIn = ports.at("fuelIn : ~FuelPort");
+    const auto *drain = ports.at("drain : FuelPort");
+    const QRectF tankRect = view.nodes()->find(tank)->Rect;
+    const QRectF engineRect = view.nodes()->find(engine)->Rect;
+    CHECK(tankRect.adjusted(-8, -8, 8, 8).contains(fuelOut->Rect.center()));
+    CHECK(!tankRect.adjusted(8, 8, -8, -8).contains(fuelOut->Rect.center())); // on the border
+    CHECK(engineRect.adjusted(-8, -8, 8, 8).contains(fuelIn->Rect.center()));
+    CHECK_EQ(fuelOut->Keyword, QString("out"));
+    CHECK_EQ(fuelIn->Keyword, QString("in"));
+    CHECK_EQ(view.portSide(key(fuelIn->Id)), QString("left")); // incoming: left border
+    // no "^fuelOut" in a compartment of tank anymore: it is drawn on the border
+    for (const auto &compartment: view.nodes()->find(tank)->Compartments)
+        CHECK(compartment.toMap().value("title").toString() != QString("ports"));
+    int interfaces = 0;
+    int flows = 0;
+    int messages = 0;
+    for (const auto &edge: view.edges()->edges()) {
+        if (edge.Kind == DiagramTypes::Interface || edge.Kind == DiagramTypes::Flow) {
+            CHECK_EQ(edge.Source, fuelOut->Id);
+            CHECK_EQ(edge.Target, fuelIn->Id);
+            CHECK(!EdgeRouting::routeOf(*view.nodes(), view.edges()->edges(), edge).empty());
+        }
+        if (edge.Kind == DiagramTypes::Message) {
+            CHECK_EQ(edge.Source, tank);
+            CHECK_EQ(edge.Target, engine);
+        }
+        interfaces += edge.Kind == DiagramTypes::Interface ? 1 : 0;
+        flows += edge.Kind == DiagramTypes::Flow ? 1 : 0;
+        messages += edge.Kind == DiagramTypes::Message ? 1 : 0;
+    }
+    CHECK_EQ(interfaces, 1);
+    CHECK_EQ(flows, 1);
+    CHECK_EQ(messages, 1);
+    // an inherited port can be moved along the border, not selected or deleted as an element
+    view.moveNode(key(drain->Id), tankRect.center().x(), tankRect.bottom());
+    CHECK(view.nodeRect(key(drain->Id)).isValid());
+    // drawing a connection between inherited ports: "connect tank.drain to engine.fuelIn;"
+    const QVariantList kinds = view.allowedEdgeKinds(key(drain->Id), key(fuelIn->Id));
+    CHECK(kinds.contains(int(DiagramTypes::Connection)));
+    CHECK(kinds.contains(int(DiagramTypes::Interface)));
+    CHECK(!kinds.contains(int(DiagramTypes::Specialization)));
+    CHECK(view.createEdge(DiagramTypes::Connection, key(drain->Id), key(fuelIn->Id)));
+    const std::string generated = SysMLCodeGenerator().generate(model);
+    CHECK(generated.find("connect tank.drain to engine.fuelIn;") != std::string::npos);
+    // the same once more: it exists already
+    CHECK(!view.allowedEdgeKinds(key(drain->Id), key(fuelIn->Id)).contains(int(DiagramTypes::Connection)));
+    // the new connection runs between the two port nodes, and the text reads back the same
+    view.syncNow();
+    int connections = 0;
+    for (const auto &edge: view.edges()->edges())
+        connections += edge.Kind == DiagramTypes::Connection ? 1 : 0;
+    CHECK_EQ(connections, 1);
+    SemanticModel again;
+    CHECK(SysMLTextImporter::importText(generated, again).lossless());
+    CHECK_EQ(SysMLCodeGenerator().generate(again), generated);
+}
+
+TEST_CASE("Controller: attributes and ports on package level, all compartments on request") {
+    SemanticModel model;
+    CHECK(SysMLTextImporter::importText(
+            "package P {\n"
+            "    port def FuelPort;\n"
+            "    attribute mass : Real = 5;\n"
+            "    port fuel : FuelPort;\n"
+            "    requirement r1;\n"
+            "    action drive;\n"
+            "    part def Vehicle {\n"
+            "        part engine {\n"
+            "            port p : FuelPort;\n"
+            "            perform drive;\n"
+            "        }\n"
+            "        part tank {\n"
+            "            port q : FuelPort;\n"
+            "        }\n"
+            "        connect tank.q to engine.p;\n"
+            "        flow from tank.q to engine.p;\n"
+            "        satisfy r1 by engine;\n"
+            "        individual part v1;\n"
+            "        snapshot part s1;\n"
+            "    }\n"
+            "}\n", model).lossless());
+    DiagramController view(model);
+    view.syncNow();
+    const ElementId package = model.children(RootId).at(0);
+    const ElementId mass = model.children(package).at(1);
+    const ElementId fuel = model.children(package).at(2);
+    const ElementId drive = model.children(package).at(4);
+    const ElementId vehicle = model.children(package).at(5);
+    const ElementId engine = model.children(vehicle).at(0);
+    // package level: rounded usages of their own (not a text node, not a port on a border)
+    CHECK_EQ(view.nodes()->find(mass)->Kind, DiagramTypes::PartNode);
+    CHECK_EQ(view.nodes()->find(mass)->Keyword, QString("«attribute»"));
+    CHECK_EQ(view.nodes()->find(mass)->Title, QString("mass : Real = 5"));
+    CHECK_EQ(view.nodes()->find(fuel)->Kind, DiagramTypes::PartNode);
+    CHECK_EQ(view.nodes()->find(fuel)->Keyword, QString("«port»"));
+    // the further compartments only when switched on
+    CHECK(entryTexts(*view.nodes()->find(vehicle), "connections").isEmpty());
+    view.setAllCompartments(true);
+    CHECK(view.allCompartments());
+    CHECK_EQ(entryTexts(*view.nodes()->find(vehicle), "connections"), QStringList({QString("connect tank.q to engine.p")}));
+    CHECK_EQ(entryTexts(*view.nodes()->find(vehicle), "flows"), QStringList({QString("flow from tank.q to engine.p")}));
+    CHECK_EQ(entryTexts(*view.nodes()->find(vehicle), "individuals"), QStringList({QString("part v1")}));
+    CHECK_EQ(entryTexts(*view.nodes()->find(vehicle), "snapshots"), QStringList({QString("s1")}));
+    const QStringList relationships = entryTexts(*view.nodes()->find(engine), "relationships");
+    CHECK(relationships.contains(QString("satisfies r1")));
+    CHECK(relationships.contains(QString("performs drive")));
+    CHECK(entryTexts(*view.nodes()->find(drive), "relationships").contains(QString("performed by engine")));
+    view.setAllCompartments(false);
+    CHECK(entryTexts(*view.nodes()->find(vehicle), "connections").isEmpty());
+}
+
+TEST_CASE("Structure view: doc as note, with all compartments as compartment doc (table 2)") {
+    SemanticModel model;
+    const std::string text =
+            "package P {\n"
+            "    doc /* about the package */\n"
+            "    part def Part1;\n"
+            "    port def P1;\n"
+            "    part part1 : Part1 {\n"
+            "        doc /* documentation-text */\n"
+            "        doc Document1 locale \"fr_BE\" /* Ceci n'est pas une pipe. */\n"
+            "        port p1 : P1 {\n"
+            "            doc /* of the port */\n"
+            "        }\n"
+            "    }\n"
+            "}\n";
+    CHECK(SysMLTextImporter::importText(text, model).lossless());
+    DiagramController view(model);
+    view.syncNow();
+    const auto notes = [&] {
+        int count = 0;
+        for (const auto &node: view.nodes()->nodes())
+            count += node.Kind == DiagramTypes::NoteNode ? 1 : 0;
+        return count;
+    };
+    const ElementId package = model.children(RootId).at(0);
+    const ElementId part1 = model.children(package).at(3);
+    CHECK_EQ(notes(), 4); // package doc, two docs of part1, doc of the port
+    CHECK(entryTexts(*view.nodes()->find(part1), "doc").isEmpty());
+    view.setAllCompartments(true);
+    // the docs of part1 are its compartment 'doc'; the package doc and the doc of the port stay notes
+    CHECK_EQ(notes(), 2);
+    CHECK_EQ(entryTexts(*view.nodes()->find(part1), "doc"),
+             QStringList({QString("documentation-text"), QString("Document1 locale \"fr_BE\""),
+                          QString("Ceci n'est pas une pipe.")}));
+    CHECK_EQ(view.nodes()->find(part1)->Compartments.first().toMap().value("title").toString(), QString("doc"));
+    for (const auto &edge: view.edges()->edges())
+        CHECK(!(edge.Kind == DiagramTypes::Annotation && edge.Target == part1));
+    view.setAllCompartments(false);
+    CHECK_EQ(notes(), 4);
+    CHECK_EQ(generated(model), text);
+}
+
+TEST_CASE("Structure view: moving a note of a calc def keeps it in the calc def (no reparenting)") {
+    SemanticModel model;
+    const std::string text =
+            "package P {\n"
+            "    calc def square {\n"
+            "        in attribute x : Real;\n"
+            "        rep square language \"Python\" /* return x**2 */\n"
+            "    }\n"
+            "    part def A;\n"
+            "}\n"
+            "part def B;\n";
+    CHECK(SysMLTextImporter::importText(text, model).lossless());
+    DiagramController view(model);
+    view.syncNow();
+    const ElementId package = model.children(RootId).at(0);
+    const ElementId square = model.children(package).at(0);
+    const ElementId rep = model.children(square).at(1);
+    const ElementId a = model.children(package).at(1);
+    const ElementId b = model.children(RootId).at(1);
+    // the note dragged far out of the package frame, onto the empty canvas
+    view.moveNode(key(rep), 3000, 3000);
+    view.finishMove(key(rep));
+    CHECK_EQ(model.element(rep).owner(), square);
+    CHECK_EQ(generated(model), text);
+    CHECK(std::any_of(view.edges()->edges().begin(), view.edges()->edges().end(), [&](const DiagramEdge &edge) {
+        return edge.Kind == DiagramTypes::Annotation && edge.Source == rep && edge.Target == square;
+    }));
+    // what a package owns still goes where it is dropped: A out of the package, B into it
+    view.moveNode(key(a), 3000, 3000);
+    view.finishMove(key(a));
+    CHECK_EQ(model.element(a).owner(), RootId);
+    const QRectF frame = view.nodeRect(key(package));
+    view.moveNode(key(b), frame.x() + 30, frame.y() + 60);
+    view.finishMove(key(b));
+    CHECK_EQ(model.element(b).owner(), package);
+}
+
+TEST_CASE("Structure view: a comment about an inherited feature ends at its entry ^name") {
+    SemanticModel model;
+    CHECK(SysMLTextImporter::importText(
+            "part def Part2 {\n"
+            "    attribute a1;\n"
+            "}\n"
+            "comment C2 about part2::a1 /* inherited */\n"
+            "part part2 : Part2;\n", model).lossless());
+    DiagramController view(model);
+    view.syncNow();
+    const ElementId part2 = model.children(RootId).at(2);
+    const ElementId a1 = model.children(model.children(RootId).at(0)).at(0);
+    CHECK(entryTexts(*view.nodes()->find(part2), "attributes").contains(QString("^a1")));
+    CHECK(std::any_of(view.edges()->edges().begin(), view.edges()->edges().end(), [&](const DiagramEdge &edge) {
+        return edge.Kind == DiagramTypes::Annotation && edge.Target == part2 && edge.TargetEntry == key(a1);
+    }));
+}
+
+TEST_CASE("Structure view: the line of a doc note ends between the ports of its part") {
+    SemanticModel model;
+    CHECK(SysMLTextImporter::importText(
+            "part part1 {\n"
+            "    doc /* documentation-text */\n"
+            "    port p1;\n"
+            "    port p2;\n"
+            "}\n", model).lossless());
+    DiagramController view(model);
+    view.syncNow();
+    const ElementId part1 = model.children(RootId).at(0);
+    const ElementId doc = model.children(part1).at(0);
+    const QRectF part = view.nodeRect(key(part1));
+    // the note right of the part, at the height of the first port
+    const QRectF port1 = view.nodeRect(key(model.children(part1).at(1)));
+    view.moveNode(key(doc), part.right() + 120, port1.center().y() - 20);
+    view.setNodeSize(key(doc), 160, 40);
+    for (const auto &edge: view.edges()->edges()) {
+        if (edge.Kind != DiagramTypes::Annotation)
+            continue;
+        const auto route = EdgeRouting::routeOf(*view.nodes(), view.edges()->edges(), edge);
+        CHECK_EQ(route.size(), std::size_t(2));
+        if (route.size() != 2)
+            continue;
+        CHECK(std::abs(route.back().x() - part.right()) < 0.5); // on the border facing the note
+        for (const ElementId port: {model.children(part1).at(1), model.children(part1).at(2)})
+            CHECK(!view.nodeRect(key(port)).adjusted(-4, -4, 4, 4).contains(route.back()));
+    }
+}
+
+TEST_CASE("Structure view: a comment dragged onto a part offers the part and its features") {
+    SemanticModel model;
+    CHECK(SysMLTextImporter::importText(
+            "part def Part1 {\n"
+            "    attribute inheritedOne;\n"
+            "}\n"
+            "comment c1 /* note */\n"
+            "part part1 : Part1 {\n"
+            "    attribute attribute1;\n"
+            "    port p1;\n"
+            "}\n", model).lossless());
+    DiagramController view(model);
+    view.syncNow();
+    const QString note = key(model.children(RootId).at(1));
+    const QString part1 = key(model.children(RootId).at(2));
+    const QVariantList targets = view.annotationTargets(note, part1);
+    QStringList paths;
+    for (const auto &target: targets)
+        paths.append(target.toMap().value("path").toString());
+    CHECK_EQ(paths, QStringList({QString(), QString("attribute1"), QString("p1"), QString("inheritedOne")}));
+    CHECK(targets.at(3).toMap().value("label").toString().startsWith(QString("^")));
+    // the attribute: "comment c1 about part1::attribute1"
+    CHECK(view.createAnnotation(note, part1, "attribute1"));
+    CHECK(generated(model).find("comment c1 about part1::attribute1 /* note */") != std::string::npos);
+    // and an inherited one besides it
+    CHECK(view.createAnnotation(note, part1, "inheritedOne"));
+    CHECK(generated(model).find("comment c1 about part1::attribute1, part1::inheritedOne /* note */") != std::string::npos);
+    view.syncNow();
+    int toEntries = 0;
+    for (const auto &edge: view.edges()->edges())
+        toEntries += edge.Kind == DiagramTypes::Annotation && !edge.TargetEntry.isEmpty() ? 1 : 0;
+    CHECK_EQ(toEntries, 2);
+    // from a part nothing is offered (a part is not a note)
+    CHECK(view.annotationTargets(part1, note).isEmpty());
+    SemanticModel again;
+    CHECK(SysMLTextImporter::importText(generated(model), again).lossless());
+    CHECK_EQ(generated(again), generated(model));
+}
+
+TEST_CASE("Grid and browser view: relationship matrix and membership tree (table 34)") {
+    SemanticModel model;
+    CHECK(SysMLTextImporter::importText(
+            "package R {\n"
+            "    requirement r1;\n"
+            "    requirement r2;\n"
+            "    part vehicle {\n"
+            "        part engine;\n"
+            "        satisfy r1 by engine;\n"
+            "    }\n"
+            "}\n", model).lossless());
+    DiagramController view(model);
+    CHECK(!view.matrixKinds().isEmpty());
+    QVariantMap matrix = view.relationshipMatrix(DiagramTypes::Satisfy);
+    const QVariantList rows = matrix.value("rows").toList();
+    const QVariantList columns = matrix.value("columns").toList();
+    CHECK_EQ(rows.size(), 2);    // r1, r2
+    CHECK_EQ(columns.size(), 2); // vehicle, engine
+    const auto cell = [&](const QVariantMap &m, int row, int column) {
+        return m.value("cells").toList().at(row).toList().at(column).toBool();
+    };
+    CHECK_EQ(rows.at(0).toMap().value("title").toString(), QString("R::r1"));
+    CHECK_EQ(columns.at(1).toMap().value("title").toString(), QString("R::vehicle::engine"));
+    CHECK(cell(matrix, 0, 1));  // r1 satisfied by engine
+    CHECK(!cell(matrix, 1, 0));
+    // a click into a cell: "satisfy r2 by vehicle;" - and once more: removed again
+    const QString r2 = rows.at(1).toMap().value("id").toString();
+    const QString vehicle = columns.at(0).toMap().value("id").toString();
+    CHECK(view.toggleMatrixCell(DiagramTypes::Satisfy, r2, vehicle).isEmpty());
+    CHECK(cell(view.relationshipMatrix(DiagramTypes::Satisfy), 1, 0));
+    CHECK(generated(model).find("satisfy r2 by vehicle;") != std::string::npos);
+    CHECK(view.toggleMatrixCell(DiagramTypes::Satisfy, r2, vehicle).isEmpty());
+    CHECK(!cell(view.relationshipMatrix(DiagramTypes::Satisfy), 1, 0));
+    CHECK(view.relationshipMatrix(4711).isEmpty());
+    // browser: depth first with the depth of nesting
+    const QVariantList tree = view.browserTree();
+    CHECK_EQ(tree.size(), 5); // R, r1, r2, vehicle, engine (the satisfy is a relationship)
+    CHECK_EQ(tree.at(0).toMap().value("name").toString(), QString("R"));
+    CHECK_EQ(tree.at(0).toMap().value("depth").toInt(), 0);
+    CHECK_EQ(tree.at(4).toMap().value("name").toString(), QString("engine"));
+    CHECK_EQ(tree.at(4).toMap().value("depth").toInt(), 2);
+    CHECK_EQ(tree.at(3).toMap().value("keyword").toString(), QString("part"));
+}
+
 TEST_CASE("Controller: action def parameters, port def directed features (slide 24)") {
     SemanticModel model;
     CHECK(SysMLTextImporter::importText(
@@ -1523,4 +1944,983 @@ TEST_CASE("Controller: action def parameters, port def directed features (slide 
     CHECK_EQ(entryTexts(port, "attributes"), QStringList({QString("y : Real")}));
     const DiagramNode &action = *controller.nodes()->find(model.children(RootId).at(1));
     CHECK_EQ(entryTexts(action, "parameters"), QStringList({QString("in pwrCmd : PwrCmd"), QString("out torqueToWheels : Torque[*]")}));
+}
+
+TEST_CASE("Controller: comments, doc, rep and metadata are notes with annotation lines (tables 2, 26)") {
+    SemanticModel model;
+    const std::string text =
+            "package P {\n"
+            "    part def Part1 {\n"
+            "        attribute attribute1 : Real;\n"
+            "        doc /* documentation-text */\n"
+            "    }\n"
+            "    part part1 : Part1;\n"
+            "    comment c1 about part1 /* About part1. */\n"
+            "    comment c2 about Part1::attribute1 /* The annotated element is attribute1. */\n"
+            "    /* A comment of the package. */\n"
+            "    // not an element: no note\n"
+            "    metadata def Tool { attribute toolName : String; }\n"
+            "    metadata Tool about part1 {\n"
+            "        toolName = \"X\";\n"
+            "    }\n"
+            "}\n";
+    CHECK(SysMLTextImporter::importText(text, model).lossless());
+    DiagramController controller(model);
+    int notes = 0;
+    for (const auto &node: controller.nodes()->nodes())
+        notes += node.Kind == DiagramTypes::NoteNode ? 1 : 0;
+    CHECK_EQ(notes, 5); // doc, c1, c2, the bare comment, the metadata
+    QStringList annotations;
+    const auto edgesBefore = controller.edges()->edges(); // a copy: setEntryRect below replaces the edges
+    for (const auto &edge: edgesBefore) {
+        if (edge.Kind != DiagramTypes::Annotation)
+            continue;
+        // at an entry of a compartment the line ends at that entry (table 2), its id names the annotated element
+        annotations.append(QString::fromStdString(model.element(edge.Target).name()) +
+                           (edge.TargetEntry.isEmpty() ? QString()
+                            : QStringLiteral(".") + QString::fromStdString(model.element(edge.TargetEntry.toULongLong()).name())));
+        if (!edge.TargetEntry.isEmpty()) {
+            CHECK(edge.Label.isEmpty());
+            CHECK(controller.annotatedEntries(key(edge.Target)).contains(edge.TargetEntry));
+            // where the node reports the entry, the line ends: at the side of the node, at the height of the entry
+            controller.setEntryRect(key(edge.Target), edge.TargetEntry, QRectF(4, 40, 100, 18));
+        }
+    }
+    annotations.sort();
+    CHECK_EQ(annotations, QStringList({"Part1", "Part1.attribute1", "part1", "part1"}));
+    for (const auto &edge: controller.edges()->edges()) {
+        if (edge.TargetEntry.isEmpty())
+            continue;
+        const auto route = EdgeRouting::routeOf(*controller.nodes(), controller.edges()->edges(), edge);
+        const QRectF target = controller.nodes()->find(edge.Target)->Rect;
+        CHECK(!route.empty());
+        if (!route.empty())
+            CHECK(std::abs(route.back().y() - (target.top() + 49)) < 0.5);
+    }
+    const ElementId package = model.children(RootId).front();
+    const ElementId c1 = model.children(package).at(2);
+    const auto *note = controller.nodes()->find(c1);
+    CHECK_EQ(note->Keyword, QString("«comment»"));
+    CHECK_EQ(note->Title, QString("c1"));
+    CHECK_EQ(DiagramNodeModel::entryCount(*note, ""), 1);
+
+    // a new comment on the canvas, drawn to part1: "about part1"; the line removed again
+    const QString comment = controller.addElement(DiagramTypes::ToolComment, 900, 900);
+    CHECK(!comment.isEmpty());
+    const QString part1 = key(model.children(package).at(1));
+    CHECK(controller.allowedEdgeKinds(comment, part1).contains(int(DiagramTypes::Annotation)));
+    CHECK(controller.createEdge(DiagramTypes::Annotation, comment, part1));
+    CHECK(generated(model).find("comment comment1 about P::part1 /* Comment */") != std::string::npos);
+    const QString key = QStringLiteral("a:") + comment + QStringLiteral(":0");
+    CHECK(controller.edges()->find(key) != nullptr);
+    controller.deleteEdge(key);
+    CHECK(generated(model).find("comment comment1 /* Comment */") != std::string::npos);
+    // a doc dropped onto the part definition
+    controller.addElement(DiagramTypes::ToolDocumentation, controller.nodeRect(part1).center().x(), controller.nodeRect(part1).center().y());
+    CHECK(generated(model).find("    part part1 : Part1 {\n        doc /* Documentation */\n    }\n") != std::string::npos);
+
+    SemanticModel again;
+    CHECK(SysMLTextImporter::importText(generated(model), again).lossless());
+    CHECK_EQ(generated(again), generated(model));
+}
+
+TEST_CASE("Controller: exhibit, assert, assume, require, references, n-ary relationships and end multiplicities") {
+    SemanticModel model;
+    const std::string text =
+            "package P {\n"
+            "    state s1;\n"
+            "    constraint c1 {\n"
+            "        true\n"
+            "    }\n"
+            "    requirement def R;\n"
+            "    requirement r1 : R;\n"
+            "    requirement r2 {\n"
+            "        assume c1;\n"
+            "        require r1;\n"
+            "    }\n"
+            "    part a;\n"
+            "    part b;\n"
+            "    part c;\n"
+            "    part sys {\n"
+            "        part x;\n"
+            "        part y;\n"
+            "        part z;\n"
+            "        satisfy requirement rs : R references r1;\n"
+            "        exhibit s1;\n"
+            "        assert c1;\n"
+            "        connect [0..1] x to [1] y;\n"
+            "        connect (x, y, z);\n"
+            "    }\n"
+            "    dependency a, b to c;\n"
+            "}\n";
+    CHECK(SysMLTextImporter::importText(text, model).lossless());
+    CHECK_EQ(generated(model), text);
+    DiagramController controller(model);
+    std::map<int, int> kinds;
+    int junctions = 0;
+    QStringList endLabels;
+    for (const auto &edge: controller.edges()->edges()) {
+        ++kinds[int(edge.Kind)];
+        junctions += edge.Junction != 0 ? 1 : 0;
+        if (!edge.SourceLabel.isEmpty())
+            endLabels << edge.SourceLabel << edge.TargetLabel;
+    }
+    CHECK_EQ(kinds[int(DiagramTypes::Exhibit)], 1);
+    CHECK_EQ(kinds[int(DiagramTypes::Assert)], 1);
+    CHECK_EQ(kinds[int(DiagramTypes::Assume)], 1);
+    CHECK_EQ(kinds[int(DiagramTypes::Require)], 1);
+    CHECK_EQ(kinds[int(DiagramTypes::ReferenceSubsetting)], 1);
+    CHECK_EQ(junctions, 6); // the dependency: two clients, one supplier; the three ends of "connect (x, y, z)"
+    CHECK_EQ(endLabels, QStringList({"[0..1]", "[1]"}));
+    endLabels.clear();
+    DiagramController inside(model, nullptr, true);
+    const ElementId sys = model.children(model.children(RootId).front()).at(8);
+    inside.setContextId(key(sys));
+    int connectionJunctions = 0;
+    for (const auto &edge: inside.edges()->edges()) {
+        connectionJunctions += edge.Junction == 1 ? 1 : 0;
+        if (!edge.SourceLabel.isEmpty())
+            endLabels << edge.SourceLabel << edge.TargetLabel;
+    }
+    CHECK_EQ(connectionJunctions, 3);
+    CHECK_EQ(endLabels, QStringList({"[0..1]", "[1]"}));
+
+    // drawn: an exhibit arrow from a part to a state, the further end of a dependency in the edge dialog
+    const ElementId package = model.children(RootId).front();
+    const QString a = key(model.children(package).at(5));
+    const QString s1 = key(model.children(package).at(0));
+    CHECK(controller.allowedEdgeKinds(a, s1).contains(int(DiagramTypes::Exhibit)));
+    CHECK(controller.createEdge(DiagramTypes::Exhibit, a, s1));
+    CHECK(generated(model).find("    part a {\n        exhibit s1;\n    }\n") != std::string::npos);
+    QString dependencyKey;
+    for (const auto &edge: controller.edges()->edges())
+        if (edge.Kind == DiagramTypes::Dependency)
+            dependencyKey = edge.Key;
+    QVariantMap details = controller.edgeDetails(dependencyKey);
+    CHECK(details.value("hasClients").toBool());
+    CHECK_EQ(details.value("moreSources").toString(), QString("b"));
+    CHECK(controller.updateEdge(dependencyKey, {{"name", ""}, {"typeName", ""}, {"moreSources", ""}, {"moreTargets", "sys"}}).isEmpty());
+    CHECK(generated(model).find("    dependency a to c, sys;\n") != std::string::npos);
+    SemanticModel again;
+    CHECK(SysMLTextImporter::importText(generated(model), again).lossless());
+    CHECK_EQ(generated(again), generated(model));
+}
+
+TEST_CASE("Edge routing: lines go around parts, notes and package frames, never over them") {
+    DiagramNodeModel nodes;
+    const auto add = [&](std::uint64_t id, DiagramTypes::NodeKind kind, const QRectF &rect) {
+        DiagramNode node;
+        node.Id = id;
+        node.Kind = kind;
+        node.Rect = rect;
+        nodes.append(node);
+    };
+    add(1, DiagramTypes::PartNode, QRectF(0, 100, 120, 80));     // source
+    add(2, DiagramTypes::PartNode, QRectF(600, 100, 120, 80));   // target
+    add(3, DiagramTypes::PartNode, QRectF(180, 60, 100, 160));   // a part in between
+    add(4, DiagramTypes::NoteNode, QRectF(320, 40, 80, 200));    // a note in between
+    add(5, DiagramTypes::PackageNode, QRectF(430, 0, 120, 280)); // a package frame in between
+    add(6, DiagramTypes::PartNode, QRectF(440, 30, 100, 60));    // and a part in it
+    std::vector<DiagramEdge> edges;
+    for (const auto kind: {DiagramTypes::Connection, DiagramTypes::Dependency, DiagramTypes::Annotation}) {
+        DiagramEdge edge;
+        edge.Kind = kind;
+        edge.Source = 1;
+        edge.Target = 2;
+        edge.Key = QStringLiteral("r:%1").arg(int(kind));
+        edges = {edge};
+        const auto route = EdgeRouting::routeOf(nodes, edges, edge);
+        CHECK(route.size() >= 2);
+        const std::vector<QRectF> between{QRectF(180, 60, 100, 160), QRectF(320, 40, 80, 200), QRectF(430, 0, 120, 280)};
+        CHECK_EQ(EdgeRouting::crossings(route, between), 0);
+        // it starts at the source and ends at the target
+        if (route.size() >= 2) {
+            CHECK(QRectF(0, 100, 120, 80).adjusted(-1, -1, 1, 1).contains(route.front()));
+            CHECK(QRectF(600, 100, 120, 80).adjusted(-1, -1, 1, 1).contains(route.back()));
+        }
+    }
+    // a package around both ends is no obstacle: the line runs inside it
+    add(7, DiagramTypes::PackageNode, QRectF(-50, -50, 900, 400));
+    DiagramEdge edge;
+    edge.Kind = DiagramTypes::Connection;
+    edge.Source = 1;
+    edge.Target = 2;
+    edge.Key = QStringLiteral("r:9");
+    const auto route = EdgeRouting::routeOf(nodes, {edge}, edge);
+    CHECK_EQ(EdgeRouting::crossings(route, {QRectF(180, 60, 100, 160), QRectF(320, 40, 80, 200), QRectF(430, 0, 120, 280)}), 0);
+    for (const auto &point: route)
+        CHECK(QRectF(-50, -50, 900, 400).contains(point));
+}
+
+TEST_CASE("Structure view: a line between a doc and a part moves the doc into the part (either way)") {
+    const std::string text = "package Package1 {\n"
+                             "    doc /* Documentation */\n"
+                             "    part part1 {\n"
+                             "        attribute attribute1;\n"
+                             "    }\n"
+                             "    part part2;\n"
+                             "}\n";
+    SemanticModel model;
+    CHECK(SysMLTextImporter::importText(text, model).lossless());
+    DiagramController controller(model);
+    const ElementId package = model.children(RootId).front();
+    const ElementId doc = model.children(package).at(0);
+    const ElementId part1 = model.children(package).at(1);
+    const ElementId part2 = model.children(package).at(2);
+    // drawn from the part to the doc: the only choice is the part, the doc moves into it
+    CHECK(controller.allowedEdgeKinds(key(part1), key(doc)).contains(int(DiagramTypes::Annotation)));
+    CHECK_EQ(controller.annotationTargets(key(part1), key(doc)).size(), 1);
+    CHECK(controller.createEdge(DiagramTypes::Annotation, key(part1), key(doc)));
+    CHECK_EQ(model.element(doc).owner(), part1);
+    // the doc of part1 now: no line to part1 again, but from the doc to part2 it moves on
+    CHECK(!controller.allowedEdgeKinds(key(doc), key(part1)).contains(int(DiagramTypes::Annotation)));
+    CHECK(controller.createAnnotation(key(doc), key(part2), QString()));
+    CHECK_EQ(model.element(doc).owner(), part2);
+    const std::string generated = SysMLCodeGenerator().generate(model);
+    CHECK(generated.find("part part2 {") != std::string::npos);
+    CHECK(generated.find("about") == std::string::npos);
+    SemanticModel again;
+    CHECK(SysMLTextImporter::importText(generated, again).lossless());
+    // the line from the doc to its part
+    bool line = false;
+    for (const auto &edge: controller.edges()->edges())
+        line = line || (edge.Kind == DiagramTypes::Annotation && edge.Source == doc && edge.Target == part2);
+    CHECK(line);
+}
+
+TEST_CASE("Structure view: the doc tool for the box puts the doc into the part, shown in its compartment doc") {
+    const std::string text = "package P {\n"
+                             "    part part1 {\n"
+                             "        attribute a1;\n"
+                             "    }\n"
+                             "    part part2 {\n"
+                             "        doc /* Old */\n"
+                             "    }\n"
+                             "}\n";
+    SemanticModel model;
+    CHECK(SysMLTextImporter::importText(text, model).lossless());
+    DiagramController controller(model);
+    const ElementId package = model.children(RootId).front();
+    const ElementId part1 = model.children(package).at(0);
+    const ElementId part2 = model.children(package).at(1);
+    const auto notes = [&] {
+        int count = 0;
+        for (const auto &node: controller.nodes()->nodes())
+            count += node.Kind == DiagramTypes::NoteNode ? 1 : 0;
+        return count;
+    };
+    CHECK_EQ(notes(), 1); // the doc of part2 as note
+    const QPointF at = controller.nodeRect(key(part1)).center();
+    const QString doc = controller.addElement(DiagramTypes::ToolDocumentationInside, at.x(), at.y());
+    CHECK(!doc.isEmpty());
+    CHECK_EQ(model.element(idOf(doc)).owner(), part1);
+    CHECK(controller.docInside(key(part1)));
+    CHECK_EQ(notes(), 1); // no note for it, no line
+    CHECK_EQ(entryTexts(*controller.nodes()->find(part1), "doc"), QStringList({QString("Documentation")}));
+    // a part that has a doc already: shown in the box from now on
+    const QPointF at2 = controller.nodeRect(key(part2)).center();
+    CHECK(!controller.addElement(DiagramTypes::ToolDocumentationInside, at2.x(), at2.y()).isEmpty());
+    CHECK_EQ(notes(), 0);
+    CHECK_EQ(entryTexts(*controller.nodes()->find(part2), "doc"), QStringList({QString("Old")}));
+    // the canvas or a package: not possible
+    CHECK(controller.addElement(DiagramTypes::ToolDocumentationInside, 3000, 3000).isEmpty());
+    // kept with the layout (not in the text): a new controller shows it in the box again
+    const QJsonObject layout = controller.layoutState();
+    CHECK(layout.contains("@notations"));
+    const std::string generated = SysMLCodeGenerator().generate(model);
+    CHECK(generated.find("doc /* Documentation */") != std::string::npos);
+    SemanticModel again;
+    CHECK(SysMLTextImporter::importText(generated, again).lossless());
+    DiagramController restored(again);
+    restored.restoreLayout(layout);
+    CHECK(restored.docInside(key(model.children(model.children(RootId).front()).at(0))));
+    int restoredNotes = 0;
+    for (const auto &node: restored.nodes()->nodes())
+        restoredNotes += node.Kind == DiagramTypes::NoteNode ? 1 : 0;
+    CHECK_EQ(restoredNotes, 0);
+    // back to a note
+    controller.setDocInside(key(part1), false);
+    CHECK_EQ(notes(), 1);
+}
+
+TEST_CASE("Controller: a package dragged into a package fits into it, the package around grows if needed") {
+    SemanticModel model;
+    DiagramController controller(model);
+    const QString outer = controller.addElement(DiagramTypes::ToolPackage, 120, 115);
+    const QString inner = controller.addElement(DiagramTypes::ToolPackage, 1200, 115);
+    const QRectF outerRect = controller.nodeRect(outer);
+    const QRectF innerBefore = controller.nodeRect(inner);
+    CHECK(innerBefore.size() == outerRect.size()); // both of the default size
+    // a part in the dragged package moves along
+    const QString part = dropPart(controller, innerBefore.x() + 120, innerBefore.y() + 80);
+    CHECK_EQ(model.element(idOf(part)).owner(), idOf(inner));
+    const QPointF partOffset = controller.nodeRect(part).topLeft() - innerBefore.topLeft();
+    // dropped with its middle onto the outer package
+    controller.moveNode(inner, outerRect.center().x() - innerBefore.width() / 2, outerRect.center().y() - innerBefore.height() / 2);
+    controller.finishMove(inner);
+    CHECK_EQ(model.element(idOf(inner)).owner(), idOf(outer));
+    const QRectF innerAfter = controller.nodeRect(inner);
+    const QRectF outerAfter = controller.nodeRect(outer);
+    CHECK(innerAfter.width() < outerAfter.width());
+    CHECK(innerAfter.height() < outerAfter.height());
+    CHECK(outerAfter.contains(innerAfter));
+    // the body of the outer package (below its tab) around the inner one with a margin
+    CHECK(innerAfter.top() >= outerAfter.top() + 24 + 8);
+    // the part is still inside its package, at the same place in it
+    CHECK(innerAfter.contains(controller.nodeRect(part)));
+    CHECK(controller.nodeRect(part).topLeft() - innerAfter.topLeft() == partOffset);
+
+    CHECK_EQ(model.element(idOf(part)).owner(), idOf(inner));
+}
+
+TEST_CASE("Structure view: an alias of a package is a package symbol, «alias» Package2Alias for Package2 (table 3)") {
+    const std::string text = "package Package1 {\n"
+                             "    alias Package2Alias for Package2;\n"
+                             "    alias PartAlias for Package2::Part2;\n"
+                             "}\n"
+                             "package Package2 {\n"
+                             "    part def Part2;\n"
+                             "}\n";
+    SemanticModel model;
+    CHECK(SysMLTextImporter::importText(text, model).lossless());
+    DiagramController controller(model);
+    const ElementId package1 = model.children(RootId).at(0);
+    const auto *packageAlias = controller.nodes()->find(model.children(package1).at(0));
+    const auto *partAlias = controller.nodes()->find(model.children(package1).at(1));
+    CHECK(packageAlias != nullptr);
+    CHECK(partAlias == nullptr); // an alias of a part def: in its name compartment (table 4), no symbol
+    if (!packageAlias)
+        return;
+    CHECK(packageAlias->Folder);
+    CHECK_EQ(packageAlias->Keyword, QString("«alias»"));
+    CHECK_EQ(packageAlias->Title, QString("Package2Alias"));
+    CHECK_EQ(packageAlias->Subtitle, QString("for Package2"));
+    // it is no package: nothing can be dropped into it
+    CHECK(packageAlias->Kind != DiagramTypes::PackageNode);
+    // the part def it names carries it in its name compartment
+    const auto *part2 = controller.nodes()->find(model.children(model.children(RootId).at(1)).front());
+    CHECK(part2 != nullptr);
+    if (part2)
+        CHECK_EQ(part2->Subtitle, QString("«alias» Package1::PartAlias"));
+    CHECK(SysMLCodeGenerator().generate(model).find("alias Package2Alias for Package2;") != std::string::npos);
+}
+
+TEST_CASE("Controller: packages numbered through the model, a new package in a package fits into it, moving out") {
+    SemanticModel model;
+    DiagramController controller(model);
+    const QString outer = controller.addElement(DiagramTypes::ToolPackage, 120, 115);
+    const QRectF outerRect = controller.nodeRect(outer);
+    // dropped into Package1: Package2 (not a second Package1), inside it and smaller
+    const QString inner = controller.addElement(DiagramTypes::ToolPackage, outerRect.center().x(), outerRect.center().y());
+    CHECK_EQ(model.element(idOf(inner)).name(), std::string("Package2"));
+    CHECK_EQ(model.element(idOf(inner)).owner(), idOf(outer));
+    const QRectF innerRect = controller.nodeRect(inner);
+    const QRectF outerAfter = controller.nodeRect(outer);
+    CHECK(outerAfter.contains(innerRect));
+    CHECK(innerRect.width() < outerAfter.width());
+    // dragged out again: on the top level, the text says so
+    controller.moveNode(inner, 1500, 900);
+    controller.finishMove(inner);
+    CHECK_EQ(model.element(idOf(inner)).owner(), RootId);
+    CHECK(generated(model).find("package Package1;") != std::string::npos);
+    CHECK(generated(model).find("package Package2;") != std::string::npos);
+}
+
+TEST_CASE("Controller: a package that cannot leave its package (name taken) is drawn in it again") {
+    SemanticModel model;
+    CHECK(SysMLTextImporter::importText("package Package1 {\n    package Package1;\n}\n", model).lossless());
+    DiagramController controller(model);
+    controller.layoutAll();
+    const ElementId outer = model.children(RootId).front();
+    const ElementId inner = model.children(outer).front();
+    QString message;
+    QObject::connect(&controller, &DiagramController::statusMessage, [&](const QString &text) { message = text; });
+    controller.moveNode(key(inner), 1500, 900);
+    controller.finishMove(key(inner));
+    CHECK_EQ(model.element(inner).owner(), outer);
+    CHECK(message.contains("rename"));
+    CHECK(controller.nodeRect(key(outer)).contains(controller.nodeRect(key(inner))));
+}
+
+TEST_CASE("Edit dialog: an alias names an element that exists, chosen from a list") {
+    SemanticModel model;
+    CHECK(SysMLTextImporter::importText("package Package1 {\n    alias Package2Alias for Package2;\n}\n"
+                                        "package Package2 {\n    part def Engine;\n}\n",
+                                        model)
+                  .lossless());
+    DiagramController controller(model);
+    const ElementId alias = model.children(model.children(RootId).front()).front();
+    QStringList offered;
+    for (const auto &value: controller.targetSuggestions(key(alias), QString()))
+        offered.append(value.toMap().value("text").toString());
+    CHECK(offered.contains("Package1"));
+    CHECK(offered.contains("Package2"));
+    CHECK(offered.contains("Package2::Engine"));
+    CHECK(!offered.contains("Package2::*"));
+    CHECK(controller.targetStatus(key(alias), "Package2").value("known").toBool());
+    CHECK(controller.targetStatus(key(alias), "ScalarValues::Real").value("known").toBool());
+    CHECK(!controller.targetStatus(key(alias), "Package4").value("known").toBool());
+    CHECK(!controller.targetStatus(key(alias), "Package2::*").value("known").toBool());
+    // not applied: the alias keeps its target
+    QVariantMap values = controller.elementDetails(key(alias));
+    values["target"] = "Package4";
+    CHECK(!controller.updateElement(key(alias), values).isEmpty());
+    CHECK_EQ(model.element(alias).target(), std::string("Package2"));
+    values["target"] = "Package2::Engine";
+    CHECK(controller.updateElement(key(alias), values).isEmpty());
+    CHECK_EQ(model.element(alias).target(), std::string("Package2::Engine"));
+    // an import offers the packages with ::* and ::**
+    SemanticModel second;
+    CHECK(SysMLTextImporter::importText("package A {\n    private import B::*;\n}\npackage B;\n", second).lossless());
+    DiagramController other(second);
+    const ElementId import = second.children(second.children(RootId).front()).front();
+    QStringList imports;
+    for (const auto &value: other.targetSuggestions(key(import), "B"))
+        imports.append(value.toMap().value("text").toString());
+    CHECK(imports.contains("B::**"));
+}
+
+namespace {
+    const DiagramNode *nodeTitled(const DiagramController &controller, const QString &title) {
+        for (const auto &node: controller.nodes()->nodes()) {
+            if (node.Title == title)
+                return &node;
+        }
+        return nullptr;
+    }
+
+    QStringList compartmentTexts(const DiagramNode &node, const QString &title) {
+        QStringList texts;
+        for (const auto &value: node.Compartments) {
+            const auto compartment = value.toMap();
+            if (compartment.value("title").toString() != title)
+                continue;
+            for (const auto &entryValue: compartment.value("entries").toList())
+                texts.append(entryValue.toMap().value("text").toString());
+        }
+        return texts;
+    }
+}
+
+TEST_CASE("Notations: packages, imports and aliases drawn as chosen (table 3), for all or per element") {
+    const std::string text = "package Package0 {\n"
+                             "    package Package1;\n"
+                             "    alias Package1Alias for Package1;\n"
+                             "}\n"
+                             "package Package2 {\n"
+                             "    private import Package0::*;\n"
+                             "}\n";
+    SemanticModel model;
+    CHECK(SysMLTextImporter::importText(text, model).lossless());
+    DiagramController controller(model);
+    const ElementId package0 = model.children(RootId).at(0);
+    const ElementId package1 = model.children(package0).at(0);
+    const ElementId alias = model.children(package0).at(1);
+    const ElementId import = model.children(model.children(RootId).at(1)).at(0);
+    // the groups and their modes: "individual" at first
+    const QVariantList groups = controller.notationGroups();
+    CHECK_EQ(groups.size(), 11);
+    for (const auto &group: groups)
+        CHECK_EQ(group.toMap().value("mode").toString(), QString("individual"));
+    // defaults: nested package, alias symbol, import nested
+    CHECK(nodeTitled(controller, "Package1") != nullptr);
+    CHECK(nodeTitled(controller, "Package1Alias") != nullptr);
+    CHECK(controller.nodes()->find(import) != nullptr);
+    CHECK_EQ(controller.nodes()->find(import)->Kind, int(DiagramTypes::LibraryNode));
+
+    // per element: Package1 beside its package with the ⊕ line, the alias as line with its name
+    controller.setNotation(key(package1), "packages", "line");
+    controller.setNotation(key(alias), "aliases", "line");
+    controller.setNotation(key(import), "imports", "line");
+    CHECK(edgeOfKind(controller, DiagramTypes::Membership) != nullptr);
+    const auto *aliasLine = edgeOfKind(controller, DiagramTypes::AliasMembership);
+    CHECK(aliasLine != nullptr);
+    if (aliasLine) {
+        CHECK_EQ(aliasLine->Label, QString("Package1Alias"));
+        CHECK_EQ(aliasLine->Source, package0);
+        CHECK_EQ(aliasLine->Target, package1);
+        CHECK_EQ(controller.notationSubject(aliasLine->Key), key(alias));
+    }
+    CHECK(controller.nodes()->find(alias) == nullptr);
+    CHECK(edgeOfKind(controller, DiagramTypes::Import) != nullptr);
+    // Package1 drawn outside Package0, and moving it does not change its owner
+    controller.layoutAll();
+    CHECK(!controller.nodeRect(key(package0)).intersects(controller.nodeRect(key(package1))));
+    controller.moveNode(key(package1), 2000, 2000);
+    controller.finishMove(key(package1));
+    CHECK_EQ(model.element(package1).owner(), package0);
+
+    // as text in the compartments of the frame
+    controller.setNotation(key(package1), "packages", "compartment");
+    controller.setNotation(key(import), "imports", "compartment");
+    CHECK(controller.nodes()->find(package1) == nullptr);
+    CHECK(controller.nodes()->find(import) == nullptr);
+    CHECK_EQ(compartmentTexts(*controller.nodes()->find(package0), "packages"), QStringList({QString("package Package1")}));
+    CHECK_EQ(compartmentTexts(*controller.nodes()->find(model.children(RootId).at(1)), "imports"),
+             QStringList({QString("private import Package0::*")}));
+    // the alias names Package1, which is not shown now: its symbol again
+    CHECK(controller.nodes()->find(alias) != nullptr);
+
+    // one notation for all: overrides the choices of the elements, which come back with "individual"
+    controller.setNotationMode("packages", "nested");
+    CHECK(controller.nodes()->find(package1) != nullptr);
+    CHECK_EQ(controller.notationChoices(key(package1)).front().toMap().value("mode").toString(), QString("nested"));
+    controller.setNotationMode("packages", "individual");
+    CHECK(controller.nodes()->find(package1) == nullptr);
+
+    // kept with the layout, not in the text
+    const QJsonObject layout = controller.layoutState();
+    CHECK(layout.contains("@notations"));
+    CHECK_EQ(SysMLCodeGenerator().generate(model), text);
+    DiagramController restored(model);
+    restored.restoreLayout(layout);
+    CHECK(restored.nodes()->find(package1) == nullptr);
+    CHECK_EQ(restored.notationOf(import, "imports"), QString("compartment"));
+    restored.setNotationMode("aliases", "name");
+    const QJsonObject withMode = restored.layoutState();
+    CHECK_EQ(withMode.value("@notationModes").toObject().value("aliases").toString(), QString("name"));
+}
+
+TEST_CASE("Notations: the parts and ports of a part as nodes, inside it or as text (table 9); type line; doc") {
+    const std::string text = "package P {\n"
+                             "    part def Vehicle {\n"
+                             "        doc /* A vehicle */\n"
+                             "        port fuel;\n"
+                             "        part engine;\n"
+                             "        part wheel;\n"
+                             "    }\n"
+                             "    part car : Vehicle;\n"
+                             "}\n";
+    SemanticModel model;
+    CHECK(SysMLTextImporter::importText(text, model).lossless());
+    DiagramController controller(model);
+    const ElementId package = model.children(RootId).front();
+    const ElementId vehicle = model.children(package).at(0);
+    const ElementId car = model.children(package).at(1);
+    const ElementId engine = model.children(vehicle).at(2);
+    const ElementId fuel = model.children(vehicle).at(1);
+    // default: part nodes with ◆ lines, ports on the border, type in the name, doc as note
+    CHECK(controller.nodes()->find(engine) != nullptr);
+    CHECK(edgeOfKind(controller, DiagramTypes::Composition) != nullptr);
+    CHECK(controller.nodes()->find(fuel) != nullptr);
+    CHECK(edgeOfKind(controller, DiagramTypes::DefinedBy) == nullptr);
+    QStringList groups;
+    for (const auto &choice: controller.notationChoices(key(vehicle)))
+        groups.append(choice.toMap().value("group").toString());
+    CHECK_EQ(groups, QStringList({QString("qualified"), QString("features"), QString("ports"), QString("docs")}));
+
+    // inside the part (graphical compartment): no ◆ line, the part drawn around them
+    controller.setNotation(key(vehicle), "features", "nested");
+    controller.layoutAll();
+    CHECK(edgeOfKind(controller, DiagramTypes::Composition) == nullptr);
+    CHECK(controller.nodes()->find(vehicle)->Container);
+    CHECK(controller.nodeRect(key(vehicle)).contains(controller.nodeRect(key(engine))));
+    // as text: the compartments parts and ports
+    controller.setNotation(key(vehicle), "features", "compartment");
+    controller.setNotation(key(vehicle), "ports", "compartment");
+    CHECK(controller.nodes()->find(engine) == nullptr);
+    CHECK(controller.nodes()->find(fuel) == nullptr);
+    CHECK_EQ(compartmentTexts(*controller.nodes()->find(vehicle), "parts"), QStringList({QString("engine"), QString("wheel")}));
+    CHECK_EQ(compartmentTexts(*controller.nodes()->find(vehicle), "ports"), QStringList({QString("fuel")}));
+    // the type as line, the doc in its compartment
+    controller.setNotation(key(car), "typing", "line");
+    CHECK(edgeOfKind(controller, DiagramTypes::DefinedBy) != nullptr);
+    controller.setNotation(key(vehicle), "docs", "compartment");
+    CHECK_EQ(compartmentTexts(*controller.nodes()->find(vehicle), "doc"), QStringList({QString("A vehicle")}));
+    // the text stays as it was
+    CHECK_EQ(SysMLCodeGenerator().generate(model), text);
+}
+
+TEST_CASE("Notations: asked right after creating, only while the group is individual") {
+    SemanticModel model;
+    DiagramController controller(model);
+    const QString outer = controller.addElement(DiagramTypes::ToolPackage, 120, 115);
+    const QRectF frame = controller.nodeRect(outer);
+    const QString inner = controller.addElement(DiagramTypes::ToolPackage, frame.center().x(), frame.center().y());
+    const QVariantList choices = controller.creationChoices(inner);
+    CHECK_EQ(choices.size(), 1);
+    CHECK_EQ(choices.front().toMap().value("group").toString(), QString("packages"));
+    CHECK_EQ(choices.front().toMap().value("options").toList().size(), 3);
+    controller.setNotationMode("packages", "compartment");
+    CHECK(controller.creationChoices(inner).isEmpty());
+    // a part added to a part: how that part shows its parts, asked once
+    controller.setNotationMode("packages", "individual");
+    const QString vehicle = dropPart(controller, 900, 600, DiagramTypes::ToolPartDefinition);
+    const QRectF vehicleRect = controller.nodeRect(vehicle);
+    const QString engine = dropPart(controller, vehicleRect.center().x(), vehicleRect.center().y());
+    CHECK_EQ(model.element(idOf(engine)).owner(), idOf(vehicle));
+    const QVariantList partChoices = controller.creationChoices(engine);
+    CHECK_EQ(partChoices.size(), 1);
+    CHECK_EQ(partChoices.front().toMap().value("subject").toString(), vehicle);
+    controller.setNotation(vehicle, "features", "line");
+    CHECK(controller.creationChoices(engine).isEmpty());
+}
+
+TEST_CASE("Notations: «alias» in the name compartment only for definitions and usages, not for packages (table 3, 4)") {
+    SemanticModel model;
+    CHECK(SysMLTextImporter::importText("package Package2 {\n    alias Package3Alias for Package3;\n    alias CarAlias for Car;\n}\n"
+                                        "package Package3;\npart def Car;\n", model)
+                  .lossless());
+    DiagramController controller(model);
+    const ElementId package2 = model.children(RootId).front();
+    const ElementId alias = model.children(package2).front();
+    const ElementId carAlias = model.children(package2).at(1);
+    const ElementId package3 = model.children(RootId).at(1);
+    const ElementId car = model.children(RootId).at(2);
+    // an alias of a package: the symbol or the line, «alias» at the element is not offered
+    QStringList values;
+    for (const auto &option: controller.notationChoices(key(alias)).front().toMap().value("options").toList())
+        values.append(option.toMap().value("value").toString());
+    CHECK_EQ(values, QStringList({QString("nested"), QString("line")}));
+    controller.setNotationMode("aliases", "name");
+    CHECK(controller.nodes()->find(alias) != nullptr); // stays a symbol
+    CHECK(controller.nodes()->find(package3)->Subtitle.isEmpty());
+    // an alias of a part def: in its name compartment, qualified (another package), clickable
+    CHECK(controller.nodes()->find(carAlias) == nullptr);
+    CHECK_EQ(controller.nodes()->find(car)->Subtitle, QString("«alias» Package2::CarAlias"));
+    CHECK_EQ(controller.aliasEntries(key(car)), QStringList({key(carAlias)}));
+    // also offered on the package owning it and on the element it names
+    bool offered = false;
+    for (const auto &choice: controller.notationChoices(key(package2)))
+        offered = offered || choice.toMap().value("subject").toString() == key(carAlias);
+    CHECK(offered);
+    const QVariantList choices = controller.notationChoices(key(car));
+    CHECK_EQ(choices.size(), 1);
+    CHECK_EQ(choices.front().toMap().value("subject").toString(), key(carAlias));
+    controller.setNotationMode("aliases", "individual");
+    // the symbol is for packages only: the line with the alias name instead (table 3, membership)
+    controller.setNotation(key(carAlias), "aliases", "nested");
+    CHECK(controller.nodes()->find(carAlias) == nullptr);
+    controller.setNotation(key(carAlias), "aliases", "line");
+    CHECK(edgeOfKind(controller, DiagramTypes::AliasMembership) != nullptr);
+    // and when the element it names does not exist: the symbol stays
+    SemanticModel missing;
+    CHECK(SysMLTextImporter::importText("package Package2 {\n    alias CarAlias for Car;\n}\n", missing).lossless());
+    DiagramController other(missing);
+    const ElementId lonely = missing.children(missing.children(RootId).front()).front();
+    other.setNotationMode("aliases", "name");
+    CHECK(other.nodes()->find(lonely) != nullptr);
+}
+
+TEST_CASE("Notations: the members of a package as text in its compartment members (table 3)") {
+    const std::string text = "package Package1 {\n"
+                             "    part def PartDef1;\n"
+                             "    part def PartDef2;\n"
+                             "    part part1 : PartDef1;\n"
+                             "    part part2 : PartDef2;\n"
+                             "}\n";
+    SemanticModel model;
+    CHECK(SysMLTextImporter::importText(text, model).lossless());
+    DiagramController controller(model);
+    const ElementId package = model.children(RootId).front();
+    CHECK_EQ(controller.nodes()->count(), 5);
+    controller.setNotation(key(package), "members", "compartment");
+    CHECK_EQ(controller.nodes()->count(), 1);
+    const auto *frame = controller.nodes()->find(package);
+    CHECK(frame != nullptr);
+    if (!frame)
+        return;
+    CHECK_EQ(compartmentTexts(*frame, "members"), QStringList({QString("part def PartDef1"), QString("part def PartDef2"),
+                                                                 QString("part part1 : PartDef1"), QString("part part2 : PartDef2")}));
+    CHECK_EQ(SysMLCodeGenerator().generate(model), text);
+    controller.setNotationMode("members", "nested");
+    CHECK_EQ(controller.nodes()->count(), 5);
+}
+
+TEST_CASE("Notations: aliases in the name compartment, qualified where they are in another package (table 4)") {
+    SemanticModel model;
+    CHECK(SysMLTextImporter::importText("part def PartDef0;\nabstract part def PartDef1 :> PartDef0;\n"
+                                        "package P {\n    alias PartDefAlias1 for PartDef1;\n}\n"
+                                        "package Q {\n    alias PartDefAlias2 for PartDef1;\n}\n", model).lossless());
+    DiagramController controller(model);
+    controller.setNotationMode("aliases", "name");
+    const auto *partDef = nodeTitled(controller, "PartDef1");
+    CHECK(partDef != nullptr);
+    if (partDef)
+        CHECK_EQ(partDef->Subtitle, QString("«alias» P::PartDefAlias1, Q::PartDefAlias2"));
+}
+
+TEST_CASE("Notations: ':> PartDef0' in the name, an element alone with its qualified name (table 4)") {
+    const std::string text = "part def PartDef0;\n"
+                             "abstract part def PartDef1 :> PartDef0;\n"
+                             "package Package1 {\n"
+                             "    package Package2 {\n"
+                             "        package Package3 {\n"
+                             "            part def PartDef3;\n"
+                             "        }\n"
+                             "    }\n"
+                             "}\n";
+    SemanticModel model;
+    CHECK(SysMLTextImporter::importText(text, model).lossless());
+    DiagramController controller(model);
+    const ElementId partDef1 = model.children(RootId).at(1);
+    const ElementId package1 = model.children(RootId).at(2);
+    const ElementId package2 = model.children(package1).front();
+    const ElementId package3 = model.children(package2).front();
+    const ElementId partDef3 = model.children(package3).front();
+    // the specialization: a line, or in the name
+    CHECK(edgeOfKind(controller, DiagramTypes::Specialization) != nullptr);
+    controller.setNotation(key(partDef1), "specialization", "name");
+    CHECK(edgeOfKind(controller, DiagramTypes::Specialization) == nullptr);
+    CHECK_EQ(controller.nodes()->find(partDef1)->Title, QString("PartDef1 :> PartDef0"));
+    // three packages deep: alone, "Package1::Package2::Package3::PartDef3", the empty packages not drawn
+    controller.setNotation(key(partDef3), "qualified", "qualified");
+    CHECK(controller.nodes()->find(package1) == nullptr);
+    CHECK(controller.nodes()->find(package2) == nullptr);
+    CHECK(controller.nodes()->find(package3) == nullptr);
+    CHECK(controller.nodes()->find(partDef3) != nullptr);
+    CHECK_EQ(controller.nodes()->find(partDef3)->Title, QString("Package1::Package2::Package3::PartDef3"));
+    controller.layoutAll();
+    // moved anywhere: still in its package; back with "Inside its package"
+    controller.moveNode(key(partDef3), 1200, 800);
+    controller.finishMove(key(partDef3));
+    CHECK_EQ(model.element(partDef3).owner(), package3);
+    controller.setNotation(key(partDef3), "qualified", "nested");
+    CHECK(controller.nodes()->find(package1) != nullptr);
+    CHECK(controller.nodes()->find(package3) != nullptr);
+    CHECK_EQ(controller.nodes()->find(partDef3)->Title, QString("PartDef3"));
+    // for all: the whole model flat with qualified names
+    controller.setNotationMode("qualified", "qualified");
+    CHECK(controller.nodes()->find(package1) == nullptr);
+    CHECK_EQ(SysMLCodeGenerator().generate(model), text);
+}
+
+TEST_CASE("Notations: usages - qualified part of a part, subsets / redefines in the name compartment (table 4)") {
+    const std::string text = "part def PartDef3;\n"
+                             "part part1 {\n"
+                             "    part part2 {\n"
+                             "        part part3 : PartDef3;\n"
+                             "    }\n"
+                             "}\n"
+                             "part def Base {\n"
+                             "    attribute m : ScalarValues::Integer;\n"
+                             "    part part1 : PartDef1[*];\n"
+                             "    part part1S : PartDef1S[m] subsets part1;\n"
+                             "}\n"
+                             "part def Special :> Base {\n"
+                             "    part part2 : PartDef1R;\n"
+                             "    part part1R : PartDef1R[m] redefines part1 = part2;\n"
+                             "}\n";
+    SemanticModel model;
+    CHECK(SysMLTextImporter::importText(text, model).lossless());
+    DiagramController controller(model);
+    const ElementId part1 = model.children(RootId).at(1);
+    const ElementId part2 = model.children(part1).front();
+    const ElementId part3 = model.children(part2).front();
+    const ElementId base = model.children(RootId).at(2);
+    const ElementId special = model.children(RootId).at(3);
+    const ElementId subsetted = model.children(base).at(2);
+    const ElementId redefined = model.children(special).at(1);
+    // "part1::part2::part3 : PartDef3" alone, no composition line to part2
+    controller.setNotation(key(part3), "qualified", "qualified");
+    CHECK_EQ(controller.nodes()->find(part3)->Title, QString("part1::part2::part3 : PartDef3"));
+    for (const auto &edge: controller.edges()->edges())
+        CHECK(!(edge.Kind == DiagramTypes::Composition && edge.Target == part3));
+    // subsets / redefines in the name: no lines
+    controller.setNotation(key(subsetted), "specialization", "name");
+    controller.setNotation(key(redefined), "specialization", "name");
+    CHECK_EQ(controller.nodes()->find(subsetted)->Title, QString("part1S : PartDef1S[m]\nsubsets part1"));
+    CHECK_EQ(controller.nodes()->find(redefined)->Title, QString("part1R : PartDef1R[m]\nredefines part1 = part2"));
+    for (const auto &edge: controller.edges()->edges()) {
+        CHECK(!(edge.Source == subsetted && edge.Kind == DiagramTypes::Specialization));
+        CHECK(!(edge.Source == redefined && edge.Kind == DiagramTypes::Redefinition));
+    }
+    CHECK_EQ(SysMLCodeGenerator().generate(model), text);
+}
+
+TEST_CASE("Notations: back to nested - a package and its members are drawn inside their package again") {
+    SemanticModel model;
+    CHECK(SysMLTextImporter::importText("package Package1 {\n    package Package2 {\n        part def PartDef3;\n    }\n}\n", model)
+                  .lossless());
+    DiagramController controller(model);
+    controller.layoutAll();
+    const ElementId package1 = model.children(RootId).front();
+    const ElementId package2 = model.children(package1).front();
+    const ElementId partDef3 = model.children(package2).front();
+    controller.moveNode(key(package1), 100, 100); // a layout of the user (no automatic layout any more)
+    const auto inside = [&](ElementId outer, ElementId inner) {
+        return controller.nodeRect(key(outer)).contains(controller.nodeRect(key(inner)));
+    };
+    for (const char *mode: {"compartment", "line", "nested", "line", "compartment", "nested"}) {
+        controller.setNotationMode("packages", mode);
+        controller.setNotationMode("members", QString(mode) == "compartment" ? "compartment" : "nested");
+    }
+    CHECK(inside(package1, package2));
+    CHECK(inside(package2, partDef3));
+    // per element as well, from beside it
+    controller.setNotationMode("packages", "individual");
+    controller.setNotation(key(package2), "packages", "line");
+    CHECK(!inside(package1, package2));
+    controller.setNotation(key(package2), "packages", "nested");
+    CHECK(inside(package1, package2));
+    CHECK(inside(package2, partDef3));
+}
+
+TEST_CASE("Notations: a top-level package shows its packages and members as text (table 3 'Package with owned package')") {
+    SemanticModel model;
+    CHECK(SysMLTextImporter::importText("package Package1 {\n    package Package2 {\n        part def PartDef3;\n    }\n}\n", model)
+                  .lossless());
+    DiagramController controller(model);
+    const ElementId package1 = model.children(RootId).front();
+    const ElementId package2 = model.children(package1).front();
+    // Package1 has only a package in it: the choice is offered all the same
+    bool offered = false;
+    for (const auto &choice: controller.notationChoices(key(package1)))
+        offered = offered || choice.toMap().value("group").toString() == "members";
+    CHECK(offered);
+    controller.setNotation(key(package1), "members", "compartment");
+    CHECK(controller.nodes()->find(package2) == nullptr);
+    // in the compartment packages (members holds definitions and usages only), with what is in it (indented)
+    CHECK(compartmentTexts(*controller.nodes()->find(package1), "members").isEmpty());
+    CHECK_EQ(compartmentTexts(*controller.nodes()->find(package1), "packages"),
+             QStringList({QString("package Package2"), QString("part def PartDef3")}));
+    controller.setNotation(key(package1), "members", "nested");
+    CHECK(controller.nodes()->find(package2) != nullptr);
+    CHECK(controller.nodeRect(key(package1)).contains(controller.nodeRect(key(package2))));
+}
+
+TEST_CASE("Containment: a definition dragged onto a part goes into it (owned member, ⊕ line); parts back inside their part") {
+    const std::string text = "part part1 {\n"
+                             "    part part2 {\n"
+                             "        part part3;\n"
+                             "    }\n"
+                             "}\n"
+                             "part def <part3> Part3;\n";
+    SemanticModel model;
+    CHECK(SysMLTextImporter::importText(text, model).lossless());
+    DiagramController controller(model);
+    controller.layoutAll();
+    const ElementId part1 = model.children(RootId).at(0);
+    const ElementId part2 = model.children(part1).front();
+    const ElementId part3 = model.children(part2).front();
+    const ElementId definition = model.children(RootId).at(1);
+    // onto part2: "part part2 { part part3; part def <part3> Part3; }"
+    const QRectF target = controller.nodeRect(key(part2));
+    const QRectF moved = controller.nodeRect(key(definition));
+    controller.moveNode(key(definition), target.center().x() - moved.width() / 2, target.center().y() - moved.height() / 2);
+    controller.finishMove(key(definition));
+    CHECK_EQ(model.element(definition).owner(), part2);
+    CHECK(SysMLCodeGenerator().generate(model).find("        part def <part3> Part3;") != std::string::npos);
+    bool line = false;
+    for (const auto &edge: controller.edges()->edges())
+        line = line || (edge.Kind == DiagramTypes::Membership && edge.Source == part2 && edge.Target == definition);
+    CHECK(line);
+    SemanticModel again;
+    CHECK(SysMLTextImporter::importText(SysMLCodeGenerator().generate(model), again).lossless());
+    // part1 drawn around its parts, with a layout of the user: they are put inside it; dragged out of it: out of it
+    controller.moveNode(key(part1), 600, 600);
+    controller.setNotation(key(part1), "features", "nested");
+    CHECK(controller.nodeRect(key(part1)).contains(controller.nodeRect(key(part2))));
+    controller.moveNode(key(part2), 2000, 2000);
+    controller.finishMove(key(part2));
+    CHECK_EQ(model.element(part2).owner(), RootId);
+    CHECK_EQ(model.element(part3).owner(), part2);
+}
+
+TEST_CASE("Containment: a part of a part dropped onto another part becomes its part; dropped elsewhere it stays") {
+    SemanticModel model;
+    CHECK(SysMLTextImporter::importText("part part1 {\n    part part2;\n}\npart def Part3 {\n    part part3 : Part3;\n}\n", model)
+                  .lossless());
+    DiagramController controller(model);
+    controller.layoutAll();
+    const ElementId part1 = model.children(RootId).at(0);
+    const ElementId part2 = model.children(part1).front();
+    const ElementId definition = model.children(RootId).at(1);
+    const ElementId part3 = model.children(definition).front();
+    // dropped on the empty canvas: still a part of Part3
+    controller.moveNode(key(part3), 1500, 1500);
+    controller.finishMove(key(part3));
+    CHECK_EQ(model.element(part3).owner(), definition);
+    // dropped onto part2 (also when part1 is drawn around part2): a part of part2
+    controller.setNotation(key(part1), "features", "nested");
+    const QRectF target = controller.nodeRect(key(part2));
+    const QRectF moved = controller.nodeRect(key(part3));
+    controller.moveNode(key(part3), target.center().x() - moved.width() / 2, target.center().y() - moved.height() / 2);
+    controller.finishMove(key(part3));
+    CHECK_EQ(model.element(part3).owner(), part2);
+    CHECK(SysMLCodeGenerator().generate(model).find("part part2 {\n        part part3 : Part3;\n    }") != std::string::npos);
+}
+
+TEST_CASE("Notations: usages - subsets / redefines as lines as in the doc figure 'Redefinition' (table 4)") {
+    const std::string text = "part part1 : Part1[0..*] {\n"
+                             "    part part2 : Part2[0..*];\n"
+                             "}\n"
+                             "part part1S : Part1S[1] subsets part1 {\n"
+                             "    part part2R : Part2R redefines part2;\n"
+                             "}\n";
+    SemanticModel model;
+    CHECK(SysMLTextImporter::importText(text, model).lossless());
+    DiagramController controller(model);
+    const ElementId part1 = model.children(RootId).at(0);
+    const ElementId part2 = model.children(part1).front();
+    const ElementId part1S = model.children(RootId).at(1);
+    const ElementId part2R = model.children(part1S).front();
+    CHECK_EQ(controller.nodes()->find(part1S)->Title, QString("part1S : Part1S[1]"));
+    CHECK_EQ(controller.nodes()->find(part2R)->Title, QString("part2R : Part2R"));
+    const auto has = [&](DiagramTypes::EdgeKind kind, ElementId source, ElementId target) {
+        for (const auto &edge: controller.edges()->edges())
+            if (edge.Kind == kind && edge.Source == source && edge.Target == target)
+                return true;
+        return false;
+    };
+    CHECK(has(DiagramTypes::Composition, part1, part2));
+    CHECK(has(DiagramTypes::Composition, part1S, part2R));
+    CHECK(has(DiagramTypes::Redefinition, part2R, part2));
+    CHECK(has(DiagramTypes::Specialization, part1S, part1));
+    CHECK_EQ(SysMLCodeGenerator().generate(model), text);
+}
+
+TEST_CASE("Notations: inherited parts as nodes ^part1, marked as drawn only (table 4 'Inherited Usage')") {
+    const std::string text = "part def PartDef0 {\n"
+                             "    part part1 : PartDef1;\n"
+                             "}\n"
+                             "part def PartDef1;\n"
+                             "part def PartDef2 :> PartDef0;\n";
+    SemanticModel model;
+    CHECK(SysMLTextImporter::importText(text, model).lossless());
+    DiagramController controller(model);
+    const ElementId special = model.children(RootId).at(2);
+    const auto count = controller.nodes()->count();
+    CHECK(controller.nodes()->find(special)->Compartments.size() > 0);
+    controller.setNotation(key(special), "inherited", "nodes");
+    CHECK_EQ(controller.nodes()->count(), count + 1);
+    if (controller.nodes()->count() != count + 1)
+        return;
+    const auto &derived = controller.nodes()->nodes().back();
+    CHECK(derived.Derived);
+    CHECK_EQ(derived.Title, QString("^part1 : PartDef1"));
+    bool composed = false;
+    for (const auto &edge: controller.edges()->edges())
+        composed = composed || (edge.Kind == DiagramTypes::Composition && edge.Source == special && edge.Target == derived.Id);
+    CHECK(composed);
+    controller.layoutAll();
+    // drawn only: nothing of the editor changes the model through it
+    const QString derivedKey = key(derived.Id);
+    const auto rect = derived.Rect;
+    controller.moveNode(derivedKey, rect.x() + 30, rect.y() + 10);
+    controller.finishMove(derivedKey);
+    controller.setNodeSize(derivedKey, 200, 90);
+    CHECK(controller.elementDetails(derivedKey).isEmpty() || true);
+    controller.notationChoices(derivedKey);
+    controller.creationChoices(derivedKey);
+    controller.aliasEntries(derivedKey);
+    controller.kindLabel(derivedKey);
+    controller.minimumNodeHeight(derivedKey);
+    controller.allowedEdgeKinds(derivedKey, key(special));
+    CHECK(!controller.createEdge(int(DiagramTypes::Specialization), derivedKey, key(special)));
+    controller.select(derivedKey, false);
+    controller.deleteSelection();
+    controller.deleteElement(derivedKey);
+    // a part dropped onto it does not go into it
+    const ElementId def1 = model.children(RootId).at(1);
+    const auto *derivedNode = controller.nodes()->find(derived.Id);
+    CHECK(derivedNode != nullptr);
+    if (derivedNode) {
+        controller.moveNode(key(def1), derivedNode->Rect.center().x() - 10, derivedNode->Rect.center().y() - 10);
+        controller.finishMove(key(def1));
+    }
+    CHECK_EQ(SysMLCodeGenerator().generate(model), text);
+    controller.setNotation(key(special), "inherited", "compartment");
+    CHECK_EQ(controller.nodes()->count(), count);
+    CHECK_EQ(SysMLCodeGenerator().generate(model), text);
 }

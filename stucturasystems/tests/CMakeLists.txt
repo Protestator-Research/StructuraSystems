@@ -153,6 +153,7 @@ target_include_directories(OnlineDocumentTests PRIVATE $<TARGET_PROPERTY:Qt6::Qm
 target_link_libraries(OnlineDocumentTests PRIVATE
         Qt6::Core
         Qt6::Test
+        md4c::md4c
         yaml-cpp::yaml-cpp
         sysmllib::sysmllib)
 

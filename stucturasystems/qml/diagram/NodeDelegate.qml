@@ -16,6 +16,12 @@ Item {
     required property int nodeKind
     required property string keyword
     required property string title
+    /** Below the name: "«alias» Car" */
+    required property string subtitle
+    /** A package symbol without contents: an alias of a package (table 3), «alias» Package2Alias for Package2. */
+    required property bool folder
+    /** An inherited usage drawn as node (^part1, table 4 "Inherited Usage"): drawn only, no textual notation. */
+    required property bool derived
     /** [{title, entries: [{entryId, text, tooltip}]}] */
     required property var compartments
     required property real nodeX
@@ -39,18 +45,33 @@ Item {
     readonly property bool isPort: nodeKind === DiagramTypes.PortNode
     /** An imported library package (ISQ, ScalarValues): a dashed package symbol. */
     readonly property bool isLibrary: nodeKind === DiagramTypes.LibraryNode
+    /** comment, doc, rep, metadata: a note with a folded corner (table 2, 26). */
+    readonly property bool isNote: nodeKind === DiagramTypes.NoteNode
+    // definitions have square corners, usages rounded ones («action», «state», «view» are usages too);
+    // «alias», «import», «filter» and statements kept as text are drawn as plain rectangles
     readonly property bool isDefinition: nodeKind === DiagramTypes.PartDefinitionNode
-                                         || nodeKind === DiagramTypes.DefinitionNode
+                                         || (nodeKind === DiagramTypes.DefinitionNode
+                                             && (keyword.indexOf(" def»") >= 0 || keyword === "«alias»"
+                                                 || keyword.indexOf("import»") >= 0 || keyword === "«filter»"))
                                          || nodeKind === DiagramTypes.TextualNode
                                          || nodeKind === DiagramTypes.ConstraintDefinitionNode
                                          || nodeKind === DiagramTypes.CalcDefinitionNode
                                          || ((nodeKind === DiagramTypes.RequirementNode || nodeKind === DiagramTypes.CaseNode)
                                              && keyword.indexOf(" def»") >= 0)
-    readonly property color lineColor: selected ? Theme.accent : Theme.textPrimary
+    readonly property color lineColor: derived ? Theme.danger : selected ? Theme.accent : Theme.textPrimary
     readonly property real padding: 8
 
     /** Attribute or action shown at a point in node coordinates, empty if none. */
     function entryAt(point) {
+        // "«alias» Car" below the name: the alias
+        if (subtitleLabel.visible && !folder) {
+            const local = node.mapToItem(subtitleLabel, point.x, point.y)
+            if (local.x >= 0 && local.y >= 0 && local.x <= subtitleLabel.width && local.y <= subtitleLabel.height) {
+                const alias = aliasAt(subtitleLabel, local.x, local.y)
+                if (alias.length > 0)
+                    return alias
+            }
+        }
         for (let c = 0; c < compartmentRepeater.count; ++c) {
             const compartment = compartmentRepeater.itemAt(c)
             if (!compartment)
@@ -82,10 +103,61 @@ Item {
         return ""
     }
 
+    /** The alias under the mouse in "«alias» A, B" (the label shows them in the order of aliasEntries), or "". */
+    function aliasAt(label, x, y) {
+        if (!controller || folder)
+            return ""
+        const entries = controller.aliasEntries(elementId)
+        if (entries.length === 0)
+            return ""
+        const position = label.positionAt(x, y)
+        const before = label.text.substring(0, position)
+        const index = Math.min(entries.length - 1, before.split(",").length - 1)
+        return entries[index]
+    }
+
     function reportSize() {
         if (!isFrame && !isPort && !container && controller)
             controller.setNodeSize(elementId, width, height)
+        Qt.callLater(reportEntries)
     }
+
+    /** Entries a note is about ("comment about part1::attribute1"): highlighted, the dashed line ends there. */
+    property var annotatedEntries: []
+    function updateAnnotatedEntries() {
+        const entries = controller ? controller.annotatedEntries(elementId) : []
+        if (JSON.stringify(entries) !== JSON.stringify(annotatedEntries))
+            annotatedEntries = entries
+        Qt.callLater(reportEntries)
+    }
+    function reportEntries() {
+        if (!controller || annotatedEntries.length === 0)
+            return
+        for (let c = 0; c < compartmentRepeater.count; ++c) {
+            const compartment = compartmentRepeater.itemAt(c)
+            if (!compartment)
+                continue
+            for (let i = 0; i < compartment.entryRepeater.count; ++i) {
+                const item = compartment.entryRepeater.itemAt(i)
+                if (!item || annotatedEntries.indexOf(item.entryId) < 0)
+                    continue
+                const at = item.mapToItem(node, 0, 0)
+                controller.setEntryRect(elementId, item.entryId, Qt.rect(node.padding / 2, at.y, node.width - node.padding, item.height))
+            }
+        }
+    }
+    Connections {
+        target: node.controller ? node.controller.edges : null
+        function onModelReset() { node.updateAnnotatedEntries() }
+    }
+    // a notation or "All compartments" changed: the controller forgot the sizes, so report it again (also when this
+    // node keeps its size)
+    Connections {
+        target: node.controller
+        function onNotationsChanged() { Qt.callLater(node.reportSize) }
+        function onAllCompartmentsChanged() { Qt.callLater(node.reportSize) }
+    }
+    onCompartmentsChanged: Qt.callLater(updateAnnotatedEntries)
 
     x: nodeX
     y: nodeY
@@ -99,7 +171,10 @@ Item {
 
     onWidthChanged: reportSize()
     onHeightChanged: reportSize()
-    Component.onCompleted: reportSize()
+    Component.onCompleted: {
+        reportSize()
+        updateAnnotatedEntries()
+    }
 
     // ---------------------------------------------------------------- mouse handling
     // Shared by the part body and the frame grips: select, move, arrow, edit, context menu.
@@ -168,7 +243,7 @@ Item {
             _dragging = false
         }
         onDoubleClicked: mouse => {
-            if (mouse.button !== Qt.LeftButton || grip.owner.controller.arrowMode)
+            if (mouse.button !== Qt.LeftButton || grip.owner.controller.arrowMode || grip.owner.derived)
                 return
             const entry = grip.owner.entryAt(grip.mapToItem(grip.owner, mouse.x, mouse.y))
             grip.owner.canvas.editElement(entry.length > 0 ? entry : grip.owner.elementId)
@@ -181,10 +256,92 @@ Item {
 
         visible: !node.isFrame && !node.isPort && !node.isLibrary
         anchors.fill: parent
-        radius: node.isDefinition ? 2 : 10
-        color: Theme.card
-        border.width: node.dashed ? 0 : node.selected ? 2 : 1.2
+        radius: node.isDefinition || node.isNote ? 2 : 10
+        color: node.isNote || node.folder ? "transparent"
+               : node.derived ? Qt.rgba(Theme.danger.r, Theme.danger.g, Theme.danger.b, 0.12) : Theme.card
+        border.width: node.dashed || node.isNote || node.folder ? 0 : node.selected || node.derived ? 2 : 1.2
         border.color: node.lineColor
+
+        // an alias of a package: the package symbol (an empty tab on the body), the text in the body
+        Canvas {
+            id: folderShape
+
+            readonly property real tab: 16
+            visible: node.folder
+            anchors.fill: parent
+            onPaint: {
+                const context = getContext("2d")
+                context.reset()
+                context.strokeStyle = node.lineColor
+                context.lineWidth = node.selected ? 2 : 1.2
+                context.fillStyle = Theme.card
+                const inset = context.lineWidth / 2
+                const tabWidth = Math.min(width * 0.45, 70)
+                context.beginPath()
+                context.rect(inset, inset, tabWidth, tab - inset)
+                context.fill()
+                context.stroke()
+                context.beginPath()
+                context.rect(inset, tab, width - 2 * inset, height - tab - inset)
+                context.fill()
+                context.stroke()
+            }
+            onWidthChanged: requestPaint()
+            onHeightChanged: requestPaint()
+            onVisibleChanged: requestPaint()
+            Connections {
+                target: node
+                function onLineColorChanged() { folderShape.requestPaint() }
+                function onSelectedChanged() { folderShape.requestPaint() }
+            }
+            Connections {
+                target: Theme
+                function onDarkChanged() { folderShape.requestPaint() }
+            }
+        }
+
+        // a note: the outline with the folded upper right corner
+        Canvas {
+            id: noteShape
+
+            visible: node.isNote
+            anchors.fill: parent
+            onPaint: {
+                const context = getContext("2d")
+                context.reset()
+                context.strokeStyle = node.lineColor
+                context.lineWidth = node.selected ? 2 : 1.2
+                context.fillStyle = Theme.card
+                const inset = context.lineWidth / 2
+                const fold = 14
+                context.beginPath()
+                context.moveTo(inset, inset)
+                context.lineTo(width - fold, inset)
+                context.lineTo(width - inset, fold)
+                context.lineTo(width - inset, height - inset)
+                context.lineTo(inset, height - inset)
+                context.closePath()
+                context.fill()
+                context.stroke()
+                context.beginPath()
+                context.moveTo(width - fold, inset)
+                context.lineTo(width - fold, fold)
+                context.lineTo(width - inset, fold)
+                context.stroke()
+            }
+            onWidthChanged: requestPaint()
+            onHeightChanged: requestPaint()
+            onVisibleChanged: requestPaint()
+            Connections {
+                target: node
+                function onLineColorChanged() { noteShape.requestPaint() }
+                function onSelectedChanged() { noteShape.requestPaint() }
+            }
+            Connections {
+                target: Theme
+                function onDarkChanged() { noteShape.requestPaint() }
+            }
+        }
 
         // dashed border of a reference
         Canvas {
@@ -218,7 +375,9 @@ Item {
             id: partContent
 
             readonly property real contentWidth: {
-                let width = Math.max(keywordLabel.implicitWidth, titleLabel.implicitWidth)
+                // the alias line ("for Package1::Package2") too, up to a width; longer it wraps
+                let width = Math.max(keywordLabel.implicitWidth, titleLabel.implicitWidth,
+                                     subtitleLabel.visible ? Math.min(subtitleLabel.implicitWidth, 280) : 0)
                 for (let c = 0; c < compartmentRepeater.count; ++c) {
                     const item = compartmentRepeater.itemAt(c)
                     if (item)
@@ -228,25 +387,81 @@ Item {
             }
 
             width: parent.width
-            topPadding: node.padding / 2
+            topPadding: node.padding / 2 + (node.folder ? folderShape.tab + 4 : 0)
 
             Label {
                 id: keywordLabel
                 width: parent.width
+                visible: !node.isNote || node.keyword.length > 0
                 horizontalAlignment: Text.AlignHCenter
                 text: node.keyword
                 font.pixelSize: 12
-                color: Theme.textSecondary
+                color: node.derived ? Theme.danger : Theme.textSecondary
             }
             Label {
                 id: titleLabel
                 width: parent.width
+                visible: !node.isNote || node.title.length > 0
                 horizontalAlignment: Text.AlignHCenter
-                text: node.title
+                // as in the tables of the specification: the name in normal weight, the keywords of the name
+                // compartment ("subsets", "redefines", ...) in bold, each further line ("redefines part1 = part2") below
+                textFormat: Text.StyledText
+                text: {
+                    const escaped = node.title.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+                    return escaped.replace(/(^|\s)(subsets|redefines|references|specializes|conjugates|crosses|for)(?=\s)/g,
+                                           "$1<b>$2</b>")
+                                  .replace(/\n/g, "<br>")
+                }
                 font.pixelSize: 14
-                font.weight: Font.DemiBold
-                color: Theme.textPrimary
+                // an abstract definition: its name in italics (table 4)
+                font.italic: node.isDefinition && node.keyword.indexOf("«abstract ") === 0
+                color: node.derived ? Theme.danger : Theme.textPrimary
+                bottomPadding: node.subtitle.length > 0 ? 0 : 4
+            }
+            // an inherited usage drawn as node: allowed in the graphical notation only, it has no text
+            Label {
+                width: parent.width
+                visible: node.derived
+                horizontalAlignment: Text.AlignHCenter
+                wrapMode: Text.WordWrap
+                leftPadding: node.padding
+                rightPadding: node.padding
+                text: qsTr("inherited - no textual notation")
+                font.pixelSize: 10
+                font.italic: true
+                color: Theme.danger
                 bottomPadding: 4
+            }
+            // "«alias» Car, Auto": the aliases of the element in its name compartment
+            Label {
+                id: subtitleLabel
+                objectName: "aliasLabel"
+                width: parent.width
+                leftPadding: node.padding
+                rightPadding: node.padding
+                wrapMode: Text.WrapAtWordBoundaryOrAnywhere
+                visible: node.subtitle.length > 0
+                horizontalAlignment: Text.AlignHCenter
+                // "for Package2" of an alias drawn as package: "for" in bold, as large as the name (table 3)
+                textFormat: node.folder ? Text.StyledText : Text.PlainText
+                // a long qualified name may break after "::" (a zero width space there)
+                text: node.folder ? "<b>for</b> " + node.subtitle.substring(4).replace(/&/g, "&amp;").replace(/</g, "&lt;")
+                                                       .replace(/::/g, "::\u200B")
+                                  : node.subtitle.replace(/::/g, "::\u200B")
+                font.pixelSize: node.folder ? 14 : 11
+                color: node.folder ? Theme.textPrimary : Theme.textSecondary
+                bottomPadding: 4
+                MouseArea {
+                    anchors.fill: parent
+                    enabled: !node.folder && !node.readOnly && node.canvas !== null
+                    acceptedButtons: Qt.RightButton
+                    onClicked: mouse => {
+                        const alias = node.aliasAt(subtitleLabel, mouse.x, mouse.y)
+                        if (alias.length > 0)
+                            node.canvas.openNodeMenu(node.elementId, alias)
+                    }
+                    // left clicks (select, move, double-click) go to the node below
+                }
             }
 
             Repeater {
@@ -262,11 +477,13 @@ Item {
                     width: partContent.width
 
                     Rectangle {
+                        visible: !node.isNote // the text of a note has no compartment line
                         width: parent.width
                         height: 1
                         color: Qt.alpha(Theme.textPrimary, 0.5)
                     }
                     Label {
+                        visible: compartment.modelData.title.length > 0
                         width: parent.width
                         horizontalAlignment: Text.AlignHCenter
                         text: compartment.modelData.title
@@ -290,6 +507,16 @@ Item {
                                 textFormat: Text.PlainText
                                 font.pixelSize: 13
                                 color: Theme.textPrimary
+                                // the annotated element of a note (table 2): a grey band across the compartment
+                                background: Rectangle {
+                                    visible: node.annotatedEntries.indexOf(parent.entryId) >= 0
+                                    x: -node.padding / 2
+                                    implicitWidth: 0
+                                    implicitHeight: 0
+                                    width: partContent.width - node.padding
+                                    height: parent.height
+                                    color: Qt.alpha(Theme.textPrimary, 0.1)
+                                }
                             }
                         }
                     }
@@ -322,6 +549,64 @@ Item {
         color: Theme.card
         border.width: node.selected ? 2 : 1.4
         border.color: node.lineColor
+
+        // direction of the port (graphical BNF pdh / pdv): -> into the part for "in", out of it for "out", <-> for
+        // "inout"; the side of the part decides which way the arrow points
+        Canvas {
+            id: portArrow
+
+            readonly property string sideName: node.isPort && node.controller && node.controller.geometryRevision >= 0
+                                               ? node.controller.portSide(node.elementId) : "left"
+            readonly property int side: sideName === "left" ? 0 : sideName === "right" ? 1 : sideName === "top" ? 2 : 3
+            visible: node.isPort && node.keyword.length > 0
+            anchors.fill: parent
+            anchors.margins: 2
+            onPaint: {
+                const context = getContext("2d")
+                context.reset()
+                context.strokeStyle = node.lineColor
+                context.lineWidth = 1.2
+                const horizontal = side <= 1
+                // "inwards" on the left border is to the right, on the right border to the left, ...
+                const inwards = side === 0 ? 1 : side === 1 ? -1 : side === 2 ? 1 : -1
+                const both = node.keyword === "inout"
+                const sign = node.keyword === "out" ? -inwards : inwards
+                const cx = width / 2
+                const cy = height / 2
+                const half = (horizontal ? width : height) / 2 - 0.5
+                const head = Math.min(4, half)
+                const line = (x1, y1, x2, y2) => { context.moveTo(x1, y1); context.lineTo(x2, y2) }
+                context.beginPath()
+                if (horizontal) {
+                    line(cx - half, cy, cx + half, cy)
+                    const tip = cx + sign * half
+                    line(tip, cy, tip - sign * head, cy - head)
+                    line(tip, cy, tip - sign * head, cy + head)
+                    if (both) {
+                        line(cx - sign * half, cy, cx - sign * half + sign * head, cy - head)
+                        line(cx - sign * half, cy, cx - sign * half + sign * head, cy + head)
+                    }
+                } else {
+                    line(cx, cy - half, cx, cy + half)
+                    const tip = cy + sign * half
+                    line(cx, tip, cx - head, tip - sign * head)
+                    line(cx, tip, cx + head, tip - sign * head)
+                    if (both) {
+                        line(cx, cy - sign * half, cx - head, cy - sign * half + sign * head)
+                        line(cx, cy - sign * half, cx + head, cy - sign * half + sign * head)
+                    }
+                }
+                context.stroke()
+            }
+            onSideChanged: requestPaint()
+            onVisibleChanged: requestPaint()
+            onWidthChanged: requestPaint()
+            Connections {
+                target: node
+                function onKeywordChanged() { portArrow.requestPaint() }
+                function onLineColorChanged() { portArrow.requestPaint() }
+            }
+        }
 
         Grip {
             owner: node
@@ -420,7 +705,6 @@ Item {
                 horizontalAlignment: Text.AlignHCenter
                 text: node.title
                 font.pixelSize: 14
-                font.weight: Font.DemiBold
                 color: Theme.textPrimary
             }
         }
@@ -434,20 +718,22 @@ Item {
     Item {
         id: frame
 
-        readonly property real tabWidth: Math.min(node.width, frameTitle.implicitWidth + 2 * node.padding + 12)
-        readonly property real tabHeight: 26
+        readonly property real tabWidth: Math.min(node.width * 0.8, frameTitle.implicitWidth + 2 * node.padding + 8)
+        readonly property real tabHeight: 24
 
         visible: node.isFrame
         anchors.fill: parent
 
+        // Table 3 "Package (name in tab)": a folder - the name in a tab on top of the body, the body below it
         Rectangle {
-            anchors.fill: parent
+            y: frame.tabHeight
+            width: parent.width
+            height: parent.height - frame.tabHeight
             color: Qt.alpha(Theme.card, 0.35)
             border.width: node.selected ? 2 : 1.2
             border.color: node.lineColor
         }
 
-        // Title tab with a cut corner (SysML frame notation)
         Canvas {
             id: tabShape
 
@@ -460,13 +746,9 @@ Item {
                 context.lineWidth = node.selected ? 2 : 1.2
                 context.fillStyle = Theme.card
                 const inset = context.lineWidth / 2
+                // a closed rectangle standing on the body: the line under the name is the top of the body
                 context.beginPath()
-                context.moveTo(inset, inset)
-                context.lineTo(width - inset, inset)
-                context.lineTo(width - inset, height - 9)
-                context.lineTo(width - 9, height - inset)
-                context.lineTo(inset, height - inset)
-                context.closePath()
+                context.rect(inset, inset, width - 2 * inset, height - inset)
                 context.fill()
                 context.stroke()
             }
@@ -484,37 +766,125 @@ Item {
         Label {
             id: frameTitle
             x: node.padding
-            width: frame.tabWidth - 2 * node.padding - 6
+            width: frame.tabWidth - 2 * node.padding
             height: frame.tabHeight
             verticalAlignment: Text.AlignVCenter
             elide: Text.ElideRight
             text: node.title
             font.pixelSize: 13
-            font.weight: Font.Medium
             color: Theme.textPrimary
         }
 
-        // Grips: title band and the border (the inside stays free for the content and the canvas).
+        // packages / imports listed as text (notation "compartment", table 3): compartments at the top of the body
+        Column {
+            objectName: "frameCompartments"
+            x: node.padding
+            y: frame.tabHeight + 4
+            width: parent.width - 2 * node.padding
+            visible: node.isFrame && (node.compartments.length > 0 || node.subtitle.length > 0)
+            // "«alias» Package3Alias": the aliases of the package (notation "«alias» at the element", table 4)
+            Label {
+                objectName: "frameAliasLabel"
+                width: parent.width
+                visible: node.subtitle.length > 0
+                horizontalAlignment: Text.AlignHCenter
+                text: node.subtitle
+                font.pixelSize: 12
+                color: Theme.textSecondary
+                height: visible ? 18 : 0
+                // the alias itself: double-click to edit, right-click for its menu (notation, delete)
+                MouseArea {
+                    anchors.fill: parent
+                    enabled: !node.readOnly && node.canvas !== null
+                    acceptedButtons: Qt.LeftButton | Qt.RightButton
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: mouse => {
+                        const alias = node.aliasAt(parent, mouse.x, mouse.y)
+                        if (mouse.button === Qt.RightButton && alias.length > 0)
+                            node.canvas.openNodeMenu(node.elementId, alias)
+                    }
+                    onDoubleClicked: mouse => {
+                        const alias = node.aliasAt(parent, mouse.x, mouse.y)
+                        if (alias.length > 0)
+                            node.canvas.editElement(alias)
+                    }
+                }
+            }
+            Repeater {
+                model: node.isFrame ? node.compartments : []
+                Column {
+                    id: frameCompartment
+                    required property var modelData
+                    width: parent.width
+                    Label {
+                        width: parent.width
+                        horizontalAlignment: Text.AlignHCenter
+                        text: frameCompartment.modelData.title
+                        font.pixelSize: 11
+                        font.italic: true
+                        color: Theme.textSecondary
+                    }
+                    Repeater {
+                        model: frameCompartment.modelData.entries
+                        Label {
+                            id: frameEntry
+                            required property var modelData
+                            readonly property string keyword: modelData.keyword !== undefined ? modelData.keyword : ""
+                            function escaped(value) { return value.replace(/&/g, "&amp;").replace(/</g, "&lt;") }
+                            // "part def PartDef1": the keyword in bold (table 3 "Package with members compartment")
+                            textFormat: Text.StyledText
+                            // the content of a package listed as text: indented below it
+                            readonly property string indent: "&nbsp;".repeat(4 * (modelData.indent !== undefined ? modelData.indent : 0))
+                            text: indent + (keyword.length > 0 && modelData.text.indexOf(keyword) === 0
+                                            ? "<b>" + escaped(keyword) + "</b>" + escaped(modelData.text.substring(keyword.length))
+                                            : escaped(modelData.text))
+                            font.pixelSize: 12
+                            color: Theme.textPrimary
+                            height: 17
+                            MouseArea {
+                                anchors.fill: parent
+                                enabled: !node.readOnly && node.canvas !== null
+                                acceptedButtons: Qt.LeftButton | Qt.RightButton
+                                onClicked: mouse => {
+                                    if (mouse.button === Qt.RightButton)
+                                        node.canvas.openNodeMenu(node.elementId, frameEntry.modelData.entryId)
+                                }
+                                onDoubleClicked: node.canvas.editElement(frameEntry.modelData.entryId)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Grips: the tab, the top of the body and the border (the inside stays free for the content and the canvas).
         Grip {
             owner: node
             x: 0
             y: 0
+            width: frame.tabWidth
+            height: frame.tabHeight
+        }
+        Grip {
+            owner: node
+            x: 0
+            y: frame.tabHeight - 3
             width: parent.width
-            height: 30
+            height: 8
         }
         Grip {
             owner: node
             x: -4
-            y: 0
+            y: frame.tabHeight
             width: 8
-            height: parent.height
+            height: parent.height - frame.tabHeight
         }
         Grip {
             owner: node
             x: parent.width - 4
-            y: 0
+            y: frame.tabHeight
             width: 8
-            height: parent.height
+            height: parent.height - frame.tabHeight
         }
         Grip {
             owner: node

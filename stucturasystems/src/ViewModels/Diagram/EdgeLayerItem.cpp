@@ -270,7 +270,7 @@ namespace StructuraSystems::Client {
                     continue;
 
                 const QColor loopColor = edge.Selected ? SelectionColor : LineColor;
-                if (edge.Source == edge.Target) {
+                if (edge.Source == edge.Target && edge.Junction == 0) {
                     // transition of a state to itself: a loop at the upper right corner
                     painter->setPen(QPen(loopColor, edge.Selected ? 2.2 : 1.4));
                     const QRectF r = source->Rect;
@@ -291,9 +291,9 @@ namespace StructuraSystems::Client {
                     return node.Kind == DiagramTypes::ActorNode
                            ? QRectF(node.Rect.center().x() - 20, node.Rect.top(), 40, 62) : node.Rect;
                 };
+                // use cases are rounded boxes in SysML v2 (table 23): from border to border
                 const auto outline = [&](const DiagramNode &node, const QPointF &towards) {
-                    return node.Kind == DiagramTypes::UseCaseNode ? DiagramGeometry::ellipsePointTowards(node.Rect, towards)
-                                                                  : DiagramGeometry::borderPointTowards(shape(node), towards);
+                    return DiagramGeometry::borderPointTowards(shape(node), towards);
                 };
                 // tidy lines (structure and behavior views): around the nodes in between, side by side between
                 // the same two nodes; otherwise straight (use cases: from outline to outline)
@@ -302,7 +302,9 @@ namespace StructuraSystems::Client {
                                          target->Kind == DiagramTypes::UseCaseNode || target->Kind == DiagramTypes::ActorNode;
                 const bool tree = edge.Kind == DiagramTypes::Composition || edge.Kind == DiagramTypes::Aggregation ||
                                   edge.Kind == DiagramTypes::Temporal;
-                if (tree && Routing && target->Rect.top() > source->Rect.bottom() + 16) {
+                if (edge.Junction != 0) {
+                    path = EdgeRouting::routeOf(*Nodes, Edges->edges(), edge); // to the dot of an n-ary relationship
+                } else if (tree && Routing && target->Rect.top() > source->Rect.bottom() + 16) {
                     // decomposition tree: down from the owner, across, down to the part (shared by its siblings)
                     const qreal middle = (source->Rect.bottom() + target->Rect.top()) / 2.0;
                     const qreal sourceX = source->Rect.center().x();
@@ -340,6 +342,9 @@ namespace StructuraSystems::Client {
                 bool openArrow = false; // «satisfy», «verify», «include», «import», dependency, succession: dashed, open head
                 bool openHead = false;  // message, «allocate», transition, perform: a solid line with an open arrow head
                 bool flowArrow = false; // flow: a filled triangle in the middle of the line
+                bool variantMembership = false; // a circle with a cross at the variation (or the owning package)
+                bool aliasMembership = false;   // a circle at the package (unowned member with alias name, table 3)
+                bool annotation = false;        // dashed line without a head
                 switch (edge.Kind) {
                     case DiagramTypes::Composition:
                     case DiagramTypes::Aggregation:
@@ -349,7 +354,15 @@ namespace StructuraSystems::Client {
                             lineStart = marker[2];
                         break;
                     case DiagramTypes::Flow:
-                        flowArrow = true;
+                        if (edge.FilledHead) {
+                            // between parameters: a filled head at the target (flow-edge, sflow-edge)
+                            marker = arrowHead(end, beforeEnd);
+                            filled = true;
+                            if (!marker.isEmpty())
+                                lineEnd = (marker[1] + marker[2]) / 2.0;
+                        } else {
+                            flowArrow = true;
+                        }
                         break;
                     case DiagramTypes::Succession:
                         openArrow = true;
@@ -358,25 +371,41 @@ namespace StructuraSystems::Client {
                     case DiagramTypes::Performs:
                         openHead = true;
                         break;
+                    case DiagramTypes::VariantMembership:
+                    case DiagramTypes::Membership:
+                        variantMembership = true;
+                        break;
+                    case DiagramTypes::AliasMembership:
+                        aliasMembership = true;
+                        break;
+                    case DiagramTypes::Annotation:
+                        annotation = true;
+                        break;
                     case DiagramTypes::Specialization:
                     case DiagramTypes::DefinedBy:
                     case DiagramTypes::Redefinition:
+                    case DiagramTypes::ReferenceSubsetting:
                         marker = arrowHead(end, beforeEnd);
                         filled = false;
                         if (!marker.isEmpty())
                             lineEnd = (marker[1] + marker[2]) / 2.0;
                         break;
+                    case DiagramTypes::Dependency:
+                    case DiagramTypes::Import:
+                    case DiagramTypes::Expose:
+                        openArrow = true; // graphical BNF: dashed line, open head
+                        break;
                     case DiagramTypes::Satisfy:
                     case DiagramTypes::Verify:
                     case DiagramTypes::Include:
                     case DiagramTypes::Frame:
-                    case DiagramTypes::Dependency:
-                    case DiagramTypes::Import:
-                        openArrow = true;
-                        break;
+                    case DiagramTypes::Exhibit:
+                    case DiagramTypes::Assert:
+                    case DiagramTypes::Assume:
+                    case DiagramTypes::Require:
                     case DiagramTypes::Message:
                     case DiagramTypes::Allocation:
-                        openHead = true;
+                        openHead = true; // graphical BNF: solid line, open head
                         break;
                     case DiagramTypes::Temporal:
                         break;
@@ -389,10 +418,81 @@ namespace StructuraSystems::Client {
                         break;
                 }
 
+                if (variantMembership) {
+                    // owned-membership / variant membership: a circle with a cross at the owner
+                    const QLineF line(start, afterStart);
+                    if (line.length() > 1e-6) {
+                        const QPointF direction = (afterStart - start) / line.length();
+                        const QPointF center = start + direction * 6.0;
+                        painter->setBrush(QBrush(BackgroundColor));
+                        painter->drawEllipse(center, 6.0, 6.0);
+                        painter->setBrush(Qt::NoBrush);
+                        painter->drawLine(center - QPointF(6, 0), center + QPointF(6, 0));
+                        painter->drawLine(center - QPointF(0, 6), center + QPointF(0, 6));
+                        lineStart = start + direction * 12.0;
+                    }
+                }
+                if (aliasMembership) {
+                    const QLineF line(start, afterStart);
+                    if (line.length() > 1e-6) {
+                        const QPointF direction = (afterStart - start) / line.length();
+                        const QPointF center = start + direction * 6.0;
+                        painter->setBrush(QBrush(BackgroundColor));
+                        painter->drawEllipse(center, 6.0, 6.0);
+                        painter->setBrush(Qt::NoBrush);
+                        lineStart = start + direction * 12.0;
+                    }
+                }
+                if (edge.Junction == 2) { // a client of an n-ary dependency: dashed, no head
+                    annotation = true;
+                    openArrow = false;
+                    openHead = false;
+                } else if (edge.Junction == 3) { // a supplier: dashed, open head
+                    annotation = false;
+                    openArrow = true;
+                } else if (edge.Junction == 1) {
+                    annotation = false;
+                    openArrow = false;
+                    openHead = false;
+                }
                 std::vector<QPointF> drawn = path;
                 drawn.front() = lineStart;
                 drawn.back() = lineEnd;
-                if (openArrow) {
+                if (edge.Junction != 0) {
+                    // the dot where the lines meet (n-ary-association-dot)
+                    const QPointF junction = edge.Junction == 3 ? path.front() : path.back();
+                    painter->setBrush(QBrush(color));
+                    painter->drawEllipse(junction, 4.5, 4.5);
+                    painter->setBrush(Qt::NoBrush);
+                }
+                // multiplicities / role names at the ends (connection-graphical)
+                for (int side = 0; side < 2; ++side) {
+                    const QString &text = side == 0 ? edge.SourceLabel : edge.TargetLabel;
+                    if (text.isEmpty())
+                        continue;
+                    const QPointF at = side == 0 ? path.front() : path.back();
+                    const QPointF next = side == 0 ? path[1] : path[path.size() - 2];
+                    const QLineF line(at, next);
+                    if (line.length() < 1e-6)
+                        continue;
+                    const QPointF direction = (next - at) / line.length();
+                    const QPointF normal(-direction.y(), direction.x());
+                    QFont font = painter->font();
+                    font.setPixelSize(11);
+                    painter->setFont(font);
+                    const QRectF box = painter->fontMetrics().boundingRect(text).adjusted(-2, -1, 2, 1);
+                    const QPointF center = at + direction * (box.width() / 2 + 10) + normal * 10;
+                    painter->setPen(QPen(color));
+                    painter->drawText(QRectF(center.x() - box.width() / 2, center.y() - box.height() / 2, box.width(),
+                                             box.height()), Qt::AlignCenter, text);
+                    painter->setPen(QPen(color, edge.Selected ? 2.2 : 1.4));
+                }
+                if (annotation) {
+                    QPen dashed(color, edge.Selected ? 2.2 : 1.2, Qt::DashLine);
+                    painter->setPen(dashed);
+                    painter->drawPolyline(drawn.data(), int(drawn.size()));
+                    painter->setPen(QPen(color, edge.Selected ? 2.2 : 1.4));
+                } else if (openArrow) {
                     QPen dashed(color, edge.Selected ? 2.2 : 1.4, Qt::DashLine);
                     painter->setPen(dashed);
                     painter->drawPolyline(drawn.data(), int(drawn.size()));
@@ -403,7 +503,10 @@ namespace StructuraSystems::Client {
                         painter->drawLine(head[0], head[2]);
                     }
                 } else {
+                    if (edge.Dashed) // succession flow
+                        painter->setPen(QPen(color, edge.Selected ? 2.2 : 1.4, Qt::DashLine));
                     painter->drawPolyline(drawn.data(), int(drawn.size()));
+                    painter->setPen(QPen(color, edge.Selected ? 2.2 : 1.4));
                     const QPolygonF head = openHead ? arrowHead(end, beforeEnd) : QPolygonF();
                     if (!head.isEmpty()) {
                         painter->drawLine(head[0], head[1]);
@@ -449,7 +552,7 @@ namespace StructuraSystems::Client {
                     // ':' (defined by), '::' (perform = reference subsetting) and the bar of a redefinition,
                     // just behind the arrow head, across the line
                     const QLineF last(end, beforeEnd);
-                    if (last.length() > 1e-6 && (edge.Kind == DiagramTypes::DefinedBy || edge.Kind == DiagramTypes::Performs ||
+                    if (last.length() > 1e-6 && (edge.Kind == DiagramTypes::DefinedBy || edge.Kind == DiagramTypes::ReferenceSubsetting ||
                                                  edge.Kind == DiagramTypes::Redefinition)) {
                         const QPointF direction = (beforeEnd - end) / last.length();
                         const QPointF normal(-direction.y(), direction.x());
@@ -461,7 +564,7 @@ namespace StructuraSystems::Client {
                             painter->setPen(QPen(color, edge.Selected ? 2.2 : 1.4));
                         } else {
                             painter->setPen(Qt::NoPen);
-                            const int pairs = edge.Kind == DiagramTypes::Performs ? 2 : 1;
+                            const int pairs = edge.Kind == DiagramTypes::ReferenceSubsetting ? 2 : 1;
                             for (int pair = 0; pair < pairs; ++pair) {
                                 const QPointF at = base + direction * (pair * 6.0);
                                 painter->drawEllipse(at + normal * 4, 1.8, 1.8);

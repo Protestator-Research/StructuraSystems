@@ -13,6 +13,9 @@
 #include <cstdint>
 #include <vector>
 
+#include <QPointF>
+#include <QRectF>
+
 #include "DiagramTypes.h"
 
 namespace StructuraSystems::Client {
@@ -30,6 +33,25 @@ namespace StructuraSystems::Client {
         int TargetPin = -1;
         /// Written next to the line: name and type of a connection / interface, the item of a flow.
         QString Label;
+        /// Written at the ends of the line: multiplicity / role name of the source and target end ("[0..1]").
+        QString SourceLabel;
+        QString TargetLabel;
+        /// n-ary connection / dependency: one line from an end (Source = Target = the end node) to the dot where all
+        /// lines of the group (the key of the relationship) meet. 1: an end of a connection, 2: a client of a
+        /// dependency (dashed), 3: a supplier of a dependency (dashed, open head at the supplier).
+        QString Group;
+        int Junction = 0;
+        /// Flow: "succession flow" - a dashed line (graphical BNF: sflow).
+        bool Dashed = false;
+        /// Flow between parameters (pins): a filled arrow head at the target instead of the triangle on the line.
+        bool FilledHead = false;
+        /// A pin / port end: the direction the line leaves it in (set by the view; null = found from the node it is on).
+        QPointF SourceOut;
+        QPointF TargetOut;
+        /// Annotation of an element shown as entry of a compartment ("comment about part1::attribute1"): the entry
+        /// (its entryId) and where it is in the target node (relative to its top left; empty until the node reported it).
+        QString TargetEntry;
+        QRectF TargetEntryRect;
 
         bool operator==(const DiagramEdge &other) const = default;
     };

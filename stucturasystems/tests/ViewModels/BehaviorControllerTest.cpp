@@ -8,6 +8,7 @@
 #include <BehaviorController.h>
 #include <QJsonObject>
 #include <DiagramController.h>
+#include <EdgeRouting.h>
 
 #include <Diagram/Conversion/SysMLCodeGenerator.h>
 #include <Diagram/Conversion/SysMLTextImporter.h>
@@ -229,11 +230,15 @@ TEST_CASE("Behavior: send, accept, assign, if and loop actions are shown and dra
     QStringList keywords;
     for (const auto &node: behavior.nodes()->nodes())
         keywords.append(node.Keyword);
-    CHECK(keywords.contains("«accept»"));
+    CHECK(keywords.contains("«accept action»"));
     CHECK(keywords.contains("«loop»"));
-    CHECK(keywords.contains("«send»"));
+    CHECK(keywords.contains("«send action»"));
     const ElementId charging = *find(model, definition, "charging");
-    CHECK_EQ(behavior.nodes()->find(charging)->Title, QString("charging: until charge >= 100"));
+    // «loop» charging with the compartments 'loop body' and 'until condition' (graphical BNF)
+    const DiagramNode *loopNode = behavior.nodes()->find(charging);
+    CHECK_EQ(loopNode->Title, QString("charging"));
+    CHECK_EQ(DiagramNodeModel::entryCount(*loopNode, "loop body"), 2);
+    CHECK_EQ(DiagramNodeModel::entryCount(*loopNode, "until condition"), 1);
     // the body of the loop and of the if can be chosen as well
     int bodies = 0;
     for (const auto &context: behavior.contexts()) {
@@ -400,8 +405,143 @@ TEST_CASE("Behavior: input / output flows between actions (slide 57)") {
         if (edge.Kind != DiagramTypes::Flow)
             continue;
         ++flows;
-        CHECK_EQ(edge.Label, QString(": Torque"));
-        CHECK_EQ(model.element(edge.Source).name(), std::string("generateTorque"));
+        CHECK_EQ(edge.Label, QString("of Torque"));
+        // from pin to pin: the parameters on the border of their actions (graphical BNF: param-t / param-b)
+        CHECK_EQ(model.element(edge.Source).name(), std::string("torque"));
+        CHECK_EQ(model.element(model.element(edge.Source).owner()).name(), std::string("generateTorque"));
+        CHECK_EQ(model.element(model.element(edge.Target).owner()).name(), std::string("amplifyTorque"));
+        CHECK(edge.FilledHead);
+        CHECK(!edge.Dashed);
     }
     CHECK_EQ(flows, 1);
 }
+
+TEST_CASE("Behavior: parameters as pins on the actions and the frame, flows and succession flows between them") {
+    const std::string text =
+            "action def ProvidePower {\n"
+            "    in item fuelIn : Fuel;\n"
+            "    out item torque : Fuel;\n"
+            "    action pump {\n"
+            "        in item cmd : Fuel;\n"
+            "        out item fuelOut : Fuel;\n"
+            "    }\n"
+            "    action burn {\n"
+            "        in item fuelIn : Fuel;\n"
+            "        out item heat : Fuel;\n"
+            "        inout item level : Fuel;\n"
+            "    }\n"
+            "    first start then pump;\n"
+            "    first pump then burn;\n"
+            "    flow of Fuel from pump.fuelOut to burn.fuelIn;\n"
+            "    succession flow from burn.heat to torque;\n"
+            "    flow from fuelIn to pump.cmd;\n"
+            "}\n";
+    SemanticModel model;
+    CHECK(SysMLTextImporter::importText(text, model).lossless());
+    BehaviorController behavior(model);
+    const ElementId providePower = model.children(RootId).at(0);
+    const ElementId fuelIn = model.children(providePower).at(0);
+    const ElementId torque = model.children(providePower).at(1);
+    const ElementId pump = model.children(providePower).at(2);
+    const ElementId burn = model.children(providePower).at(3);
+    const ElementId cmd = model.children(pump).at(0);
+    const ElementId fuelOut = model.children(pump).at(1);
+    const ElementId level = model.children(burn).at(2);
+    // pins: on top of the action for "in", at its bottom for "out", on its right for "inout"
+    for (const ElementId pin: {cmd, fuelOut, level, fuelIn, torque})
+        CHECK(behavior.nodes()->find(pin) != nullptr);
+    const QRectF pumpRect = behavior.nodes()->find(pump)->Rect;
+    const QRectF burnRect = behavior.nodes()->find(burn)->Rect;
+    CHECK(std::abs(behavior.nodes()->find(cmd)->Rect.center().y() - pumpRect.top()) < 0.5);
+    CHECK(std::abs(behavior.nodes()->find(fuelOut)->Rect.center().y() - pumpRect.bottom()) < 0.5);
+    CHECK(std::abs(behavior.nodes()->find(level)->Rect.center().x() - burnRect.right()) < 0.5);
+    CHECK_EQ(behavior.pinSide(key(cmd)), QString("top"));
+    CHECK_EQ(behavior.pinSide(key(fuelOut)), QString("bottom"));
+    CHECK_EQ(behavior.pinSide(key(level)), QString("right"));
+    CHECK_EQ(behavior.nodes()->find(cmd)->Keyword, QString("in"));
+    CHECK_EQ(behavior.nodes()->find(cmd)->Title, QString("cmd : Fuel"));
+    // the parameters of the context on its frame: in on the left, out on the right
+    const QRectF frame = behavior.frameRect();
+    CHECK(std::abs(behavior.nodes()->find(fuelIn)->Rect.center().x() - frame.left()) < 0.5);
+    CHECK(std::abs(behavior.nodes()->find(torque)->Rect.center().x() - frame.right()) < 0.5);
+    CHECK_EQ(behavior.pinSide(key(fuelIn)), QString("left"));
+    int flows = 0;
+    int successionFlows = 0;
+    for (const auto &edge: behavior.edges()->edges()) {
+        if (edge.Kind != DiagramTypes::Flow)
+            continue;
+        CHECK(edge.FilledHead);
+        CHECK(!EdgeRouting::routeOf(*behavior.nodes(), behavior.edges()->edges(), edge).empty());
+        if (edge.Dashed) {
+            ++successionFlows;
+            CHECK_EQ(edge.Target, torque);
+        } else {
+            ++flows;
+        }
+    }
+    CHECK_EQ(flows, 2);
+    CHECK_EQ(successionFlows, 1);
+    // a pin stays on the border when dragged; the node at a pin is the pin
+    const QRectF before = behavior.nodes()->find(cmd)->Rect;
+    behavior.moveNode(key(cmd), 400, 400);
+    CHECK(behavior.nodes()->find(cmd)->Rect == before);
+    CHECK_EQ(behavior.nodeAt(before.center().x(), before.center().y()), key(cmd));
+    // a flow drawn from a pin to a pin
+    CHECK(behavior.connectNodes(key(level), key(cmd)).isEmpty());
+    const std::string generated = SysMLCodeGenerator().generate(model);
+    CHECK(generated.find("flow from burn.level to pump.cmd;") != std::string::npos);
+    CHECK(!behavior.connectNodes(key(level), key(pump)).isEmpty()); // a pin only to a pin
+    SemanticModel again;
+    CHECK(SysMLTextImporter::importText(generated, again).lossless());
+    CHECK_EQ(SysMLCodeGenerator().generate(again), generated);
+}
+
+TEST_CASE("Behavior: swimlanes for the parts performing the actions (perform-actions-swimlanes)") {
+    const std::string text =
+            "part part0 {\n"
+            "    perform action0;\n"
+            "    part part1 {\n"
+            "        perform action0.action1;\n"
+            "        perform action0.action4;\n"
+            "    }\n"
+            "    part part2 {\n"
+            "        perform action0.action2;\n"
+            "    }\n"
+            "}\n"
+            "action action0 {\n"
+            "    action action1;\n"
+            "    action action2;\n"
+            "    action action4;\n"
+            "    action other;\n"
+            "    first action1 then action2;\n"
+            "    first action2 then action4;\n"
+            "}\n";
+    SemanticModel model;
+    CHECK(SysMLTextImporter::importText(text, model).lossless());
+    BehaviorController behavior(model);
+    const ElementId action0 = model.children(RootId).at(1);
+    behavior.setContextId(key(action0));
+    behavior.syncNow();
+    const QVariantList lanes = behavior.lanes();
+    CHECK_EQ(lanes.size(), 2);
+    if (lanes.size() != 2)
+        return;
+    CHECK_EQ(lanes.at(0).toMap().value("title").toString(), QString("part0.part1"));
+    CHECK_EQ(lanes.at(1).toMap().value("title").toString(), QString("part0.part2"));
+    const auto laneRect = [&](int index) {
+        const auto map = lanes.at(index).toMap();
+        return QRectF(map.value("x").toReal(), map.value("y").toReal(), map.value("width").toReal(), map.value("height").toReal());
+    };
+    const ElementId action1 = model.children(action0).at(0);
+    const ElementId action2 = model.children(action0).at(1);
+    const ElementId action4 = model.children(action0).at(2);
+    const ElementId other = model.children(action0).at(3);
+    CHECK(laneRect(0).contains(behavior.nodeRect(key(action1))));
+    CHECK(laneRect(0).contains(behavior.nodeRect(key(action4))));
+    CHECK(laneRect(1).contains(behavior.nodeRect(key(action2))));
+    CHECK(!laneRect(0).intersects(behavior.nodeRect(key(other))));
+    CHECK(!laneRect(1).intersects(behavior.nodeRect(key(other))));
+    CHECK(std::abs(laneRect(0).top() - laneRect(1).top()) < 0.5); // aligned
+    CHECK(behavior.frameRect().contains(laneRect(0).united(laneRect(1))));
+}
+

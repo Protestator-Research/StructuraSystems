@@ -111,8 +111,9 @@ namespace StructuraSystems::Diagram {
         // Relationships touching any removed element go first.
         std::vector<RelationshipId> danglingRelationships;
         for (const auto &relationship: Relationships) {
-            const bool touches = std::find(subtree.begin(), subtree.end(), relationship.Source) != subtree.end() ||
-                                 std::find(subtree.begin(), subtree.end(), relationship.Target) != subtree.end();
+            bool touches = false;
+            for (const ElementId end: endsOf(relationship))
+                touches = touches || std::find(subtree.begin(), subtree.end(), end) != subtree.end();
             if (touches)
                 danglingRelationships.push_back(relationship.Id);
         }
@@ -152,10 +153,13 @@ namespace StructuraSystems::Diagram {
         if (name.empty()) {
             const auto inside = [&](ElementId end) { return end == id || isAncestor(id, end); };
             for (const auto &relationship: Relationships) {
-                if (inside(relationship.Target) ||
-                    (inside(relationship.Source) && !(relationship.Source == id && (relationship.Kind == RelationshipKind::Verify ||
-                                                                                    relationship.Kind == RelationshipKind::Include ||
-                                                                                    relationship.Kind == RelationshipKind::Frame))))
+                bool extra = false;
+                for (const ElementId end: relationship.ExtraSources)
+                    extra = extra || inside(end);
+                for (const ElementId end: relationship.ExtraTargets)
+                    extra = extra || inside(end);
+                if (inside(relationship.Target) || extra ||
+                    (inside(relationship.Source) && !(relationship.Source == id && isWrittenInSource(relationship.Kind))))
                     throw ModelError("The element is referenced by a relationship and needs a name");
             }
         }
@@ -265,6 +269,20 @@ namespace StructuraSystems::Diagram {
         if (target.ExternalSpecializations == references)
             return;
         target.ExternalSpecializations = std::move(references);
+        notify(ModelChange::Type::ElementChanged, id);
+    }
+
+    void SemanticModel::setReferencedFeature(ElementId id, const std::string &keyword, const std::string &reference) {
+        auto &target = mutableElement(id);
+        if (!reference.empty() && !isUsageKind(target.Kind))
+            throw ModelError("Only a usage references a feature (" + toString(target.Kind) + ")");
+        if (!keyword.empty() && keyword != "references" && keyword != "::>")
+            throw ModelError("'" + keyword + "' is not 'references' or '::>'");
+        const std::string word = reference.empty() ? std::string() : keyword.empty() ? std::string("references") : keyword;
+        if (target.ReferencedFeature == reference && target.ReferencesKeyword == word)
+            return;
+        target.ReferencedFeature = reference;
+        target.ReferencesKeyword = word;
         notify(ModelChange::Type::ElementChanged, id);
     }
 
@@ -573,30 +591,7 @@ namespace StructuraSystems::Diagram {
         for (const auto &relationship: Relationships) {
             // the ends are referenced from where the relationship is written: from there on, every element on the
             // way to an end needs a name (not so below an unnamed "objective { ... }" or "if c { ... }" around it)
-            const bool shorthand = relationship.Kind == RelationshipKind::Succession && relationship.Name.empty() &&
-                                   element(relationship.Source).owner() == element(relationship.Target).owner();
-            const auto pathSource = ownershipPath(relationship.Source);
-            const auto pathTarget = ownershipPath(relationship.Target);
-            std::size_t common = 0;
-            if (relationship.Context) {
-                const auto contextPath = *relationship.Context == RootId ? std::vector<ElementId>()
-                                                                          : ownershipPath(*relationship.Context);
-                common = contextPath.size();
-            } else {
-                while (common + 1 < pathSource.size() && common + 1 < pathTarget.size() &&
-                       pathSource[common] == pathTarget[common])
-                    ++common;
-            }
-            const auto named = [&](const std::vector<ElementId> &path) {
-                for (std::size_t i = std::min(common, path.size()); i < path.size(); ++i) {
-                    if (element(path[i]).name().empty())
-                        return false;
-                }
-                return true;
-            };
-            if (!shorthand && (!named(pathTarget) || (!named(pathSource) && relationship.Kind != RelationshipKind::Verify &&
-                                                       relationship.Kind != RelationshipKind::Include &&
-                                                       relationship.Kind != RelationshipKind::Frame))) {
+            if (!referenceable(relationship)) {
                 invalid.push_back(relationship.Id);
                 continue;
             }
@@ -609,8 +604,12 @@ namespace StructuraSystems::Diagram {
                 invalid.push_back(relationship.Id);
                 continue;
             }
-            if (isAncestor(relationship.Source, relationship.Target) ||
-                isAncestor(relationship.Target, relationship.Source))
+            const auto ends = endsOf(relationship);
+            bool nested = false;
+            for (const ElementId a: ends)
+                for (const ElementId b: ends)
+                    nested = nested || (a != b && isAncestor(a, b));
+            if (nested)
                 invalid.push_back(relationship.Id);
         }
         for (const RelationshipId relationshipId: invalid) {
@@ -619,6 +618,41 @@ namespace StructuraSystems::Diagram {
         }
 
         notify(ModelChange::Type::ElementReparented, id);
+    }
+
+    bool SemanticModel::referenceable(const Relationship &relationship) const {
+        // the ends are referenced from where the relationship is written (the innermost owner of all its ends, or
+        // its context): from there on, every element on the way to an end needs a name (not so below an unnamed
+        // "objective { ... }" or "if c { ... }" around a succession written right after its source)
+        const bool shorthand = relationship.Kind == RelationshipKind::Succession && relationship.Name.empty() &&
+                               element(relationship.Source).owner() == element(relationship.Target).owner();
+        if (shorthand)
+            return true;
+        const auto ends = endsOf(relationship);
+        std::vector<std::vector<ElementId>> paths;
+        for (const ElementId end: ends)
+            paths.push_back(ownershipPath(end));
+        std::size_t common = 0;
+        if (relationship.Context) {
+            common = *relationship.Context == RootId ? 0 : ownershipPath(*relationship.Context).size();
+        } else {
+            for (bool same = true; same; ) {
+                for (const auto &path: paths)
+                    same = same && common + 1 < path.size() && path[common] == paths.front()[common];
+                if (same)
+                    ++common;
+            }
+        }
+        for (std::size_t k = 0; k < paths.size(); ++k) {
+            // the source of a relationship written in its body ("exhibit s;", "assert c;") is that body itself
+            if (k == 0 && isWrittenInSource(relationship.Kind))
+                continue;
+            for (std::size_t i = std::min(common, paths[k].size()); i < paths[k].size(); ++i) {
+                if (element(paths[k][i]).name().empty())
+                    return false;
+            }
+        }
+        return true;
     }
 
     void SemanticModel::setChildIndex(ElementId id, std::size_t index) {
@@ -680,11 +714,39 @@ namespace StructuraSystems::Diagram {
 
     // --- relationships ------------------------------------------------------------------
 
+    RelationshipId SemanticModel::addFurtherRelationship(RelationshipKind kind, ElementId source, ElementId target) {
+        if (const auto rule = RelationshipRules::canRelateAgain(*this, kind, source, target); !rule)
+            throw ModelError(rule.Reason);
+        const RelationshipId id = NextRelationshipId++;
+        Relationships.push_back(Relationship{id, kind, source, target, {}, {}, {}, {}, {}, false, std::nullopt, {}, std::nullopt, {}, {}, false});
+        notify(ModelChange::Type::RelationshipAdded, id);
+        return id;
+    }
+
     RelationshipId SemanticModel::addRelationship(RelationshipKind kind, ElementId source, ElementId target) {
         if (const auto rule = RelationshipRules::canRelate(*this, kind, source, target); !rule)
             throw ModelError(rule.Reason);
         const RelationshipId id = NextRelationshipId++;
         Relationships.push_back(Relationship{id, kind, source, target, {}, {}, {}, {}, {}, false, std::nullopt, {}, std::nullopt, {}, {}, false});
+        notify(ModelChange::Type::RelationshipAdded, id);
+        return id;
+    }
+
+    RelationshipId SemanticModel::addRelationship(RelationshipKind kind, ElementId source, ElementId target,
+                                                  const std::string &sourceFeature, const std::string &targetFeature) {
+        if (sourceFeature.empty() && targetFeature.empty())
+            return addRelationship(kind, source, target);
+        for (const std::string *feature: {&sourceFeature, &targetFeature}) {
+            if (!feature->empty() && !isDottedPath(*feature))
+                throw ModelError("Invalid end feature '" + *feature + "'");
+        }
+        if (const auto rule = RelationshipRules::canRelate(*this, kind, source, target, sourceFeature, targetFeature); !rule)
+            throw ModelError(rule.Reason);
+        const RelationshipId id = NextRelationshipId++;
+        Relationship relationship{id, kind, source, target, {}, {}, {}, {}, {}, false, std::nullopt, {}, std::nullopt, {}, {}, false};
+        relationship.SourceFeature = sourceFeature;
+        relationship.TargetFeature = targetFeature;
+        Relationships.push_back(std::move(relationship));
         notify(ModelChange::Type::RelationshipAdded, id);
         return id;
     }
@@ -809,7 +871,7 @@ namespace StructuraSystems::Diagram {
             throw ModelError("Unknown relationship id " + std::to_string(id));
         if (it->Kind == RelationshipKind::Specialization || it->Kind == RelationshipKind::Binding ||
             it->Kind == RelationshipKind::Satisfy || it->Kind == RelationshipKind::Verify ||
-            it->Kind == RelationshipKind::Include || it->Kind == RelationshipKind::Frame ||
+            isWrittenInSource(it->Kind) ||
             ((it->Kind == RelationshipKind::Succession || it->Kind == RelationshipKind::Transition ||
               it->Kind == RelationshipKind::Dependency) && !typeName.empty())) {
             if (!name.empty() || !typeName.empty())
@@ -844,6 +906,76 @@ namespace StructuraSystems::Diagram {
         if (it->Definition == definition)
             return;
         it->Definition = definition;
+        notify(ModelChange::Type::RelationshipChanged, id);
+    }
+
+    void SemanticModel::setExtraEnds(RelationshipId id, std::vector<ElementId> sources, std::vector<ElementId> targets, bool nary) {
+        auto it = std::find_if(Relationships.begin(), Relationships.end(),
+                               [id](const Relationship &relationship) { return relationship.Id == id; });
+        if (it == Relationships.end())
+            throw ModelError("Unknown relationship id " + std::to_string(id));
+        if (it->Kind == RelationshipKind::Connection) {
+            if (!sources.empty())
+                throw ModelError("The ends of an n-ary connection are listed in one row");
+        } else if (it->Kind == RelationshipKind::Dependency) {
+            if (nary)
+                throw ModelError("A dependency has clients and suppliers");
+        } else if (!sources.empty() || !targets.empty() || nary) {
+            throw ModelError(toString(it->Kind) + " has two ends");
+        }
+        if (!it->SourceFeature.empty() || !it->TargetFeature.empty() || !it->SourceMultiplicity.empty() ||
+            !it->TargetMultiplicity.empty()) {
+            if (!sources.empty() || !targets.empty() || nary)
+                throw ModelError("An n-ary connection has neither end features nor end multiplicities");
+        }
+        std::vector<ElementId> all{it->Source, it->Target};
+        for (const auto *list: {&sources, &targets}) {
+            for (const ElementId end: *list) {
+                if (!contains(end))
+                    throw ModelError("Unknown element id " + std::to_string(end));
+                if (std::find(all.begin(), all.end(), end) != all.end())
+                    throw ModelError("An element is an end only once");
+                for (const ElementId other: all)
+                    if (isAncestor(other, end) || isAncestor(end, other))
+                        throw ModelError("An end cannot own another end");
+                if (element(end).name().empty())
+                    throw ModelError("An element without a name cannot be referenced");
+                all.push_back(end);
+            }
+        }
+        if (it->ExtraSources == sources && it->ExtraTargets == targets && it->Nary == nary)
+            return;
+        // written in the owner of all ends now: every element on the way to them needs a name from there
+        Relationship changed = *it;
+        changed.ExtraSources = sources;
+        changed.ExtraTargets = targets;
+        changed.Nary = nary;
+        if (!referenceable(changed))
+            throw ModelError("An element without a name cannot be referenced");
+        it->ExtraSources = std::move(sources);
+        it->ExtraTargets = std::move(targets);
+        it->Nary = nary;
+        notify(ModelChange::Type::RelationshipChanged, id);
+    }
+
+    void SemanticModel::setEndMultiplicities(RelationshipId id, const std::string &source, const std::string &target) {
+        auto it = std::find_if(Relationships.begin(), Relationships.end(),
+                               [id](const Relationship &relationship) { return relationship.Id == id; });
+        if (it == Relationships.end())
+            throw ModelError("Unknown relationship id " + std::to_string(id));
+        if ((!source.empty() || !target.empty()) &&
+            ((it->Kind != RelationshipKind::Connection && it->Kind != RelationshipKind::Interface) || it->Nary ||
+             !it->ExtraTargets.empty() || !it->SourceFeature.empty() || !it->TargetFeature.empty()))
+            throw ModelError("Only the ends of a binary connection or interface have multiplicities");
+        for (const std::string *text: {&source, &target}) {
+            if (!text->empty() && (text->size() < 3 || text->front() != '[' || text->back() != ']' ||
+                                   text->find_first_of(";{}") != std::string::npos))
+                throw ModelError("A multiplicity is written in brackets, e.g. [0..1]");
+        }
+        if (it->SourceMultiplicity == source && it->TargetMultiplicity == target)
+            return;
+        it->SourceMultiplicity = source;
+        it->TargetMultiplicity = target;
         notify(ModelChange::Type::RelationshipChanged, id);
     }
 

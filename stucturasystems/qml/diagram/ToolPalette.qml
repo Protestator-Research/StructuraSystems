@@ -17,7 +17,7 @@ Pane {
     /** Behavior view: actions and control nodes, or states (stateMachine). */
     property bool behavior: false
     property bool stateMachine: false
-    /** Use case view: use cases, actors, the subject (system boundary). */
+    /** Use case view: use cases, actors, the subject. */
     property bool useCase: false
     /** Sequence view: lifelines, events; messages / "then" are drawn on the canvas. */
     property bool sequence: false
@@ -145,13 +145,13 @@ Pane {
                         color: Theme.accent
                     }
                 }
-                // use case: ellipse; actor: stick figure; subject: boundary with a use case inside
+                // use case: rounded box; actor: stick figure; subject: box with a small use case
                 Rectangle {
                     visible: tile.symbol === 17 || tile.symbol === 19
                     anchors.centerIn: parent
                     width: tile.symbol === 17 ? 30 : 16
                     height: tile.symbol === 17 ? 18 : 9
-                    radius: height / 2
+                    radius: 4
                     color: Theme.card
                     border.width: 1.2
                     border.color: tile.symbol === 17 ? Theme.textPrimary : Theme.accent
@@ -333,6 +333,14 @@ Pane {
                       ? qsTr("An allocation definition with its two ends; draw «allocate» arrows between usages")
                       : tile.tool === DiagramTypes.ToolMetadata
                       ? qsTr("Drop onto an element: metadata about it (@Name); onto the canvas: metadata about listed elements")
+                      : tile.tool === DiagramTypes.ToolComment
+                      ? qsTr("A comment: drop onto an element (it is about it) or the canvas; arrows from it add \"about\" elements")
+                      : tile.tool === DiagramTypes.ToolDocumentation
+                      ? qsTr("The documentation of the element it is dropped onto (doc), as a note with a line")
+                      : tile.tool === DiagramTypes.ToolDocumentationInside
+                      ? qsTr("Drop onto a part or definition: its documentation (doc) shown inside the box, no line needed")
+                      : tile.tool === DiagramTypes.ToolRepresentation
+                      ? qsTr("A textual representation of the element in another language (rep ... language \"...\")")
                       : tile.tool === DiagramTypes.ToolExpose
                       ? qsTr("Drop onto a view: the elements it shows (expose vehicle::**)")
                       : tile.tool === DiagramTypes.ToolRender
@@ -364,9 +372,9 @@ Pane {
                       : tile.owner.useCase && tile.tool === DiagramTypes.ToolActor
                       ? qsTr("Drop onto a use case: the actor takes part in it. Lines from the actor add it to more use cases")
                       : tile.owner.useCase && tile.tool === DiagramTypes.ToolSubject
-                      ? qsTr("Drop onto a use case: its subject becomes the system boundary")
+                      ? qsTr("Drop onto a use case: its subject (the system it is about); lines to more use cases")
                       : tile.owner.useCase
-                      ? qsTr("Drag onto the canvas (into a boundary: a use case of that system), or click to insert")
+                      ? qsTr("Drag onto the canvas (onto a subject: a use case of that system), or click to insert")
                       : tile.tool === DiagramTypes.ToolSubject
                       ? qsTr("Drop onto a requirement, use case or verification: what it is about (subject)")
                       : tile.tool === DiagramTypes.ToolActor
@@ -867,7 +875,11 @@ Pane {
                         { tool: DiagramTypes.ToolMetadataDefinition, label: qsTr("Metadata def"), symbol: 10, glyph: "#" },
                         { tool: DiagramTypes.ToolMetadata, label: qsTr("Metadata"), symbol: 10, glyph: "@" },
                         { tool: DiagramTypes.ToolImport, label: qsTr("Import"), symbol: 10, glyph: "⇣" },
-                        { tool: DiagramTypes.ToolAlias, label: qsTr("Alias"), symbol: 10, glyph: "≡" }
+                        { tool: DiagramTypes.ToolAlias, label: qsTr("Alias"), symbol: 10, glyph: "≡" },
+                        { tool: DiagramTypes.ToolComment, label: qsTr("Comment"), symbol: 10, glyph: "✎" },
+                        { tool: DiagramTypes.ToolDocumentation, label: qsTr("Doc"), symbol: 10, glyph: "¶" },
+                        { tool: DiagramTypes.ToolDocumentationInside, label: qsTr("Doc (in box)"), symbol: 10, glyph: "▤" },
+                        { tool: DiagramTypes.ToolRepresentation, label: qsTr("Rep"), symbol: 10, glyph: "❝" }
                     ]
 
                     Tile {
@@ -1049,8 +1061,7 @@ Pane {
                 Tile {
                     owner: palette
                     tool: DiagramTypes.ToolDone
-                    visible: !palette.stateMachine
-                    label: qsTr("Done")
+                    label: palette.stateMachine ? qsTr("Final") : qsTr("Done")
                     symbol: 16
                 }
                 // actions that do something specific (written unnamed: "then send s to t;"), control structures
@@ -1077,7 +1088,7 @@ Pane {
                 }
             }
 
-            // Use case view: use cases, actors, the subject (system boundary)
+            // Use case view: use cases, actors, the subject
             Label {
                 visible: palette.useCase
                 text: qsTr("Use cases")
@@ -1220,7 +1231,7 @@ Pane {
                              + "lifeline. Double-click edits.")
                       : palette.useCase
                       ? qsTr("Lines: drag the small handle at the corner of a use case or actor onto another node - "
-                             + "actor to use case, use case to use case («include»), use case onto a boundary. "
+                             + "actor to use case, use case to use case («include»), use case to a subject. "
                              + "Double-click edits.")
                       : palette.behavior
                       ? qsTr("Arrows: drag the small handle at the corner of a node onto another node. "

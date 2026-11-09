@@ -80,13 +80,16 @@ TEST_CASE("Rules: ownership") {
     const auto package = model.addElement(ElementKind::Package, "P");
     const auto def = model.addElement(ElementKind::PartDefinition, "Car", package);
     CHECK(RelationshipRules::canOwn(model, RootId, ElementKind::PartUsage));
-    CHECK(!RelationshipRules::canOwn(model, RootId, ElementKind::Attribute));
+    CHECK(RelationshipRules::canOwn(model, RootId, ElementKind::Attribute)); // "attribute mass : Mass;" (table 5)
+    CHECK(!RelationshipRules::canOwn(model, RootId, ElementKind::EnumerationLiteral));
     CHECK(RelationshipRules::canOwn(model, def, ElementKind::Attribute));
     CHECK(RelationshipRules::canOwn(model, def, ElementKind::ActionPerformance));
     CHECK(!RelationshipRules::canOwn(model, def, ElementKind::Package));
-    CHECK(!RelationshipRules::canOwn(model, package, ElementKind::Attribute));
+    CHECK(RelationshipRules::canOwn(model, package, ElementKind::Attribute));
+    CHECK(RelationshipRules::canOwn(model, package, ElementKind::PortUsage));
+    CHECK(!RelationshipRules::canOwn(model, package, ElementKind::EnumerationLiteral));
     CHECK(!RelationshipRules::canReparent(model, package, def)); // package below its own child
-    const auto reason = RelationshipRules::canOwn(model, package, ElementKind::Attribute).Reason;
+    const auto reason = RelationshipRules::canOwn(model, package, ElementKind::EnumerationLiteral).Reason;
     CHECK(!reason.empty());
 }
 

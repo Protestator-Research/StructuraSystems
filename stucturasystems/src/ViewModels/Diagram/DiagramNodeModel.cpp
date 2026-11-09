@@ -48,6 +48,12 @@ namespace StructuraSystems::Client {
                 return node.OutPins;
             case DashedRole:
                 return node.Dashed;
+            case SubtitleRole:
+                return node.Subtitle;
+            case FolderRole:
+                return node.Folder;
+            case DerivedRole:
+                return node.Derived;
             case ContainerRole:
                 return node.Container;
             default:
@@ -71,7 +77,10 @@ namespace StructuraSystems::Client {
             {InPinsRole, "inPins"},
             {OutPinsRole, "outPins"},
             {DashedRole, "dashed"},
-            {ContainerRole, "container"}
+            {ContainerRole, "container"},
+            {SubtitleRole, "subtitle"},
+            {FolderRole, "folder"},
+            {DerivedRole, "derived"}
         };
     }
 
@@ -122,9 +131,12 @@ namespace StructuraSystems::Client {
         existing.OutPins = node.OutPins;
         existing.Dashed = node.Dashed;
         existing.Container = node.Container;
+        existing.Subtitle = node.Subtitle;
+        existing.Folder = node.Folder;
+        existing.Derived = node.Derived;
         const auto changed = index(row);
         emit dataChanged(changed, changed, {NodeKindRole, KeywordRole, TitleRole, CompartmentsRole, DepthRole,
-                                            InPinsRole, OutPinsRole, DashedRole, ContainerRole});
+                                            InPinsRole, OutPinsRole, DashedRole, ContainerRole, SubtitleRole, FolderRole, DerivedRole});
     }
 
     void DiagramNodeModel::setRect(int row, const QRectF &rect) {

@@ -15,6 +15,9 @@ Menu {
     /** DiagramTypes.EdgeKind values */
     property var kinds: []
 
+    /** An annotation onto an element with features: which of them the note is about is asked next. */
+    signal annotationChosen(string source, string target)
+
     MenuItem {
         text: qsTr("Relationship")
         enabled: false
@@ -27,7 +30,13 @@ Menu {
         MenuItem {
             required property var modelData
             text: menu.controller ? menu.controller.edgeKindName(modelData) : ""
-            onTriggered: menu.controller.createEdge(modelData, menu.source, menu.target)
+            onTriggered: {
+                if (modelData === DiagramTypes.Annotation
+                        && menu.controller.annotationTargets(menu.source, menu.target).length > 1)
+                    menu.annotationChosen(menu.source, menu.target)
+                else
+                    menu.controller.createEdge(modelData, menu.source, menu.target)
+            }
         }
     }
 }

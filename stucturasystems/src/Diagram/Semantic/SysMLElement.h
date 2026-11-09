@@ -143,8 +143,38 @@ namespace StructuraSystems::Diagram {
         /// dependency [name] from a to b;  between any two named elements
         Dependency,
         /// frame target;  inside the source requirement (a viewpoint, ...); target: a concern (requirement usage)
-        Frame
+        Frame,
+        /// exhibit target;  inside the source part (definition); target: a state usage declared elsewhere
+        Exhibit,
+        /// assert target;  inside the source; target: a constraint (or requirement) usage declared elsewhere
+        Assert,
+        /// assume target;  inside the source requirement; target: a constraint or requirement usage
+        Assume,
+        /// require target;  inside the source requirement; target: a constraint or requirement usage
+        Require
     };
+
+    /// Relationships written as "keyword target;" in the body of their source (verify in its objective): the
+    /// source needs no name.
+    [[nodiscard]] inline bool isWrittenInSource(RelationshipKind kind) {
+        return kind == RelationshipKind::Verify || kind == RelationshipKind::Include || kind == RelationshipKind::Frame ||
+               kind == RelationshipKind::Exhibit || kind == RelationshipKind::Assert || kind == RelationshipKind::Assume ||
+               kind == RelationshipKind::Require;
+    }
+
+    /// The keyword of a relationship written in its source: "frame", "exhibit", "assert", "assume", "require", ...
+    [[nodiscard]] inline const char *sourceKeyword(RelationshipKind kind) {
+        switch (kind) {
+            case RelationshipKind::Verify: return "verify";
+            case RelationshipKind::Include: return "include";
+            case RelationshipKind::Frame: return "frame";
+            case RelationshipKind::Exhibit: return "exhibit";
+            case RelationshipKind::Assert: return "assert";
+            case RelationshipKind::Assume: return "assume";
+            case RelationshipKind::Require: return "require";
+            default: return "";
+        }
+    }
 
     /// import, alias, expose, render, filter: a keyword and a target written as it is (no element of their own).
     [[nodiscard]] inline bool isTargetKind(ElementKind kind) {
@@ -277,9 +307,14 @@ namespace StructuraSystems::Diagram {
     struct Multiplicity {
         std::size_t Lower = 1;
         std::optional<std::size_t> Upper = 1; ///< std::nullopt means '*'
+        /// Bounds written as expressions ("m", "1..n", "0..size(x)"): the text between the brackets, verbatim;
+        /// Lower / Upper are then not used. A plain range written differently from its usual form ("0..*" for
+        /// "*") keeps its spelling here too, with Lower / Upper set.
+        std::string Text{};
 
         static Multiplicity exactly(std::size_t count);
         static Multiplicity range(std::size_t lower, std::optional<std::size_t> upper);
+        static Multiplicity expression(std::string text);
 
         [[nodiscard]] std::string toString() const;
 
@@ -351,6 +386,10 @@ namespace StructuraSystems::Diagram {
         [[nodiscard]] const std::vector<std::string> &externalSpecializations() const { return ExternalSpecializations; }
         /// Word written for the specializations: empty = ":>", or "subsets" (a usage) / "specializes" (a definition).
         [[nodiscard]] const std::string &specializationKeyword() const { return SpecializationKeyword; }
+        /// Reference subsetting of a usage as written ("action3" in "perform action a1 references action3"), empty = none,
+        /// and the word written for it: "references" or "::>".
+        [[nodiscard]] const std::string &referencedFeature() const { return ReferencedFeature; }
+        [[nodiscard]] const std::string &referencesKeyword() const { return ReferencesKeyword; }
         /// Short name (id) as written between < >, e.g. "'R1'" or "R1" (empty = none).
         [[nodiscard]] const std::string &shortName() const { return ShortName; }
         /// Written after the multiplicity: "ordered", "nonunique" or "ordered nonunique" (empty = none).
@@ -406,6 +445,8 @@ namespace StructuraSystems::Diagram {
         std::string Keyword;
         std::vector<std::string> ExternalSpecializations;
         std::string SpecializationKeyword;
+        std::string ReferencedFeature;
+        std::string ReferencesKeyword;
         std::string Expression;
         std::optional<std::string> DeclaredKeyword;
         std::string ShortName;
@@ -455,7 +496,24 @@ namespace StructuraSystems::Diagram {
         std::string TargetFeature;
         /// Flow only: "succession flow ..." - the transfer happens after the source ends, before the target starts.
         bool SuccessionFlow = false;
+        /// n-ary: further ends. Connection: "connect (a, b, c)" (Source, Target, then ExtraTargets);
+        /// dependency: "dependency a, b to c, d" (clients Source + ExtraSources, suppliers Target + ExtraTargets).
+        std::vector<ElementId> ExtraSources{};
+        std::vector<ElementId> ExtraTargets{};
+        /// Connection: written as "connect (a, b)" (the n-ary form) even with two ends.
+        bool Nary = false;
+        /// Connection / interface: multiplicities of the ends as written, "[0..1]" in "connect [0..1] a to [1] b".
+        std::string SourceMultiplicity{};
+        std::string TargetMultiplicity{};
     };
+
+    /// All ends of a relationship: Source, Target and the further ends of an n-ary one.
+    [[nodiscard]] inline std::vector<ElementId> endsOf(const Relationship &relationship) {
+        std::vector<ElementId> ends{relationship.Source, relationship.Target};
+        ends.insert(ends.end(), relationship.ExtraSources.begin(), relationship.ExtraSources.end());
+        ends.insert(ends.end(), relationship.ExtraTargets.begin(), relationship.ExtraTargets.end());
+        return ends;
+    }
 
     [[nodiscard]] std::string toString(ElementKind kind);
     /// Keyword of the textual notation, e.g. "part def", "port", "enum" (empty for Textual).

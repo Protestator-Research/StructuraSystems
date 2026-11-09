@@ -91,7 +91,12 @@ namespace StructuraSystems::Client::DiagramTypes {
         ToolRender,                ///< "render asTreeDiagram;" onto a view (definition)
         ToolFilter,                ///< "filter @Metadata;" onto a package or view
         ToolImport,                ///< "private import Lib::*;" in a package / onto the canvas
-        ToolAlias                  ///< "alias Name for Element;"
+        ToolAlias,                 ///< "alias Name for Element;"
+        // annotations (table 2)
+        ToolComment,               ///< "comment comment1 /* ... */" onto the canvas, a frame or an element (about it)
+        ToolDocumentation,         ///< "doc /* ... */" of the element it is dropped onto
+        ToolRepresentation,        ///< "rep rep1 language "text" /* ... */" of the element it is dropped onto
+        ToolDocumentationInside    ///< "doc /* ... */" of the part / definition it is dropped onto, shown in its box
     };
     Q_ENUM_NS(Tool)
 
@@ -120,7 +125,17 @@ namespace StructuraSystems::Client::DiagramTypes {
         DefinedBy,  ///< usage -> its definition (": Type"): hollow triangle with ':'
         Redefinition, ///< feature -> the inherited feature it redefines (":>>"): hollow triangle with a bar
         Performs,   ///< part -> the action it performs ("perform a;", "::>"): open arrow with '::'
-        Aggregation ///< "ref part" / "ref item" of its owner: a hollow diamond at the owner
+        Aggregation, ///< "ref part" / "ref item" of its owner: a hollow diamond at the owner
+        VariantMembership, ///< "variant part a;" of a variation: a circle with a cross at the variation
+        Annotation, ///< a comment, doc, rep or metadata note and the element it is about: a dashed line
+        Exhibit,    ///< «exhibit»: part -> the state it exhibits ("exhibit s;"), solid line, open head
+        Assert,     ///< «assert»: element -> the constraint it asserts ("assert c;")
+        Assume,     ///< «assume»: requirement -> an assumed constraint ("assume c;")
+        Require,    ///< «require»: requirement -> a required constraint / requirement ("require c;")
+        Expose,     ///< «expose» (*, **): view -> exposed element, dashed, open head
+        ReferenceSubsetting, ///< "references", "::>": a hollow triangle with four dots
+        Membership, ///< a package and a package it owns, drawn beside it: a circle with a cross at the owner (table 3)
+        AliasMembership ///< a package and the element an alias of it names: a circle at the package, the alias name (table 3)
     };
     Q_ENUM_NS(EdgeKind)
 
@@ -170,7 +185,9 @@ namespace StructuraSystems::Client::DiagramTypes {
         LifelineNode,   ///< sequence view: a part (or item, occurrence) with its header and dashed line
         LifelineGroupNode, ///< sequence view: header of a part whose parts are the lifelines below it
         EventNode,      ///< sequence view: an event occurrence on its lifeline (or where a message starts / ends)
-        LibraryNode     ///< an imported package that is not in the diagram (ISQ, ScalarValues): a dashed package
+        LibraryNode,    ///< an imported package that is not in the diagram (ISQ, ScalarValues): a dashed package
+        TerminateNode,  ///< behavior view: "terminate;" (a circle with a cross)
+        NoteNode        ///< comment, doc, rep, metadata: a note with a folded corner, attached with a dashed line
     };
     Q_ENUM_NS(NodeKind)
 }

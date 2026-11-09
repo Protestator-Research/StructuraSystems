@@ -7,6 +7,8 @@
 #include "EdgeRouting.h"
 #include "DiagramGeometry.h"
 
+#include <QRegularExpression>
+#include <QJsonArray>
 #include <QMetaObject>
 
 #include <Diagram/Conversion/SysMLCodeGenerator.h>
@@ -188,6 +190,14 @@ namespace StructuraSystems::Client {
                     return RelationshipKind::Dependency;
                 case DiagramTypes::Frame:
                     return RelationshipKind::Frame;
+                case DiagramTypes::Exhibit:
+                    return RelationshipKind::Exhibit;
+                case DiagramTypes::Assert:
+                    return RelationshipKind::Assert;
+                case DiagramTypes::Assume:
+                    return RelationshipKind::Assume;
+                case DiagramTypes::Require:
+                    return RelationshipKind::Require;
                 default:
                     return std::nullopt;
             }
@@ -223,6 +233,14 @@ namespace StructuraSystems::Client {
                     return DiagramTypes::Dependency;
                 case RelationshipKind::Frame:
                     return DiagramTypes::Frame;
+                case RelationshipKind::Exhibit:
+                    return DiagramTypes::Exhibit;
+                case RelationshipKind::Assert:
+                    return DiagramTypes::Assert;
+                case RelationshipKind::Assume:
+                    return DiagramTypes::Assume;
+                case RelationshipKind::Require:
+                    return DiagramTypes::Require;
             }
             return DiagramTypes::Connection;
         }
@@ -373,19 +391,23 @@ namespace StructuraSystems::Client {
             return kindText(element.kind());
         }
 
-        /// Prefixes shown as keyword of a node («variation», «variant», «individual»), not in its title.
+        /// Prefixes shown in the keyword of a node («variation part def», «abstract part def», «individual part»),
+        /// not in its title.
         bool isStereotypeWord(const std::string &prefix) {
-            return prefix == "variation" || prefix == "variant" || prefix == "individual";
+            return prefix == "variation" || prefix == "variant" || prefix == "individual" || prefix == "abstract";
         }
 
-        /// «variation» «individual» ... in front of the keyword of a node.
-        QString stereotypes(const Diagram::SysMLElement &element) {
-            QString text;
+        /// The keyword of a node with its prefixes, as in the name compartments of the graphical notation:
+        /// «part def» -> «abstract part def», «variation part def», «individual occurrence def», «variant part».
+        QString withStereotypes(const Diagram::SysMLElement &element, const QString &keyword) {
+            QString words;
             for (const auto &prefix: element.prefixes()) {
                 if (isStereotypeWord(prefix))
-                    text += QStringLiteral("«") + QString::fromStdString(prefix) + QStringLiteral("» ");
+                    words += QString::fromStdString(prefix) + QLatin1Char(' ');
             }
-            return text;
+            if (words.isEmpty() || !keyword.startsWith(QStringLiteral("«")))
+                return keyword;
+            return QStringLiteral("«") + words + keyword.mid(1);
         }
 
         /// «measurable» for metadata, "/" for derived (UML notation), other prefixes as words (the stereotype words
@@ -408,6 +430,25 @@ namespace StructuraSystems::Client {
             const QString shortName = element.shortName().empty()
                                       ? QString() : QStringLiteral("<") + QString::fromStdString(element.shortName()) + QStringLiteral("> ");
             return metadata + words + (derived ? QStringLiteral("/") : QString()) + shortName + name;
+        }
+
+        /// A text broken into lines of at most width characters at word boundaries (its own line breaks kept).
+        QStringList wrapLines(const QString &text, int width) {
+            QStringList lines;
+            for (const QString &paragraph: text.split(QLatin1Char('\n'))) {
+                QString line;
+                for (const QString &word: paragraph.split(QLatin1Char(' '), Qt::SkipEmptyParts)) {
+                    if (!line.isEmpty() && line.size() + 1 + word.size() > width) {
+                        lines.append(line);
+                        line.clear();
+                    }
+                    line += (line.isEmpty() ? QString() : QStringLiteral(" ")) + word;
+                }
+                lines.append(line);
+            }
+            while (!lines.isEmpty() && lines.last().isEmpty())
+                lines.removeLast();
+            return lines;
         }
 
         /// Lines of the doc text of an element for a compartment (long lines wrapped at word boundaries).
@@ -442,12 +483,24 @@ namespace StructuraSystems::Client {
             return text;
         }
 
+        /// A comment, doc or rep that is drawn as a note (table 2); a "//" note is no element and stays in the code.
+        bool isNoteStatement(const Diagram::SysMLElement &element) {
+            if (element.kind() != ElementKind::Textual)
+                return false;
+            const auto &keyword = element.keyword();
+            if (keyword != "comment" && keyword != "doc" && keyword != "rep")
+                return false;
+            return !SysMLTextImporter::describeAnnotation(element.text()).Keyword.empty();
+        }
+
         /// Statements kept as text that are not shown in the diagram (they stay in the code).
         bool isHiddenStatement(const Diagram::SysMLElement &element) {
             if (element.kind() != ElementKind::Textual)
                 return false;
             const auto &keyword = element.keyword();
-            return keyword == "comment" || keyword == "doc" || keyword == "import" || keyword == "alias";
+            if (keyword == "comment" || keyword == "doc" || keyword == "rep")
+                return !isNoteStatement(element);
+            return keyword == "import" || keyword == "alias";
         }
 
         QVariantMap entry(ElementId id, const QString &text, const QString &tooltip = QString()) {
@@ -557,10 +610,108 @@ namespace StructuraSystems::Client {
             return resolveReference(model, model.element(import).owner(), target);
         }
 
-        /// "«import» *", "«import» **", "«import»" (and a filter in brackets).
+        /// A group of notations: what the specification allows to draw in more than one way.
+        struct NotationGroupInfo {
+            const char *Id;
+            const char *Label;
+            std::vector<std::pair<const char *, const char *>> Options; ///< value, label
+        };
+
+        const std::vector<NotationGroupInfo> &notationTable() {
+            static const std::vector<NotationGroupInfo> table = {
+                    // table 3: the members of a package as nodes / "Package with members compartment"
+                    {"members", QT_TRANSLATE_NOOP("DiagramController", "Members of a package"),
+                     {{"nested", QT_TRANSLATE_NOOP("DiagramController", "Nodes in the package")},
+                      {"compartment", QT_TRANSLATE_NOOP("DiagramController", "Text (members)")}}},
+                    // table 4: an element in its package / alone with its qualified name (Package1::Package2::PartDef3)
+                    {"qualified", QT_TRANSLATE_NOOP("DiagramController", "Element in a package"),
+                     {{"nested", QT_TRANSLATE_NOOP("DiagramController", "Inside its package")},
+                      {"qualified", QT_TRANSLATE_NOOP("DiagramController", "Alone, qualified name")}}},
+                    // table 4: a specialization as line / ":> PartDef0" in the name compartment
+                    {"specialization", QT_TRANSLATE_NOOP("DiagramController", "Specialization"),
+                     {{"line", QT_TRANSLATE_NOOP("DiagramController", "Line (hollow triangle)")},
+                      {"name", QT_TRANSLATE_NOOP("DiagramController", ":> in the name")}}},
+                    // table 3: nested / "Membership (owned member)" with ⊕ / packages compartment
+                    {"packages", QT_TRANSLATE_NOOP("DiagramController", "Package in package"),
+                     {{"nested", QT_TRANSLATE_NOOP("DiagramController", "In the package")},
+                      {"line", QT_TRANSLATE_NOOP("DiagramController", "Line with \u2295")},
+                      {"compartment", QT_TRANSLATE_NOOP("DiagramController", "Text (packages)")}}},
+                    // table 3: nested notation / «import» arrow ("Import (recursive)") / imports compartment
+                    {"imports", QT_TRANSLATE_NOOP("DiagramController", "Imports"),
+                     {{"nested", QT_TRANSLATE_NOOP("DiagramController", "In the package (dashed)")},
+                      {"line", QT_TRANSLATE_NOOP("DiagramController", "\u00abimport\u00bb arrow")},
+                      {"compartment", QT_TRANSLATE_NOOP("DiagramController", "Text (imports)")}}},
+                    // table 3: alias member symbol / "Membership (unowned member with alias name)" / table 4: name
+                    {"aliases", QT_TRANSLATE_NOOP("DiagramController", "Aliases"),
+                     {{"nested", QT_TRANSLATE_NOOP("DiagramController", "Symbol in the package")},
+                      {"line", QT_TRANSLATE_NOOP("DiagramController", "Line with \u25cb and name")},
+                      {"name", QT_TRANSLATE_NOOP("DiagramController", "\u00abalias\u00bb at the element")}}},
+                    // table 9: composition lines / "Part with graphical compartment" / parts compartment
+                    {"features", QT_TRANSLATE_NOOP("DiagramController", "Parts of a part"),
+                     {{"line", QT_TRANSLATE_NOOP("DiagramController", "Nodes with \u25c6 line")},
+                      {"nested", QT_TRANSLATE_NOOP("DiagramController", "Inside the part")},
+                      {"compartment", QT_TRANSLATE_NOOP("DiagramController", "Text (parts)")}}},
+                    // table 4: inherited parts with ^ in the compartment / "Name Compartment - Inherited Usage" as node
+                    {"inherited", QT_TRANSLATE_NOOP("DiagramController", "Inherited parts"),
+                     {{"compartment", QT_TRANSLATE_NOOP("DiagramController", "Text (^ in parts)")},
+                      {"nodes", QT_TRANSLATE_NOOP("DiagramController", "Nodes (^part1, no text)")}}},
+                    // table 9: "Part with Ports" / ports compartment
+                    {"ports", QT_TRANSLATE_NOOP("DiagramController", "Ports"),
+                     {{"border", QT_TRANSLATE_NOOP("DiagramController", "On the border")},
+                      {"compartment", QT_TRANSLATE_NOOP("DiagramController", "Text (ports)")}}},
+                    // table 3 / 4: the type in the name / "Part defined by Part" line
+                    {"typing", QT_TRANSLATE_NOOP("DiagramController", "Type"),
+                     {{"name", QT_TRANSLATE_NOOP("DiagramController", "In the name")},
+                      {"line", QT_TRANSLATE_NOOP("DiagramController", "Line (defined by)")}}},
+                    // table 2: a note with a line / documentation compartment
+                    {"docs", QT_TRANSLATE_NOOP("DiagramController", "Doc"),
+                     {{"note", QT_TRANSLATE_NOOP("DiagramController", "Note with line")},
+                      {"compartment", QT_TRANSLATE_NOOP("DiagramController", "Compartment doc")}}},
+            };
+            return table;
+        }
+
+        const NotationGroupInfo *notationGroup(const QString &group) {
+            for (const auto &info: notationTable()) {
+                if (group == QLatin1String(info.Id))
+                    return &info;
+            }
+            return nullptr;
+        }
+
+        bool isNotationValue(const NotationGroupInfo &info, const QString &value) {
+            return std::any_of(info.Options.begin(), info.Options.end(),
+                               [&](const auto &option) { return value == QLatin1String(option.first); });
+        }
+
+        /// "import Package2::*" (the members of a package, no filter): drawn nested, as a dashed package symbol in the
+        /// importing package (table 3 "Package with imported package (nested notation)"). With 'recursive' also
+        /// "import Package2::**" (else that is an «import» ** arrow, table 3 "Import (recursive)").
+        bool isNestedPackageImport(const Diagram::SemanticModel &model, ElementId import, bool recursive) {
+            const auto &element = model.element(import);
+            const std::string &target = element.target();
+            const auto endsWith = [&](const char *ending) {
+                const std::string text(ending);
+                return target.size() > text.size() && target.compare(target.size() - text.size(), text.size(), text) == 0;
+            };
+            const bool members = endsWith("::*") && !endsWith("::**");
+            if (element.owner() == RootId || element.declaredKeyword() == "import all" || target.find('[') != std::string::npos ||
+                !(members || (recursive && endsWith("::**"))))
+                return false;
+            const auto imported = importedElement(model, import);
+            return !imported || model.element(*imported).kind() == ElementKind::Package;
+        }
+
+        /// "«import» *", "«private import» **", "«import»" (and a filter in brackets), as in the graphical BNF:
+        /// '«' VisibilityIndicator? 'import' '»' ('*' | '**')?
         QString importLabel(const Diagram::SysMLElement &import) {
             const QString target = QString::fromStdString(import.target());
-            QString label = QStringLiteral("«import»");
+            QString visibility;
+            for (const auto &prefix: import.prefixes()) {
+                if (prefix == "private" || prefix == "public" || prefix == "protected")
+                    visibility = QString::fromStdString(prefix) + QLatin1Char(' ');
+            }
+            QString label = QStringLiteral("«") + visibility + QStringLiteral("import»");
             const QString withoutFilter = target.section(QLatin1Char('['), 0, 0);
             if (withoutFilter.endsWith(QLatin1String("::**")))
                 label += QStringLiteral(" **");
@@ -576,6 +727,10 @@ namespace StructuraSystems::Client {
         /// The definition kinds that can type a usage of this kind (for "defined by" arrows).
         bool typesUsage(ElementKind definition, ElementKind usage) {
             switch (usage) {
+                case ElementKind::Attribute:
+                    return definition == ElementKind::AttributeDefinition || definition == ElementKind::EnumerationDefinition;
+                case ElementKind::PortUsage:
+                    return definition == ElementKind::PortDefinition;
                 case ElementKind::PartUsage:
                     return definition == ElementKind::PartDefinition || definition == ElementKind::ItemDefinition;
                 case ElementKind::ItemUsage:
@@ -656,8 +811,25 @@ namespace StructuraSystems::Client {
             return owner == ElementKind::ActionUsage || owner == ElementKind::ActionDefinition;
         }
 
+        bool isNodeElement(const Diagram::SemanticModel &model, ElementId id);
+
+        /// A note of its own: a comment, doc or rep (the doc of a requirement or case is its compartment "doc").
+        bool isNoteElement(const Diagram::SemanticModel &model, ElementId id) {
+            const auto &element = model.element(id);
+            if (!isNoteStatement(element))
+                return false;
+            if (element.keyword() == "doc" && element.owner() != RootId) {
+                const ElementKind owner = model.element(element.owner()).kind();
+                if (Diagram::isRequirementKind(owner) || Diagram::isCaseKind(owner))
+                    return false;
+            }
+            return true;
+        }
+
         bool isNodeElement(const Diagram::SemanticModel &model, ElementId id) {
             const auto &element = model.element(id);
+            if (isNoteElement(model, id))
+                return true;
             // the ends of an allocation / connection / flow definition are entries of its compartment "ends"
             if (element.kind() == ElementKind::PartUsage && element.owner() != RootId &&
                 (model.element(element.owner()).kind() == ElementKind::AllocationDefinition ||
@@ -669,8 +841,9 @@ namespace StructuraSystems::Client {
                 const ElementKind owner = element.owner() == RootId ? ElementKind::Package : model.element(element.owner()).kind();
                 return owner == ElementKind::Package || composes(owner);
             }
-            // an item on package level: a node («item» marketSurvey); in parts an entry of "items"
-            if (element.kind() == ElementKind::ItemUsage &&
+            // an item, attribute or port on package level: a node («item» marketSurvey); in parts an entry
+            if ((element.kind() == ElementKind::ItemUsage || element.kind() == ElementKind::Attribute ||
+                 element.kind() == ElementKind::PortUsage) &&
                 (element.owner() == RootId || model.element(element.owner()).kind() == ElementKind::Package))
                 return true;
             if ((element.kind() == ElementKind::ActionUsage || element.kind() == ElementKind::StateUsage) &&
@@ -726,6 +899,11 @@ namespace StructuraSystems::Client {
                 text += QStringLiteral(" : ") + QString::fromStdString(element.typeName());
             if (element.multiplicity().has_value())
                 text += QString::fromStdString(element.multiplicity()->toString());
+            if (!element.multiplicityQualifiers().empty()) // "[1..*] ordered nonunique"
+                text += QLatin1Char(' ') + QString::fromStdString(element.multiplicityQualifiers());
+            if (!element.referencedFeature().empty()) // "references action3" (UsageDeclaration)
+                text += QLatin1Char(' ') + QString::fromStdString(element.referencesKeyword()) + QLatin1Char(' ') +
+                        QString::fromStdString(element.referencedFeature());
             if (!redefinitions.isEmpty())
                 text += QLatin1Char(' ') + redefinitions;
             return text;
@@ -806,7 +984,9 @@ namespace StructuraSystems::Client {
             if (!relationship.Definition.empty())
                 label += QStringLiteral(" : ") + QString::fromStdString(relationship.Definition);
             if (!relationship.TypeName.empty())
-                label += QStringLiteral(" : ") + QString::fromStdString(relationship.TypeName);
+                // flow-label: UsageDeclaration ('of' FlowPayloadFeatureMember)?
+                label += (relationship.Kind == RelationshipKind::Flow ? QStringLiteral(" of ") : QStringLiteral(" : ")) +
+                         QString::fromStdString(relationship.TypeName);
             label = label.trimmed();
             if (relationship.Kind == RelationshipKind::Binding)
                 label = QStringLiteral("=");
@@ -818,6 +998,9 @@ namespace StructuraSystems::Client {
                 label = QStringLiteral("«include»");
             if (relationship.Kind == RelationshipKind::Frame)
                 label = QStringLiteral("«frame»");
+            if (relationship.Kind == RelationshipKind::Exhibit || relationship.Kind == RelationshipKind::Assert ||
+                relationship.Kind == RelationshipKind::Assume || relationship.Kind == RelationshipKind::Require)
+                label = QStringLiteral("«") + QString::fromLatin1(Diagram::sourceKeyword(relationship.Kind)) + QStringLiteral("»");
             if (relationship.Kind == RelationshipKind::Allocation)
                 label = (QStringLiteral("«allocate» ") + label).trimmed();
             if (relationship.Kind == RelationshipKind::Message) {
@@ -825,8 +1008,6 @@ namespace StructuraSystems::Client {
                 if (!relationship.TypeName.empty())
                     label += (label.isEmpty() ? QString() : QStringLiteral(" ")) + QStringLiteral("of ") +
                              QString::fromStdString(relationship.TypeName);
-                if (relationship.Sequenced)
-                    label = QStringLiteral("then ") + label;
             }
             if (relationship.Kind == RelationshipKind::Succession || relationship.Kind == RelationshipKind::Transition) {
                 // UML/SysML notation: trigger [guard] / effect
@@ -954,6 +1135,27 @@ namespace StructuraSystems::Client {
             return result;
         }
 
+        /// Direction of a port for the symbol in its square (graphical BNF: pdh / pdv): "in", "out", "inout" or empty,
+        /// from the directed features of the port and of its definition (reversed for a conjugated port "~P").
+        QString portDirection(const Diagram::SemanticModel &model, ElementId port) {
+            bool in = false;
+            bool out = false;
+            const auto collect = [&](ElementId owner) {
+                for (const ElementId child: model.children(owner)) {
+                    const std::string direction = directionOf(model.element(child));
+                    in = in || direction == "in" || direction == "inout";
+                    out = out || direction == "out" || direction == "inout";
+                }
+            };
+            collect(port);
+            for (const ElementId general: generalsOf(model, port))
+                collect(general);
+            const std::string &type = model.element(port).typeName();
+            if (!type.empty() && type.front() == '~')
+                std::swap(in, out);
+            return in && out ? QStringLiteral("inout") : in ? QStringLiteral("in") : out ? QStringLiteral("out") : QString();
+        }
+
         QString keywordOf(const Diagram::SysMLElement &element) {
             std::string keyword = Diagram::defaultKeyword(element.kind());
             if (element.declaredKeyword().has_value() && !element.declaredKeyword()->empty())
@@ -997,6 +1199,671 @@ namespace StructuraSystems::Client {
         if (enabled)
             emit statusMessage(tr("Drag from one element to another to connect them. Esc leaves the arrow mode."));
         emit arrowModeChanged();
+    }
+
+    void DiagramController::setViewId(const QString &id) {
+        std::optional<ElementId> value = id.isEmpty() ? std::nullopt : toId(id);
+        if (value && Model.element(*value).kind() != ElementKind::ViewUsage)
+            value.reset();
+        if (value == ViewElement)
+            return;
+        ViewElement = value;
+        AutoLayout = true;
+        emit viewChanged();
+        syncNow();
+        layoutAll();
+    }
+
+    QString DiagramController::viewTitle() const {
+        if (!ViewElement || !Model.contains(*ViewElement))
+            return {};
+        const auto &view = Model.element(*ViewElement);
+        QString title = QStringLiteral("«view» ") + QString::fromStdString(view.name());
+        if (!view.typeName().empty())
+            title += QStringLiteral(" : ") + QString::fromStdString(view.typeName());
+        return title;
+    }
+
+    QStringList DiagramController::viewInfo() const {
+        QStringList lines;
+        if (!ViewElement || !Model.contains(*ViewElement))
+            return lines;
+        for (const ElementId child: Model.children(*ViewElement)) {
+            const auto &member = Model.element(child);
+            if (member.kind() == ElementKind::Expose || member.kind() == ElementKind::Filter ||
+                member.kind() == ElementKind::Render)
+                lines.append(QString::fromStdString(Diagram::defaultKeyword(member.kind())) + QLatin1Char(' ') +
+                             QString::fromStdString(member.target()));
+        }
+        return lines;
+    }
+
+    std::set<ElementId> DiagramController::exposedElements() const {
+        std::set<ElementId> exposed;
+        if (!ViewElement || !Model.contains(*ViewElement))
+            return exposed;
+        std::function<void(ElementId)> subtree = [&](ElementId id) {
+            exposed.insert(id);
+            for (const ElementId child: Model.children(id))
+                subtree(child);
+        };
+        // "filter @Safety;": only what carries that metadata (directly, "#Safety", or "@Safety;" inside)
+        std::vector<std::string> metadata;
+        for (const ElementId child: Model.children(*ViewElement)) {
+            const auto &member = Model.element(child);
+            if (member.kind() == ElementKind::Filter && !member.target().empty() && member.target().front() == '@')
+                metadata.push_back(member.target().substr(1));
+        }
+        for (const ElementId child: Model.children(*ViewElement)) {
+            const auto &expose = Model.element(child);
+            if (expose.kind() != ElementKind::Expose)
+                continue;
+            const auto element = importedElement(Model, child);
+            if (!element)
+                continue;
+            std::string target = expose.target().substr(0, expose.target().find('['));
+            const bool members = target.size() > 3 && target.compare(target.size() - 3, 3, "::*") == 0;
+            const bool recursive = target.size() > 4 && target.compare(target.size() - 4, 4, "::**") == 0;
+            if (members || recursive) {
+                for (const ElementId member: Model.children(*element))
+                    subtree(member);
+                if (recursive)
+                    exposed.insert(*element);
+            } else {
+                subtree(*element);
+            }
+        }
+        if (metadata.empty())
+            return exposed;
+        const auto carries = [&](ElementId id) {
+            const auto &element = Model.element(id);
+            for (const auto &prefix: element.prefixes()) {
+                for (const auto &name: metadata)
+                    if (prefix == "#" + name)
+                        return true;
+            }
+            for (const ElementId child: Model.children(id)) {
+                const auto &annotation = Model.element(child);
+                if (annotation.kind() != ElementKind::MetadataUsage)
+                    continue;
+                for (const auto &name: metadata) {
+                    const std::string type = annotation.typeName().empty() ? annotation.name() : annotation.typeName();
+                    if (type == name || (type.size() > name.size() &&
+                                         type.compare(type.size() - name.size() - 2, name.size() + 2, "::" + name) == 0))
+                        return true;
+                }
+            }
+            return false;
+        };
+        std::set<ElementId> filtered;
+        for (const ElementId id: exposed) {
+            if (carries(id))
+                filtered.insert(id);
+        }
+        return filtered;
+    }
+
+    // --- grid and browser view -------------------------------------------------------------------------
+
+    namespace {
+        /// Rows and columns of a relationship matrix: what the relationship goes to (rows) and from (columns).
+        struct MatrixAxes {
+            RelationshipKind Kind;
+            bool (*Row)(ElementKind);
+            bool (*Column)(ElementKind);
+            bool ColumnIsSource; ///< the relationship goes from the column element to the row element
+        };
+
+        std::optional<MatrixAxes> matrixAxes(int kind) {
+            switch (kind) {
+                case DiagramTypes::Satisfy: // requirements satisfied by parts / usages
+                    return MatrixAxes{RelationshipKind::Satisfy, [](ElementKind k) { return Diagram::isRequirementKind(k); },
+                                      [](ElementKind k) { return k == ElementKind::PartUsage || k == ElementKind::PartDefinition; },
+                                      true};
+                case DiagramTypes::Verify: // requirements verified by verification cases
+                    return MatrixAxes{RelationshipKind::Verify, [](ElementKind k) { return Diagram::isRequirementKind(k); },
+                                      [](ElementKind k) {
+                                          return k == ElementKind::VerificationUsage || k == ElementKind::VerificationDefinition;
+                                      },
+                                      true};
+                case DiagramTypes::Allocation: // actions allocated to parts
+                    return MatrixAxes{RelationshipKind::Allocation, [](ElementKind k) { return k == ElementKind::PartUsage; },
+                                      [](ElementKind k) {
+                                          return k == ElementKind::ActionUsage || k == ElementKind::ActionPerformance;
+                                      },
+                                      true};
+                case DiagramTypes::Connection: // parts connected with parts
+                    return MatrixAxes{RelationshipKind::Connection, [](ElementKind k) { return k == ElementKind::PartUsage; },
+                                      [](ElementKind k) { return k == ElementKind::PartUsage; }, true};
+                case DiagramTypes::Dependency: // dependencies between definitions and packages
+                    return MatrixAxes{RelationshipKind::Dependency,
+                                      [](ElementKind k) { return k == ElementKind::Package || Diagram::isDefinitionKind(k); },
+                                      [](ElementKind k) { return k == ElementKind::Package || Diagram::isDefinitionKind(k); },
+                                      true};
+                default:
+                    return std::nullopt;
+            }
+        }
+    }
+
+    QVariantList DiagramController::matrixKinds() const {
+        return {QVariantMap{{QStringLiteral("kind"), int(DiagramTypes::Satisfy)}, {QStringLiteral("title"), tr("Satisfy: requirements × parts")}},
+                QVariantMap{{QStringLiteral("kind"), int(DiagramTypes::Verify)}, {QStringLiteral("title"), tr("Verify: requirements × verifications")}},
+                QVariantMap{{QStringLiteral("kind"), int(DiagramTypes::Allocation)}, {QStringLiteral("title"), tr("Allocate: parts × actions")}},
+                QVariantMap{{QStringLiteral("kind"), int(DiagramTypes::Connection)}, {QStringLiteral("title"), tr("Connect: parts × parts")}},
+                QVariantMap{{QStringLiteral("kind"), int(DiagramTypes::Dependency)}, {QStringLiteral("title"), tr("Dependency: definitions × definitions")}}};
+    }
+
+    QVariantMap DiagramController::relationshipMatrix(int kind) const {
+        const auto axes = matrixAxes(kind);
+        if (!axes)
+            return {};
+        std::vector<ElementId> rows;
+        std::vector<ElementId> columns;
+        std::function<void(ElementId)> visit = [&](ElementId owner) {
+            for (const ElementId child: Model.children(owner)) {
+                const auto &element = Model.element(child);
+                if (!element.name().empty() && element.kind() != ElementKind::Textual) {
+                    if (axes->Row(element.kind()))
+                        rows.push_back(child);
+                    if (axes->Column(element.kind()))
+                        columns.push_back(child);
+                }
+                visit(child);
+            }
+        };
+        visit(RootId);
+        const auto title = [&](ElementId id) {
+            return QString::fromStdString(Model.qualifiedName(id));
+        };
+        QVariantList rowList;
+        for (const ElementId id: rows)
+            rowList.append(QVariantMap{{QStringLiteral("id"), QString::number(id)}, {QStringLiteral("title"), title(id)}});
+        QVariantList columnList;
+        for (const ElementId id: columns)
+            columnList.append(QVariantMap{{QStringLiteral("id"), QString::number(id)}, {QStringLiteral("title"), title(id)}});
+        QVariantList cells;
+        for (const ElementId row: rows) {
+            QVariantList line;
+            for (const ElementId column: columns) {
+                const ElementId source = axes->ColumnIsSource ? column : row;
+                const ElementId target = axes->ColumnIsSource ? row : column;
+                const bool related = std::any_of(Model.relationships().begin(), Model.relationships().end(),
+                                                 [&](const Diagram::Relationship &relationship) {
+                    const bool forward = relationship.Source == source && relationship.Target == target;
+                    const bool backward = axes->Kind == RelationshipKind::Connection && relationship.Source == target &&
+                                          relationship.Target == source;
+                    return relationship.Kind == axes->Kind && (forward || backward);
+                });
+                line.append(related);
+            }
+            cells.append(QVariant(line));
+        }
+        return {{QStringLiteral("rows"), rowList}, {QStringLiteral("columns"), columnList}, {QStringLiteral("cells"), cells}};
+    }
+
+    QString DiagramController::toggleMatrixCell(int kind, const QString &row, const QString &column) {
+        const auto axes = matrixAxes(kind);
+        const auto rowId = toId(row);
+        const auto columnId = toId(column);
+        if (!axes || !rowId || !columnId)
+            return tr("Unknown element");
+        const ElementId source = axes->ColumnIsSource ? *columnId : *rowId;
+        const ElementId target = axes->ColumnIsSource ? *rowId : *columnId;
+        for (const auto &relationship: Model.relationships()) {
+            const bool forward = relationship.Source == source && relationship.Target == target;
+            const bool backward = axes->Kind == RelationshipKind::Connection && relationship.Source == target &&
+                                  relationship.Target == source;
+            if (relationship.Kind == axes->Kind && (forward || backward)) {
+                const auto id = relationship.Id;
+                runModelChange([&] { Model.removeRelationship(id); });
+                return {};
+            }
+        }
+        if (const auto rule = RelationshipRules::canRelate(Model, axes->Kind, source, target); !rule)
+            return QString::fromStdString(rule.Reason);
+        return runModelChange([&] { Model.addRelationship(axes->Kind, source, target); }) ? QString()
+                                                                                          : tr("Not possible here");
+    }
+
+    QVariantList DiagramController::browserTree() const {
+        QVariantList result;
+        std::function<void(ElementId, int)> visit = [&](ElementId owner, int depth) {
+            for (const ElementId child: Model.children(owner)) {
+                const auto &element = Model.element(child);
+                QString name = QString::fromStdString(element.name());
+                QString keyword = QString::fromStdString(Diagram::defaultKeyword(element.kind()));
+                if (element.kind() == ElementKind::Textual) {
+                    keyword = QString::fromStdString(element.keyword());
+                    if (name.isEmpty())
+                        name = QString::fromStdString(SysMLTextImporter::oneLine(element.text())).left(60);
+                } else if (element.declaredKeyword().has_value() && !element.declaredKeyword()->empty()) {
+                    keyword = QString::fromStdString(*element.declaredKeyword());
+                }
+                if (!element.typeName().empty())
+                    name += QStringLiteral(" : ") + QString::fromStdString(element.typeName());
+                if (!element.target().empty() && name.isEmpty())
+                    name = QString::fromStdString(element.target());
+                result.append(QVariantMap{{QStringLiteral("id"), QString::number(child)}, {QStringLiteral("depth"), depth},
+                                          {QStringLiteral("keyword"), keyword}, {QStringLiteral("name"), name},
+                                          {QStringLiteral("children"), int(Model.children(child).size())}});
+                visit(child, depth + 1);
+            }
+        };
+        visit(RootId, 0);
+        return result;
+    }
+
+    void DiagramController::setAllCompartments(bool enabled) {
+        if (AllCompartments == enabled)
+            return;
+        AllCompartments = enabled;
+        Measured.clear(); // the nodes change their size
+        emit allCompartmentsChanged();
+        syncNow();
+    }
+
+    // --- notations -------------------------------------------------------------------------------------
+
+    namespace {
+        /// A member listed in the compartment 'members' of a package (graphical BNF: DefinitionElement | UsageElement).
+        /// What the compartment 'members' of a package lists: its definitions and usages, and its packages
+        /// ("package Package2", table 3 "Package with owned package").
+        bool isListedMemberKind(ElementKind kind);
+
+        bool isPackageMemberKind(ElementKind kind) {
+            return kind != ElementKind::Package && kind != ElementKind::Import && kind != ElementKind::Alias &&
+                   kind != ElementKind::Textual && (Diagram::isDefinitionKind(kind) || Diagram::isUsageKind(kind));
+        }
+    }
+
+    namespace {
+        bool isListedMemberKind(ElementKind kind) {
+            return kind == ElementKind::Package || isPackageMemberKind(kind);
+        }
+    }
+
+    bool DiagramController::notationApplies(ElementId id, const QString &group) const {
+        if (Interconnection || !Model.contains(id))
+            return false;
+        const auto &element = Model.element(id);
+        const ElementKind kind = element.kind();
+        const ElementId owner = element.owner();
+        const auto hasChild = [&](auto predicate) {
+            const auto &children = Model.children(id);
+            return std::any_of(children.begin(), children.end(), predicate);
+        };
+        if (group == QLatin1String("packages"))
+            return kind == ElementKind::Package && owner != RootId && Model.element(owner).kind() == ElementKind::Package;
+        if (group == QLatin1String("imports"))
+            return kind == ElementKind::Import && owner != RootId;
+        if (group == QLatin1String("qualified"))
+            // in a package, or a part of a part ("part1::part2::part3 : PartDef3", table 4)
+            return owner != RootId && ((Model.element(owner).kind() == ElementKind::Package && isPackageMemberKind(kind)) ||
+                                       (composes(Model.element(owner).kind()) &&
+                                        (kind == ElementKind::PartUsage || kind == ElementKind::OccurrenceUsage)));
+        if (group == QLatin1String("specialization"))
+            return !element.redefinitions().empty() ||
+                   std::any_of(Model.relationships().begin(), Model.relationships().end(), [&](const Diagram::Relationship &r) {
+                       return r.Kind == RelationshipKind::Specialization && r.Source == id;
+                   });
+        if (group == QLatin1String("members"))
+            return kind == ElementKind::Package &&
+                   hasChild([&](ElementId child) { return isListedMemberKind(Model.element(child).kind()); });
+        if (group == QLatin1String("aliases"))
+            return kind == ElementKind::Alias;
+        if (group == QLatin1String("features"))
+            return composes(kind) && (hasChild([&](ElementId child) {
+                       const ElementKind childKind = Model.element(child).kind();
+                       return childKind == ElementKind::PartUsage || childKind == ElementKind::OccurrenceUsage;
+                   }) || (notationOf(id, QStringLiteral("inherited")) == QLatin1String("nodes") &&
+                          notationApplies(id, QStringLiteral("inherited")))); // ^part1 drawn as node
+        if (group == QLatin1String("inherited")) {
+            if (!composes(kind))
+                return false;
+            const auto inherited = inheritedFeatures(Model, id);
+            return std::any_of(inherited.begin(), inherited.end(), [&](ElementId feature) {
+                return Model.element(feature).kind() == ElementKind::PartUsage && !Model.element(feature).name().empty();
+            });
+        }
+        if (group == QLatin1String("ports"))
+            return composes(kind) && hasChild([&](ElementId child) { return Model.element(child).kind() == ElementKind::PortUsage; });
+        if (group == QLatin1String("typing"))
+            return Diagram::isUsageKind(kind) && !element.typeName().empty() && !portAnchor(Model, id);
+        if (group == QLatin1String("docs"))
+            return hasChild([&](ElementId child) { return isDocInCompartment(child); });
+        return false;
+    }
+
+    QString DiagramController::defaultNotation(ElementId id, const QString &group) const {
+        if (group == QLatin1String("imports"))
+            // table 3: "P::*" nested (also a library the model does not hold), else an «import» arrow
+            return isNestedPackageImport(Model, id, false) || !importedElement(Model, id) ? QStringLiteral("nested")
+                                                                                         : QStringLiteral("line");
+        if (group == QLatin1String("features") || group == QLatin1String("specialization"))
+            return QStringLiteral("line");
+        if (group == QLatin1String("ports"))
+            return QStringLiteral("border");
+        if (group == QLatin1String("inherited"))
+            return QStringLiteral("compartment");
+        if (group == QLatin1String("typing"))
+            return QStringLiteral("name");
+        if (group == QLatin1String("docs"))
+            return AllCompartments ? QStringLiteral("compartment") : QStringLiteral("note");
+        if (group == QLatin1String("aliases")) {
+            // an alias of a definition / usage: in its name compartment (table 4); of a package: its symbol (table 3)
+            const auto &alias = Model.element(id);
+            const auto aliased = resolveReference(Model, alias.owner(), alias.target());
+            return aliased && Model.element(*aliased).kind() != ElementKind::Package ? QStringLiteral("name")
+                                                                                       : QStringLiteral("nested");
+        }
+        return QStringLiteral("nested"); // packages
+    }
+
+    bool DiagramController::notationAllowed(ElementId subject, const QString &group, const QString &value) const {
+        if (group == QLatin1String("aliases")) {
+            // «alias» in the name compartment exists for definitions and usages (table 4), the alias member symbol for
+            // packages (table 3); the line with the alias name for both (table 3, membership)
+            const auto &alias = Model.element(subject);
+            const auto aliased = resolveReference(Model, alias.owner(), alias.target());
+            const bool package = aliased && Model.element(*aliased).kind() == ElementKind::Package;
+            if (value == QLatin1String("name"))
+                return aliased && !package;
+            if (value == QLatin1String("nested"))
+                return !aliased || package;
+        }
+        return true;
+    }
+
+    QString DiagramController::notationOf(ElementId subject, const QString &group) const {
+        if (!notationApplies(subject, group))
+            return defaultNotation(subject, group);
+        QString value = defaultNotation(subject, group);
+        if (const auto mode = NotationModes.find(group);
+            mode != NotationModes.end() && mode->second != QLatin1String("individual")) {
+            value = mode->second;
+        } else if (const auto element = Notations.find(subject); element != Notations.end()) {
+            if (const auto chosen = element->second.find(group); chosen != element->second.end())
+                value = chosen->second;
+        }
+        // what the specification does not define for this element: its default
+        return notationAllowed(subject, group, value) ? value : defaultNotation(subject, group);
+    }
+
+    QVariantMap DiagramController::notationChoice(ElementId id, const QString &group) const {
+        const auto *info = notationGroup(group);
+        QVariantList options;
+        for (const auto &[value, label]: info->Options) {
+            if (notationAllowed(id, group, QString::fromLatin1(value)))
+                options.append(QVariantMap{{QStringLiteral("value"), QString::fromLatin1(value)},
+                                           {QStringLiteral("label"), tr(label)}});
+        }
+        const auto mode = NotationModes.find(group);
+        return {{QStringLiteral("subject"), QString::number(id)},
+                {QStringLiteral("group"), group},
+                {QStringLiteral("label"), tr(info->Label)},
+                {QStringLiteral("value"), notationOf(id, group)},
+                {QStringLiteral("mode"), mode == NotationModes.end() ? QStringLiteral("individual") : mode->second},
+                {QStringLiteral("options"), options}};
+    }
+
+    QVariantList DiagramController::notationGroups() const {
+        QVariantList groups;
+        for (const auto &info: notationTable()) {
+            QVariantList options;
+            for (const auto &[value, label]: info.Options)
+                options.append(QVariantMap{{QStringLiteral("value"), QString::fromLatin1(value)},
+                                           {QStringLiteral("label"), tr(label)}});
+            const auto mode = NotationModes.find(QString::fromLatin1(info.Id));
+            groups.append(QVariantMap{{QStringLiteral("group"), QString::fromLatin1(info.Id)},
+                                      {QStringLiteral("label"), tr(info.Label)},
+                                      {QStringLiteral("mode"), mode == NotationModes.end() ? QStringLiteral("individual")
+                                                                                          : mode->second},
+                                      {QStringLiteral("options"), options}});
+        }
+        return groups;
+    }
+
+    void DiagramController::notationsEdited() {
+        ++NotationRevision;
+        Measured.clear(); // nodes change their size (compartments come and go)
+        emit notationsChanged();
+        syncNow();
+        if (AutoLayout)
+            layoutAll();
+        else
+            repairContainment();
+        emit layoutEdited();
+    }
+
+    void DiagramController::repairContainment() {
+        // after a change of notation (packages back in their package, members back as nodes, ...): what is drawn in a
+        // package lies inside it, the outer ones first
+        std::vector<std::pair<int, ElementId>> order;
+        for (const auto &node: Nodes->nodes()) {
+            if (node.Kind != DiagramTypes::PortNode && Model.contains(node.Id))
+                order.emplace_back(node.Depth, node.Id);
+        }
+        std::sort(order.begin(), order.end());
+        for (const auto &[depth, id]: order) {
+            const ElementId owner = Model.element(id).owner();
+            if (owner == RootId || detachedFromOwner(id))
+                continue;
+            const auto *ownerNode = Nodes->find(owner);
+            const auto *node = Nodes->find(id);
+            // a package, or a part drawn around its parts (table 9 "Part with graphical compartment")
+            const bool container = isFrame(owner) || (ownerNode && ownerNode->Container && nestedFeatures(owner));
+            if (!container || !ownerNode || !node)
+                continue;
+            const qreal header = ownerNode->Kind == DiagramTypes::PackageNode ? 24 : estimatedSize(*ownerNode).height();
+            if (!ownerNode->Rect.adjusted(0, header, 0, 0).contains(node->Rect))
+                fitIntoFrame(id, owner);
+        }
+    }
+
+    void DiagramController::setNotationMode(const QString &group, const QString &mode) {
+        const auto *info = notationGroup(group);
+        if (!info || (mode != QLatin1String("individual") && !isNotationValue(*info, mode)))
+            return;
+        const auto current = NotationModes.find(group);
+        const QString old = current == NotationModes.end() ? QStringLiteral("individual") : current->second;
+        if (old == mode)
+            return;
+        if (mode == QLatin1String("individual"))
+            NotationModes.erase(group);
+        else
+            NotationModes[group] = mode;
+        notationsEdited();
+    }
+
+    QVariantList DiagramController::notationChoices(const QString &id) const {
+        const auto element = toId(id);
+        QVariantList choices;
+        if (!element)
+            return choices;
+        for (const auto &info: notationTable()) {
+            const QString group = QString::fromLatin1(info.Id);
+            if (notationApplies(*element, group))
+                choices.append(notationChoice(*element, group));
+        }
+        // the aliases shown at this element («alias» in its name) or as lines to it: to be changed here as well
+        std::function<void(ElementId)> visit = [&](ElementId owner) {
+            for (const ElementId child: Model.children(owner)) {
+                const auto &candidate = Model.element(child);
+                if (candidate.kind() == ElementKind::Alias && child != *element && !Nodes->find(child)) {
+                    // named here, or owned by this package (and drawn elsewhere)
+                    const auto aliased = resolveReference(Model, candidate.owner(), candidate.target());
+                    if ((aliased && *aliased == *element) || candidate.owner() == *element) {
+                        QVariantMap choice = notationChoice(child, QStringLiteral("aliases"));
+                        choice[QStringLiteral("label")] = choice.value(QStringLiteral("label")).toString() + QStringLiteral(": ") +
+                                                          QString::fromStdString(candidate.name());
+                        choices.append(choice);
+                    }
+                }
+                visit(child);
+            }
+        };
+        visit(RootId);
+        return choices;
+    }
+
+    void DiagramController::setNotation(const QString &id, const QString &group, const QString &value) {
+        const auto element = toId(id);
+        const auto *info = notationGroup(group);
+        if (!element || !info || !isNotationValue(*info, value) || !Model.contains(*element))
+            return;
+        auto &choices = Notations[*element];
+        if (const auto existing = choices.find(group); existing != choices.end() && existing->second == value)
+            return;
+        choices[group] = value;
+        // a package that leaves its package (line): beside it, not on top of it
+        if (group == QLatin1String("packages") && value == QLatin1String("line") && !AutoLayout) {
+            syncNow();
+            const auto *ownerNode = Nodes->find(Model.element(*element).owner());
+            const auto *node = Nodes->find(*element);
+            if (ownerNode && node && ownerNode->Rect.intersects(node->Rect)) {
+                const QPointF delta = QPointF(ownerNode->Rect.right() + 60, ownerNode->Rect.top()) - node->Rect.topLeft();
+                if (const int row = Nodes->indexOf(*element); row >= 0)
+                    Nodes->setRect(row, node->Rect.translated(delta));
+                moveFrameContent(*element, delta);
+            }
+        }
+        notationsEdited();
+    }
+
+    QString DiagramController::notationSubject(const QString &edgeKey) const {
+        for (const QLatin1String prefix: {QLatin1String("i:"), QLatin1String("al:"), QLatin1String("t:"), QLatin1String("c:")}) {
+            if (!edgeKey.startsWith(prefix))
+                continue;
+            bool ok = false;
+            const ElementId id = edgeKey.mid(prefix.size()).toULongLong(&ok);
+            if (!ok || !Model.contains(id))
+                return {};
+            if (prefix == QLatin1String("c:"))
+                return notationApplies(id, QStringLiteral("packages")) ? QString::number(id)
+                       : notationApplies(Model.element(id).owner(), QStringLiteral("features")) ? QString::number(Model.element(id).owner())
+                                                                                              : QString();
+            return QString::number(id);
+        }
+        return {};
+    }
+
+    QStringList DiagramController::aliasEntries(const QString &id) const {
+        // the same order as syncNow writes them into the subtitle
+        const auto element = toId(id);
+        QStringList entries;
+        if (!element)
+            return entries;
+        const auto *node = Nodes->find(*element);
+        if (!node || node->Subtitle.isEmpty() || node->Folder)
+            return entries;
+        std::function<void(ElementId)> visit = [&](ElementId owner) {
+            for (const ElementId child: Model.children(owner)) {
+                const auto &candidate = Model.element(child);
+                if (candidate.kind() == ElementKind::Alias && !Nodes->find(child) &&
+                    !(notationOf(child, QStringLiteral("aliases")) == QLatin1String("line") && Nodes->find(candidate.owner()))) {
+                    const auto aliased = resolveReference(Model, candidate.owner(), candidate.target());
+                    if (aliased && *aliased == *element)
+                        entries.append(QString::number(child));
+                }
+                visit(child);
+            }
+        };
+        visit(RootId);
+        return entries;
+    }
+
+    QVariantList DiagramController::creationChoices(const QString &id) const {
+        const auto element = toId(id);
+        QVariantList choices;
+        if (!element || !Model.contains(*element))
+            return choices;
+        const auto individual = [&](const QString &group) {
+            const auto mode = NotationModes.find(group);
+            return mode == NotationModes.end();
+        };
+        const auto &created = Model.element(*element);
+        for (const QString &group: {QStringLiteral("packages"), QStringLiteral("imports"), QStringLiteral("aliases")}) {
+            if (individual(group) && notationApplies(*element, group))
+                choices.append(notationChoice(*element, group));
+        }
+        // a part / port / doc added to an element: how that element shows them, asked once
+        const ElementId owner = created.owner();
+        const auto askOwner = [&](const QString &group) {
+            if (owner == RootId || !individual(group) || !notationApplies(owner, group))
+                return;
+            if (const auto existing = Notations.find(owner); existing != Notations.end() && existing->second.count(group) > 0)
+                return;
+            choices.append(notationChoice(owner, group));
+        };
+        if (created.kind() == ElementKind::PartUsage || created.kind() == ElementKind::OccurrenceUsage)
+            askOwner(QStringLiteral("features"));
+        if (created.kind() == ElementKind::PortUsage)
+            askOwner(QStringLiteral("ports"));
+        if (isDocInCompartment(*element))
+            askOwner(QStringLiteral("docs"));
+        return choices;
+    }
+
+    bool DiagramController::detachedFromOwner(ElementId id) const {
+        return (notationApplies(id, QStringLiteral("packages")) &&
+                notationOf(id, QStringLiteral("packages")) == QLatin1String("line")) ||
+               (notationApplies(id, QStringLiteral("qualified")) &&
+                notationOf(id, QStringLiteral("qualified")) == QLatin1String("qualified"));
+    }
+
+    bool DiagramController::emptiedByQualifiedNames(ElementId id) const {
+        // a package all of whose members are drawn alone with their qualified names (table 4): no frame of its own
+        if (!Model.contains(id) || Model.element(id).kind() != ElementKind::Package || Model.children(id).empty())
+            return false;
+        const auto &children = Model.children(id);
+        return std::all_of(children.begin(), children.end(), [&](ElementId child) {
+            return (notationApplies(child, QStringLiteral("qualified")) &&
+                    notationOf(child, QStringLiteral("qualified")) == QLatin1String("qualified")) ||
+                   emptiedByQualifiedNames(child);
+        });
+    }
+
+    bool DiagramController::nestedFeatures(ElementId id) const {
+        return !Interconnection && notationApplies(id, QStringLiteral("features")) &&
+               notationOf(id, QStringLiteral("features")) == QLatin1String("nested");
+    }
+
+    std::vector<ElementId> DiagramController::layoutChildren(ElementId owner) const {
+        std::vector<ElementId> result;
+        for (const ElementId child: nodeChildren(owner)) {
+            if (!detachedFromOwner(child))
+                result.push_back(child);
+        }
+        // the inherited parts drawn as nodes (^part1) below / inside the part inheriting them
+        if (!Interconnection) {
+            for (const auto &[id, derived]: DerivedPorts) {
+                if (derived.Anchor == owner && derivedPort(id) && Nodes->find(id) &&
+                    Model.element(derived.Port).kind() != ElementKind::PortUsage)
+                    result.push_back(id);
+            }
+        }
+        if (owner == RootId) {
+            // packages drawn beside their package (⊕ line), elements alone with their qualified name: laid out on
+            // the top level
+            std::function<void(ElementId)> collect = [&](ElementId parent) {
+                for (const ElementId child: Model.children(parent)) {
+                    if (detachedFromOwner(child) && Nodes->find(child) && !portAnchor(Model, child))
+                        result.push_back(child);
+                    collect(child);
+                }
+            };
+            for (const ElementId child: Model.children(RootId))
+                collect(child);
+        }
+        return result;
+    }
+
+    qreal DiagramController::frameHeaderExtra(const DiagramNode &node) const {
+        qreal height = node.Subtitle.isEmpty() ? 0 : 18; // «alias» Package3Alias at the top of the body
+        for (const auto &value: node.Compartments)
+            height += 20 + 17 * qreal(value.toMap().value(QStringLiteral("entries")).toList().size());
+        return height;
     }
 
     void DiagramController::setArrowDefault(int value) {
@@ -1043,6 +1910,9 @@ namespace StructuraSystems::Client {
         }
         if (tool == DiagramTypes::ToolStatement)
             return addStatement(point);
+        if (tool == DiagramTypes::ToolComment || tool == DiagramTypes::ToolDocumentation ||
+            tool == DiagramTypes::ToolRepresentation || tool == DiagramTypes::ToolDocumentationInside)
+            return addAnnotation(tool, point);
         static const std::map<int, ElementKind> NodeTools = {
                 {DiagramTypes::ToolPart, ElementKind::PartUsage},
                 {DiagramTypes::ToolPartDefinition, ElementKind::PartDefinition},
@@ -1176,6 +2046,11 @@ namespace StructuraSystems::Client {
                 }
             }))
             return {};
+        if (kind == ElementKind::Package && owner != RootId && isFrame(owner)) {
+            // a package in a package: inside it, smaller than it (the package grows if needed)
+            syncNow();
+            fitIntoFrame(*id, owner);
+        }
 
         SelectedNodes = {*id};
         SelectedEdges.clear();
@@ -1215,6 +2090,77 @@ namespace StructuraSystems::Client {
             return std::nullopt;
         };
         return visit(RootId).value_or("Metadata");
+    }
+
+    QString DiagramController::addAnnotation(int tool, const QPointF &point) {
+        // owned by the element under the mouse (and so about it), else by the package frame, else top level
+        ElementId owner = RootId;
+        if (const auto node = toId(nodeIdAt(point, std::nullopt, false));
+            node && RelationshipRules::canOwn(Model, *node, ElementKind::Textual) && !isFrame(*node))
+            owner = *node;
+        else if (const auto frame = frameAt(point, std::nullopt); frame && RelationshipRules::canOwn(Model, *frame, ElementKind::Textual))
+            owner = *frame;
+        if (tool == DiagramTypes::ToolDocumentationInside) {
+            // the doc in the box of a part / definition (compartment "doc", table 2): no line to draw
+            if (owner == RootId || isFrame(owner) || !isNodeElement(Model, owner) || isNoteElement(Model, owner) ||
+                portAnchor(Model, owner)) {
+                emit statusMessage(tr("Drop it onto a part or a definition: the doc is shown in its box."));
+                return {};
+            }
+            const auto existing = SysMLTextImporter::docOf(Model, owner);
+            if (existing) {
+                // it has one: shown in the box from now on
+                if (docInside(QString::number(owner))) {
+                    emit statusMessage(tr("It has a documentation already - double-click it to edit it."));
+                    return {};
+                }
+                Notations[owner][QStringLiteral("docs")] = QStringLiteral("compartment");
+                notationsEdited();
+                emit statusMessage(tr("The documentation is shown in the box."));
+                return QString::number(owner);
+            }
+            Notations[owner][QStringLiteral("docs")] = QStringLiteral("compartment");
+            Diagram::AnnotationStatement doc;
+            doc.Keyword = "doc";
+            doc.Body = "Documentation";
+            std::optional<ElementId> id;
+            if (!runModelChange([&] {
+                    id = Model.addElement(ElementKind::Textual, "", owner);
+                    Model.setText(*id, SysMLTextImporter::annotationStatement(doc), "doc", "");
+                })) {
+                Notations[owner].erase(QStringLiteral("docs"));
+                return {};
+            }
+            emit layoutEdited();
+            emit statusMessage(tr("Added the documentation in the box - double-click it to write its text."));
+            return QString::number(*id);
+        }
+        Diagram::AnnotationStatement annotation;
+        annotation.Keyword = tool == DiagramTypes::ToolComment ? "comment" : tool == DiagramTypes::ToolDocumentation ? "doc" : "rep";
+        if (tool == DiagramTypes::ToolDocumentation && SysMLTextImporter::docOf(Model, owner) && owner != RootId) {
+            emit statusMessage(tr("It has a documentation already - double-click it to edit it."));
+            return {};
+        }
+        // the parser of the app needs a name for comments and textual representations
+        if (tool != DiagramTypes::ToolDocumentation)
+            annotation.Name = uniqueName(annotation.Keyword, owner);
+        if (tool == DiagramTypes::ToolRepresentation)
+            annotation.Language = "text";
+        annotation.Body = tool == DiagramTypes::ToolComment ? "Comment" : tool == DiagramTypes::ToolDocumentation
+                                                                            ? "Documentation" : "Representation";
+        const std::string text = SysMLTextImporter::annotationStatement(annotation);
+        std::optional<ElementId> id;
+        if (!runModelChange([&] {
+                id = Model.addElement(ElementKind::Textual, annotation.Name, owner);
+                Model.setText(*id, text, annotation.Keyword, annotation.Name);
+                PendingPositions[*id] = QPointF(std::max<qreal>(0, point.x() - 70), std::max<qreal>(0, point.y() - 25));
+            }))
+            return {};
+        SelectedNodes = {*id};
+        SelectedEdges.clear();
+        applySelection();
+        emit statusMessage(tr("Added a note - double-click it to write its text, draw an arrow to say what it is about."));
+        return QString::number(*id);
     }
 
     QString DiagramController::addStatement(const QPointF &point) {
@@ -1395,6 +2341,12 @@ namespace StructuraSystems::Client {
             Model.setExpression(id, "true");
             return;
         }
+        if (kind == ElementKind::CalcDefinition) {
+            // table 18 "Calc Definition": "calc def CalcDef1 { expression1 }" - only the result compartment with the
+            // expression; parameters ("in x : Real;") are added when needed
+            Model.setExpression(id, "0.0");
+            return;
+        }
         const ElementId parameter = Model.addElement(ElementKind::Attribute, "x", id);
         Model.setPrefixes(parameter, {"in"});
         Model.setDeclaredKeyword(parameter, std::string());
@@ -1418,6 +2370,47 @@ namespace StructuraSystems::Client {
         if (!ok || value == RootId || !Model.contains(value))
             return std::nullopt;
         return ElementId(value);
+    }
+
+    const DiagramController::DerivedPort *DiagramController::derivedPort(ElementId id) const {
+        const auto found = DerivedPorts.find(id);
+        if (found == DerivedPorts.end() || !Model.contains(found->second.Anchor) || !Model.contains(found->second.Port))
+            return nullptr;
+        return &found->second;
+    }
+
+    std::optional<ElementId> DiagramController::toNodeId(const QString &id) const {
+        if (const auto element = toId(id))
+            return element;
+        bool ok = false;
+        const auto value = id.toULongLong(&ok);
+        if (ok && isDerivedId(value) && derivedPort(value) && Nodes->find(value))
+            return ElementId(value);
+        return std::nullopt;
+    }
+
+    ElementId DiagramController::elementOf(ElementId node) const {
+        const auto *derived = derivedPort(node);
+        return derived ? derived->Port : node;
+    }
+
+    std::optional<ElementId> DiagramController::anchorOf(ElementId node) const {
+        if (const auto *derived = derivedPort(node))
+            return Model.element(derived->Port).kind() == ElementKind::PortUsage ? std::optional<ElementId>(derived->Anchor)
+                                                                                  : std::nullopt;
+        if (!Model.contains(node))
+            return std::nullopt;
+        return portAnchor(Model, node);
+    }
+
+    std::optional<std::pair<ElementId, std::string>> DiagramController::edgeEnd(const QString &id) const {
+        if (const auto element = toId(id))
+            return std::make_pair(*element, std::string());
+        const auto node = toNodeId(id);
+        const auto *derived = node ? derivedPort(*node) : nullptr;
+        if (!derived)
+            return std::nullopt;
+        return std::make_pair(derived->Anchor, Model.element(derived->Port).name());
     }
 
     bool DiagramController::isFrame(ElementId id) const {
@@ -1501,8 +2494,42 @@ namespace StructuraSystems::Client {
     }
 
     bool DiagramController::shownAsNode(ElementId id) const {
-        if (!Interconnection)
-            return isNodeElement(Model, id);
+        if (!Interconnection) {
+            if (!Model.contains(id))
+                return false;
+            const auto &element = Model.element(id);
+            const ElementId owner = element.owner();
+            // the doc of an element in its compartment 'doc' (table 2), not a note of its own
+            if (isDocInCompartment(id) && notationOf(owner, QStringLiteral("docs")) == QLatin1String("compartment"))
+                return false;
+            if (emptiedByQualifiedNames(id))
+                return false;
+            // a definition / usage listed as text in the compartment 'members' of its package (table 3)
+            if (owner != RootId && isListedMemberKind(element.kind()) && Model.element(owner).kind() == ElementKind::Package &&
+                notationOf(owner, QStringLiteral("members")) == QLatin1String("compartment"))
+                return false;
+            // a package / import listed as text in the compartment of its package (table 3)
+            if ((notationApplies(id, QStringLiteral("packages")) &&
+                 notationOf(id, QStringLiteral("packages")) == QLatin1String("compartment")) ||
+                (notationApplies(id, QStringLiteral("imports")) &&
+                 notationOf(id, QStringLiteral("imports")) == QLatin1String("compartment")))
+                return false;
+            // an alias as a line to the element or in its name compartment: only if that element is shown
+            if (element.kind() == ElementKind::Alias && notationOf(id, QStringLiteral("aliases")) != QLatin1String("nested")) {
+                const auto aliased = resolveReference(Model, owner, element.target());
+                if (aliased && *aliased != id && Model.element(*aliased).kind() != ElementKind::Alias && shownAsNode(*aliased))
+                    return false;
+            }
+            // the parts / ports of a part listed as text in its compartments (table 9)
+            if (owner != RootId && (element.kind() == ElementKind::PartUsage || element.kind() == ElementKind::OccurrenceUsage) &&
+                notationApplies(owner, QStringLiteral("features")) &&
+                notationOf(owner, QStringLiteral("features")) == QLatin1String("compartment"))
+                return false;
+            if (owner != RootId && element.kind() == ElementKind::PortUsage && notationApplies(owner, QStringLiteral("ports")) &&
+                notationOf(owner, QStringLiteral("ports")) == QLatin1String("compartment"))
+                return false;
+            return isNodeElement(Model, id) && (!ViewElement || ViewKeep.count(id) > 0);
+        }
         const auto context = interconnectionContext();
         if (!context || !Model.contains(id))
             return false;
@@ -1577,7 +2604,7 @@ namespace StructuraSystems::Client {
     }
 
     QRectF DiagramController::nodeRect(const QString &id) const {
-        const auto elementId = toId(id);
+        const auto elementId = toNodeId(id);
         const auto *node = elementId ? Nodes->find(*elementId) : nullptr;
         return node ? node->Rect : QRectF();
     }
@@ -1585,14 +2612,14 @@ namespace StructuraSystems::Client {
     // --- geometry ----------------------------------------------------------------------------------
 
     void DiagramController::moveNode(const QString &id, qreal x, qreal y) {
-        const auto elementId = toId(id);
+        const auto elementId = toNodeId(id);
         if (!elementId)
             return;
         const int row = Nodes->indexOf(*elementId);
         if (row < 0)
             return;
         const QRectF old = Nodes->nodes()[std::size_t(row)].Rect;
-        if (const auto anchor = portAnchor(Model, *elementId)) {
+        if (const auto anchor = anchorOf(*elementId)) {
             const auto *anchorNode = Nodes->find(*anchor);
             if (!anchorNode)
                 return;
@@ -1611,6 +2638,104 @@ namespace StructuraSystems::Client {
         translatePorts(*elementId, delta);
         if (isFrame(*elementId))
             moveFrameContent(*elementId, delta);
+    }
+
+    void DiagramController::fitIntoFrame(ElementId id, ElementId frame) {
+        constexpr qreal Pad = 16.0;
+        // the tab with the name above the body of a package (NodeDelegate.qml); a part drawn around its parts: its
+        // name and compartments
+        const auto *frameNode = Nodes->find(frame);
+        const qreal Tab = frameNode && frameNode->Kind != DiagramTypes::PackageNode ? estimatedSize(*frameNode).height() : 24.0;
+        const auto rectOf = [&](ElementId element) -> std::optional<QRectF> {
+            const auto *node = Nodes->find(element);
+            return node ? std::optional<QRectF>(node->Rect) : std::nullopt;
+        };
+        const auto setRectOf = [&](ElementId element, const QRectF &rect) {
+            if (const int row = Nodes->indexOf(element); row >= 0)
+                Nodes->setRect(row, rect);
+        };
+        const auto inner = [&](const QRectF &rect) { return rect.adjusted(Pad, Tab + Pad, -Pad, -Pad); };
+        const auto outer = [&](const QRectF &rect) { return rect.adjusted(-Pad, -Tab - Pad, Pad, Pad); };
+        auto movedRect = rectOf(id);
+        auto frameRect = rectOf(frame);
+        if (!movedRect || !frameRect)
+            return;
+        AutoLayout = false;
+        QRectF rect = *movedRect;
+        {
+            // a package: as large as the inside of the package it went into, at most, but not smaller than its content;
+            // anything else keeps its size
+            const bool package = isFrame(id);
+            const QRectF space = inner(*frameRect);
+            QRectF content;
+            for (const ElementId child: package ? Model.children(id) : std::vector<ElementId>{}) {
+                if (const auto childRect = rectOf(child); childRect && !detachedFromOwner(child))
+                    content = content.isNull() ? *childRect : content.united(*childRect);
+            }
+            const qreal minimumWidth = std::max(MinimumFrameWidth, content.isNull() ? 0.0 : content.width() + 2 * Pad);
+            const qreal minimumHeight = std::max(MinimumFrameHeight, content.isNull() ? 0.0 : content.height() + Tab + 2 * Pad);
+            const QSizeF size = package ? QSizeF(std::max(minimumWidth, std::min(rect.width(), space.width())),
+                                                 std::max(minimumHeight, std::min(rect.height(), space.height())))
+                                        : rect.size();
+            // inside the space where possible, the content moves with it
+            QPointF topLeft(std::clamp(rect.left(), space.left(), std::max(space.left(), space.right() - size.width())),
+                            std::clamp(rect.top(), space.top(), std::max(space.top(), space.bottom() - size.height())));
+            // not on top of what is in the package already: then below it (the package grows)
+            // (only those drawn in it: not those beside it with a line or alone with their qualified name)
+            const auto inFrame = [&](ElementId sibling) -> std::optional<QRectF> {
+                if (sibling == id || detachedFromOwner(sibling))
+                    return std::nullopt;
+                return rectOf(sibling);
+            };
+            QRectF siblings;
+            for (const ElementId sibling: Model.children(frame)) {
+                if (const auto siblingRect = inFrame(sibling))
+                    siblings = siblings.isNull() ? *siblingRect : siblings.united(*siblingRect);
+            }
+            const auto overlapsSibling = [&](const QRectF &candidate) {
+                for (const ElementId sibling: Model.children(frame)) {
+                    const auto siblingRect = inFrame(sibling);
+                    if (siblingRect && siblingRect->adjusted(-8, -8, 8, 8).intersects(candidate))
+                        return true;
+                }
+                return false;
+            };
+            if (overlapsSibling(QRectF(topLeft, size)))
+                topLeft = QPointF(space.left(), std::max(space.top(), siblings.bottom() + Pad + Tab));
+            QRectF fitted(topLeft, size);
+            if (!content.isNull()) {
+                // the content keeps its place in the package (moved along), the package around it
+                const QPointF delta = topLeft - rect.topLeft();
+                const QRectF movedContent = content.translated(delta);
+                const QRectF needed = movedContent.adjusted(-Pad, -Tab - Pad, Pad, Pad);
+                if (!fitted.contains(needed)) {
+                    const QPointF shift(std::min(0.0, needed.left() - fitted.left()) + std::max(0.0, needed.right() - fitted.right()),
+                                        std::min(0.0, needed.top() - fitted.top()) + std::max(0.0, needed.bottom() - fitted.bottom()));
+                    fitted.translate(shift);
+                }
+                moveFrameContent(id, delta);
+            }
+            translatePorts(id, fitted.topLeft() - rect.topLeft());
+            if (!package && isContainer(*Nodes->find(id)))
+                moveFrameContent(id, fitted.topLeft() - rect.topLeft());
+            rect = fitted;
+            setRectOf(id, rect);
+        }
+        // the packages around it grow where it does not fit (up to the top level)
+        QRectF insideRect = rect;
+        for (ElementId around = frame; around != RootId && (isFrame(around) || nestedFeatures(around));
+             around = Model.element(around).owner()) {
+            const auto aroundRect = rectOf(around);
+            if (!aroundRect)
+                break;
+            const QRectF needed = outer(insideRect);
+            if (aroundRect->contains(needed))
+                break;
+            const QRectF grown = aroundRect->united(needed);
+            setRectOf(around, grown);
+            insideRect = grown;
+        }
+        emit layoutEdited();
     }
 
     void DiagramController::moveFrameContent(ElementId frame, const QPointF &delta) {
@@ -1635,27 +2760,104 @@ namespace StructuraSystems::Client {
         if (!Model.contains(id))
             return;
         const ElementId owner = Model.element(id).owner();
-        if (owner != RootId && (isPartLike(Model.element(owner).kind()) || isRequirementOwner(Model.element(owner).kind())))
-            return; // owned by a part / requirement (composition): the placement does not change the ownership
-
-        const auto *node = Nodes->find(id);
-        if (!node)
+        // What a package (or the top level) owns goes where it is dropped: a frame stands for a package, a part drawn
+        // around its parts (notation "inside the part", table 9) for that part. What a part, calc def, action, ...
+        // owns otherwise (a feature on a composition line, a note "rep r1 ... /* */" in it) stays there wherever it is
+        // placed.
+        const bool ownedByContainer = owner != RootId && nestedFeatures(owner);
+        // owned by a part on a composition line (tree): it stays there wherever it is placed, unless it is dropped
+        // onto another part - then it becomes one of its parts
+        const bool ownedInTree = owner != RootId && Model.element(owner).kind() != ElementKind::Package && !ownedByContainer;
+        if (ownedInTree && !composes(Model.element(owner).kind()))
             return;
-        auto frame = frameAt(node->Rect.center(), id);
+
+        // a package drawn beside its package (⊕ line) / an element alone with its qualified name stays in it
+        if (detachedFromOwner(id))
+            return;
+        const auto *node = Nodes->find(id);
+        if (!node || node->Kind == DiagramTypes::PortNode)
+            return;
+        const QPointF center = node->Rect.center();
+        auto frame = frameAt(center, id);
         if (frame && Model.isAncestor(id, *frame))
             frame.reset();
-        const ElementId newOwner = frame ? *frame : RootId;
-        if (newOwner == owner || !RelationshipRules::canReparent(Model, id, newOwner))
+        // dropped onto a part / part definition: into it ("part part2 { part def Part3; }", a usage body may hold
+        // definitions and usages) - the smallest one under the middle, not the element itself or what is in it
+        std::optional<ElementId> part;
+        qreal partArea = 0;
+        for (const auto &other: Nodes->nodes()) {
+            if (other.Id == id || !Model.contains(other.Id) || other.Kind == DiagramTypes::PortNode ||
+                other.Kind == DiagramTypes::PackageNode || !composes(Model.element(other.Id).kind()) ||
+                Model.isAncestor(id, other.Id) || !other.Rect.contains(center))
+                continue;
+            if (frame && !Model.isAncestor(*frame, other.Id))
+                continue; // a part outside the innermost package under the point
+            const qreal area = other.Rect.width() * other.Rect.height();
+            if (!part || area < partArea) {
+                part = other.Id;
+                partArea = area;
+            }
+        }
+        if (part && !RelationshipRules::canReparent(Model, id, *part))
+            part.reset();
+        if (ownedInTree && !part)
             return;
+        const ElementId newOwner = part ? *part : frame ? *frame : RootId;
+        if (newOwner == owner)
+            return;
+        // the owner of a part drawn as composition tree keeps it (it is placed freely below)
+        if (ownedByContainer && part && !nestedFeatures(*part) && Model.element(*part).kind() != ElementKind::Package &&
+            Model.isAncestor(owner, *part))
+            return;
+        const auto allowed = RelationshipRules::canReparent(Model, id, newOwner);
+        const std::string &name = Model.element(id).name();
+        const bool nameTaken = !name.empty() && std::any_of(Model.children(newOwner).begin(), Model.children(newOwner).end(),
+                                                            [&](ElementId other) {
+                                                                return other != id && Model.element(other).name() == name;
+                                                            });
+        if (!allowed || nameTaken) {
+            // it stays where it is in the model: so it is drawn there again (inside its package), with the reason
+            emit statusMessage(nameTaken ? tr("'%1' cannot be moved there: '%2' has an element of that name already - rename one "
+                                              "of them first.").arg(QString::fromStdString(name),
+                                                                    newOwner == RootId ? tr("the top level")
+                                                                                       : QString::fromStdString(Model.element(newOwner).name()))
+                                         : tr("It cannot be moved there: %1").arg(QString::fromStdString(allowed.Reason)));
+            if (owner != RootId && isFrame(owner))
+                fitIntoFrame(id, owner);
+            return;
+        }
         if (runModelChange([&] { Model.reparent(id, newOwner); })) {
+            if (part) {
+                syncNow();
+                if (nestedFeatures(*part)) {
+                    fitIntoFrame(id, *part); // drawn inside it
+                } else if (const auto *ownerNode = Nodes->find(*part); ownerNode && Nodes->find(id)) {
+                    // below it, on its line (not on top of it)
+                    const QRectF rect = Nodes->find(id)->Rect;
+                    QPointF position(ownerNode->Rect.left(), ownerNode->Rect.bottom() + 50);
+                    for (const auto &other: Nodes->nodes()) {
+                        if (other.Id != id && other.Kind != DiagramTypes::PackageNode && other.Kind != DiagramTypes::PortNode &&
+                            other.Rect.adjusted(-12, -12, 12, 12).intersects(QRectF(position, rect.size())))
+                            position.setX(std::max(position.x(), other.Rect.right() + 24));
+                    }
+                    if (const int row = Nodes->indexOf(id); row >= 0)
+                        Nodes->setRect(row, QRectF(position, rect.size()));
+                    translatePorts(id, position - rect.topLeft());
+                    emit layoutEdited();
+                }
+                emit statusMessage(tr("Moved into '%1'.").arg(QString::fromStdString(Model.element(newOwner).name())));
+                return;
+            }
+            if (frame)
+                fitIntoFrame(id, *frame);
             emit statusMessage(frame ? tr("Moved into package '%1'.").arg(QString::fromStdString(Model.element(newOwner).name()))
                                      : tr("Moved out of the package."));
         }
     }
 
     void DiagramController::setNodeSize(const QString &id, qreal width, qreal height) {
-        const auto elementId = toId(id);
-        if (!elementId || isFrame(*elementId) || width <= 0 || height <= 0 || portAnchor(Model, *elementId))
+        const auto elementId = toNodeId(id); // also an inherited part drawn as node (^part1)
+        if (!elementId || isFrame(*elementId) || width <= 0 || height <= 0 || anchorOf(*elementId))
             return;
         const int row = Nodes->indexOf(*elementId);
         if (row < 0)
@@ -1703,8 +2905,38 @@ namespace StructuraSystems::Client {
         emit layoutEdited();
     }
 
+    bool DiagramController::docInside(const QString &id) const {
+        const auto element = toId(id);
+        if (!element)
+            return false;
+        const auto choices = Notations.find(*element);
+        return choices != Notations.end() && choices->second.count(QStringLiteral("docs")) > 0 &&
+               choices->second.at(QStringLiteral("docs")) == QLatin1String("compartment");
+    }
+
+    void DiagramController::setDocInside(const QString &id, bool inside) {
+        setNotation(id, QStringLiteral("docs"), inside ? QStringLiteral("compartment") : QStringLiteral("note"));
+    }
+
     QJsonObject DiagramController::layoutState() const {
         QJsonObject layout;
+        // how things are drawn (a choice of the view, not in the text): per group and per element
+        QJsonObject modes;
+        for (const auto &[group, mode]: NotationModes)
+            modes.insert(group, mode);
+        if (!modes.isEmpty())
+            layout.insert(QStringLiteral("@notationModes"), modes);
+        QJsonObject notations;
+        for (const auto &[id, choices]: Notations) {
+            if (!Model.contains(id) || choices.empty())
+                continue;
+            QJsonObject entry;
+            for (const auto &[group, value]: choices)
+                entry.insert(group, value);
+            notations.insert(DiagramLayout::keyOf(Model, id), entry);
+        }
+        if (!notations.isEmpty())
+            layout.insert(QStringLiteral("@notations"), notations);
         if (AutoLayout)
             return layout;
         for (const auto &node: Nodes->nodes()) {
@@ -1722,6 +2954,42 @@ namespace StructuraSystems::Client {
             return;
         syncNow();
         const auto byKey = DiagramLayout::elementsByKey(Model);
+        bool notations = false;
+        // (an older layout: "@docsInside")
+        for (const auto &value: layout.value(QStringLiteral("@docsInside")).toArray()) {
+            if (const auto element = byKey.find(value.toString()); element != byKey.end()) {
+                Notations[element->second][QStringLiteral("docs")] = QStringLiteral("compartment");
+                notations = true;
+            }
+        }
+        const QJsonObject modes = layout.value(QStringLiteral("@notationModes")).toObject();
+        for (auto it = modes.begin(); it != modes.end(); ++it) {
+            const auto *info = notationGroup(it.key());
+            if (info && isNotationValue(*info, it.value().toString())) {
+                NotationModes[it.key()] = it.value().toString();
+                notations = true;
+            }
+        }
+        const QJsonObject stored = layout.value(QStringLiteral("@notations")).toObject();
+        for (auto it = stored.begin(); it != stored.end(); ++it) {
+            const auto element = byKey.find(it.key());
+            if (element == byKey.end())
+                continue;
+            const QJsonObject choices = it.value().toObject();
+            for (auto choice = choices.begin(); choice != choices.end(); ++choice) {
+                const auto *info = notationGroup(choice.key());
+                if (info && isNotationValue(*info, choice.value().toString())) {
+                    Notations[element->second][choice.key()] = choice.value().toString();
+                    notations = true;
+                }
+            }
+        }
+        if (notations) {
+            ++NotationRevision;
+            emit notationsChanged();
+            Measured.clear();
+            syncNow();
+        }
         bool applied = false;
         for (auto it = layout.begin(); it != layout.end(); ++it) {
             const auto element = byKey.find(it.key());
@@ -1739,8 +3007,12 @@ namespace StructuraSystems::Client {
             AutoPlacedPorts.erase(element->second);
             applied = true;
         }
-        if (applied)
+        if (applied) {
             AutoLayout = false;
+            repairContainment(); // what has no stored place (shown again by its notation) inside its package
+        } else if (notations) {
+            layoutAll(); // the automatic layout, with the notations
+        }
     }
 
     void DiagramController::updateCanvasSize() {
@@ -1846,6 +3118,20 @@ namespace StructuraSystems::Client {
             return;
         }
         bool ok = false;
+        if (key.startsWith(QStringLiteral("n:"))) {
+            // a line of an n-ary relationship: the relationship is removed
+            const auto relationship = key.mid(2).section(QLatin1Char(':'), 0, 0).toULongLong(&ok);
+            if (ok && Model.containsRelationship(relationship))
+                runModelChange([&] { Model.removeRelationship(relationship); });
+            return;
+        }
+        if (key.startsWith(QStringLiteral("s:"))) {
+            // reference subsetting: removed
+            const ElementId usage = key.mid(2).toULongLong(&ok);
+            if (ok && Model.contains(usage))
+                runModelChange([&] { Model.setReferencedFeature(usage, "", ""); });
+            return;
+        }
         if (key.startsWith(QStringLiteral("t:"))) {
             // "defined by": the usage loses its type
             const ElementId usage = key.mid(2).toULongLong(&ok);
@@ -1853,11 +3139,39 @@ namespace StructuraSystems::Client {
                 runModelChange([&] { Model.setTypeName(usage, ""); });
             return;
         }
-        if (key.startsWith(QStringLiteral("i:")) || key.startsWith(QStringLiteral("p:"))) {
-            // «import» / perform: the statement is removed
-            const ElementId statement = key.mid(2).toULongLong(&ok);
+        if (key.startsWith(QStringLiteral("i:")) || key.startsWith(QStringLiteral("p:")) || key.startsWith(QStringLiteral("al:"))) {
+            // «import» / perform / alias line: the statement is removed
+            const ElementId statement = key.mid(key.indexOf(QLatin1Char(':')) + 1).toULongLong(&ok);
             if (ok && Model.contains(statement))
                 runModelChange([&] { Model.removeElement(statement); });
+            return;
+        }
+        if (key.startsWith(QStringLiteral("a:"))) {
+            // an annotation: the element is no longer named after "about" (a note in a body is about its owner)
+            const QStringList parts = key.mid(2).split(QLatin1Char(':'));
+            const ElementId note = parts.value(0).toULongLong(&ok);
+            const int index = parts.value(1).toInt();
+            if (!ok || !Model.contains(note))
+                return;
+            if (index < 0) {
+                emit statusMessage(tr("The note belongs to this element - move it or delete it instead."));
+                return;
+            }
+            const auto &element = Model.element(note);
+            if (element.kind() == ElementKind::MetadataUsage) {
+                auto about = element.about();
+                if (index < int(about.size())) {
+                    about.erase(about.begin() + index);
+                    runModelChange([&] { Model.setAbout(note, about); });
+                }
+                return;
+            }
+            auto annotation = SysMLTextImporter::describeAnnotation(element.text());
+            if (index >= int(annotation.About.size()))
+                return;
+            annotation.About.erase(annotation.About.begin() + index);
+            const std::string text = SysMLTextImporter::annotationStatement(annotation);
+            runModelChange([&] { Model.setText(note, text, element.keyword(), element.name()); });
             return;
         }
         if (key.startsWith(QStringLiteral("d:"))) {
@@ -1878,6 +3192,18 @@ namespace StructuraSystems::Client {
             runModelChange([&] { Model.setRedefinitions(feature, element.redefinitionKeyword(), references, false); });
             return;
         }
+        if (key.startsWith(QStringLiteral("x:"))) {
+            // an «expose»: the expose statement goes
+            const ElementId expose = key.mid(2).toULongLong(&ok);
+            if (ok && Model.contains(expose) && Model.element(expose).kind() == ElementKind::Expose)
+                runModelChange([&] { Model.removeElement(expose); });
+            return;
+        }
+        if (key.startsWith(QStringLiteral("cd:"))) {
+            // the line of a connection definition stands for its ends: they are edited in the definition
+            emit statusMessage(tr("The line shows the ends of the connection definition - edit or delete the definition."));
+            return;
+        }
         const auto relationship = key.mid(2).toULongLong(&ok);
         if (ok && Model.containsRelationship(relationship))
             runModelChange([&] { Model.removeRelationship(relationship); });
@@ -1885,8 +3211,45 @@ namespace StructuraSystems::Client {
 
     // --- edges -------------------------------------------------------------------------------------
 
+    std::optional<std::pair<ElementId, ElementId>> DiagramController::documentationEnds(ElementId source, ElementId target) const {
+        // a doc documents the element it is in (table 2, "Annotation-Documentation"): a line between a doc and another
+        // element (either way) moves the doc into that element
+        const auto isDoc = [&](ElementId id) {
+            return Model.element(id).kind() == ElementKind::Textual && Model.element(id).keyword() == "doc" &&
+                   isNoteStatement(Model.element(id));
+        };
+        const auto canDocument = [&](ElementId doc, ElementId owner) -> bool {
+            const auto &element = Model.element(owner);
+            return element.kind() != ElementKind::Textual && element.kind() != ElementKind::Import &&
+                   element.kind() != ElementKind::MetadataUsage && Model.element(doc).owner() != owner &&
+                   !Model.isAncestor(doc, owner) && !element.performsPath() &&
+                   bool(RelationshipRules::canReparent(Model, doc, owner));
+        };
+        if (source == target)
+            return std::nullopt;
+        if (isDoc(source) && !isDoc(target) && canDocument(source, target))
+            return std::make_pair(source, target);
+        if (isDoc(target) && !isDoc(source) && canDocument(target, source))
+            return std::make_pair(target, source);
+        return std::nullopt;
+    }
+
     QVariantList DiagramController::allowedEdgeKinds(const QString &source, const QString &target) const {
         QVariantList kinds;
+        // from / to a port a part inherits: "connect tank.fuelOut to engine.fuelIn" (connections, flows and
+        // interfaces between the features of the parts)
+        if (!toId(source) || !toId(target)) {
+            const auto from = edgeEnd(source);
+            const auto to = edgeEnd(target);
+            if (!from || !to || source == target)
+                return kinds;
+            for (const int kind: {int(DiagramTypes::Connection), int(DiagramTypes::Flow), int(DiagramTypes::Interface)}) {
+                if (RelationshipRules::canRelate(Model, *toRelationshipKind(kind), from->first, to->first, from->second,
+                                                 to->second))
+                    kinds.append(kind);
+            }
+            return kinds;
+        }
         const auto sourceId = toId(source);
         const auto targetId = toId(target);
         if (!sourceId || !targetId || *sourceId == *targetId)
@@ -1904,7 +3267,8 @@ namespace StructuraSystems::Client {
         for (const int kind: {int(DiagramTypes::Connection), int(DiagramTypes::Flow), int(DiagramTypes::Interface),
                               int(DiagramTypes::Specialization), int(DiagramTypes::Satisfy), int(DiagramTypes::Verify),
                               int(DiagramTypes::Include), int(DiagramTypes::Allocation), int(DiagramTypes::Dependency),
-                              int(DiagramTypes::Frame)}) {
+                              int(DiagramTypes::Frame), int(DiagramTypes::Exhibit), int(DiagramTypes::Assert),
+                              int(DiagramTypes::Assume), int(DiagramTypes::Require)}) {
             if (RelationshipRules::canRelate(Model, *toRelationshipKind(kind), *sourceId, *targetId))
                 kinds.append(kind);
         }
@@ -1913,6 +3277,24 @@ namespace StructuraSystems::Client {
         if (typesUsage(targetKind, sourceKind) && sourceKind != ElementKind::PortUsage && !sourceElement.performsPath() &&
             resolveReference(Model, sourceElement.owner(), sourceElement.typeName()) != targetId)
             kinds.append(int(DiagramTypes::DefinedBy));
+        // "references": a usage references another usage declared elsewhere (four dots and a hollow triangle)
+        if (Diagram::isUsageKind(sourceKind) && Diagram::isUsageKind(targetKind) && sourceElement.referencedFeature().empty() &&
+            !Model.isAncestor(*sourceId, *targetId) && !Model.isAncestor(*targetId, *sourceId) &&
+            sourceKind != ElementKind::EnumerationLiteral && targetKind != ElementKind::EnumerationLiteral &&
+            sourceKind != ElementKind::ControlNode && targetKind != ElementKind::ControlNode && !sourceElement.performsPath() &&
+            !(sourceKind == ElementKind::ActionPerformance && sourceElement.performStyle() == Diagram::PerformStyle::ReferenceAction))
+            kinds.append(int(DiagramTypes::ReferenceSubsetting));
+        // a comment or metadata is about another element ("comment c about x", "metadata M about x")
+        if ((sourceKind == ElementKind::MetadataUsage ||
+             (isNoteElement(Model, *sourceId) && sourceElement.keyword() == "comment")) &&
+            !Model.isAncestor(*targetId, *sourceId))
+            kinds.append(int(DiagramTypes::Annotation));
+        else if (documentationEnds(*sourceId, *targetId))
+            kinds.append(int(DiagramTypes::Annotation)); // a doc: moved into the element
+        // «expose»: a view exposes an element (a package: its members)
+        if (sourceKind == ElementKind::ViewUsage && !Model.isAncestor(*sourceId, *targetId) && *sourceId != *targetId &&
+            targetKind != ElementKind::Textual && !Model.element(*targetId).name().empty())
+            kinds.append(int(DiagramTypes::Expose));
         // «import»: a package imports another package (its members) or an element
         if (sourceKind == ElementKind::Package && !Model.isAncestor(*sourceId, *targetId) &&
             !Model.isAncestor(*targetId, *sourceId))
@@ -1930,10 +3312,26 @@ namespace StructuraSystems::Client {
     }
 
     bool DiagramController::createEdge(int kind, const QString &source, const QString &target) {
+        if (!toId(source) || !toId(target)) {
+            // an end is a port the part inherits: written as a feature of the part ("tank.fuelOut")
+            const auto from = edgeEnd(source);
+            const auto to = edgeEnd(target);
+            const auto relationship = toRelationshipKind(kind);
+            if (!from || !to || !relationship || !allowedEdgeKinds(source, target).contains(kind))
+                return false;
+            const bool ok = runModelChange([&] {
+                Model.addRelationship(*relationship, from->first, to->first, from->second, to->second);
+            });
+            if (ok)
+                emit statusMessage(tr("%1 created.").arg(edgeKindName(kind)));
+            return ok;
+        }
         const auto sourceId = toId(source);
         const auto targetId = toId(target);
         const bool special = kind == DiagramTypes::Composition || kind == DiagramTypes::DefinedBy ||
-                             kind == DiagramTypes::Import || kind == DiagramTypes::Performs;
+                             kind == DiagramTypes::Import || kind == DiagramTypes::Performs ||
+                             kind == DiagramTypes::Annotation || kind == DiagramTypes::ReferenceSubsetting ||
+                             kind == DiagramTypes::Expose;
         if (!sourceId || !targetId || (!special && !toRelationshipKind(kind)))
             return false;
         if (special && kind != DiagramTypes::Composition && !allowedEdgeKinds(source, target).contains(kind))
@@ -1952,6 +3350,23 @@ namespace StructuraSystems::Client {
                     target += "::*";
                 Model.setTarget(import, target);
                 Model.setPrefixes(import, {"private"});
+            } else if (kind == DiagramTypes::Expose) {
+                // "expose Vehicles::vehicle;" ("::*" for the members of a package)
+                const ElementId expose = Model.addElement(ElementKind::Expose, "", *sourceId);
+                std::string target;
+                for (const ElementId id: Model.ownershipPath(*targetId))
+                    target += (target.empty() ? "" : "::") + Diagram::SysMLCodeGenerator::formatName(Model.element(id).name());
+                if (Model.element(*targetId).kind() == ElementKind::Package)
+                    target += "::*";
+                Model.setTarget(expose, target);
+            } else if (kind == DiagramTypes::ReferenceSubsetting) {
+                Model.setReferencedFeature(*sourceId, "references",
+                                           referenceTo(Model, Model.element(*sourceId).owner(), *targetId));
+            } else if (kind == DiagramTypes::Annotation) {
+                if (const auto documentation = documentationEnds(*sourceId, *targetId))
+                    Model.reparent(documentation->first, documentation->second);
+                else
+                    addAbout(*sourceId, annotationReference(*sourceId, *targetId));
             } else if (kind == DiagramTypes::Performs) {
                 std::string path = Model.element(*targetId).name();
                 for (ElementId owner = Model.element(*targetId).owner();
@@ -1970,8 +3385,93 @@ namespace StructuraSystems::Client {
         return ok;
     }
 
-    QVariantMap DiagramController::arrowReleased(const QString &source, qreal x, qreal y) {
+    std::string DiagramController::annotationReference(ElementId note, ElementId target) const {
+        // named from where the note is: a member of its owner by name, anything else qualified
+        const ElementId noteOwner = Model.element(note).owner();
+        if (noteOwner != RootId && Model.isAncestor(noteOwner, target))
+            return referenceTo(Model, noteOwner, target);
+        std::string reference;
+        for (const ElementId id: Model.ownershipPath(target))
+            reference += (reference.empty() ? "" : "::") + Diagram::SysMLCodeGenerator::formatName(Model.element(id).name());
+        return reference;
+    }
+
+    void DiagramController::addAbout(ElementId note, const std::string &reference) {
+        const auto &element = Model.element(note);
+        if (element.kind() == ElementKind::MetadataUsage) {
+            auto about = element.about();
+            about.push_back(reference);
+            Model.setAbout(note, about);
+            return;
+        }
+        auto annotation = SysMLTextImporter::describeAnnotation(element.text());
+        annotation.About.push_back(reference);
+        if (annotation.Name.empty() && annotation.ShortName.empty()) // the parser of the app needs a name
+            annotation.Name = uniqueName("comment", element.owner());
+        annotation.KeywordWritten = true;
+        Model.setText(note, SysMLTextImporter::annotationStatement(annotation), "comment", annotation.Name);
+    }
+
+    QVariantList DiagramController::annotationTargets(const QString &source, const QString &target) const {
+        // the element itself and what is shown in its compartments (owned and inherited features), as in table 2
+        QVariantList targets;
+        if (!allowedEdgeKinds(source, target).contains(int(DiagramTypes::Annotation)))
+            return targets;
+        auto targetId = toId(target);
+        if (const auto documentation = documentationEnds(*toId(source), *targetId)) {
+            // a doc goes into the element (no "about"): the element is the only choice
+            const auto &owner = Model.element(documentation->second);
+            targets.append(QVariantMap{{QStringLiteral("path"), QString()},
+                                       {QStringLiteral("label"), keywordOf(owner) + QLatin1Char(' ') +
+                                                                 QString::fromStdString(owner.name())}});
+            return targets;
+        }
+        const auto &element = Model.element(*targetId);
+        const auto label = [&](ElementId id) {
+            const auto &feature = Model.element(id);
+            QString text = QString::fromStdString(Diagram::defaultKeyword(feature.kind()));
+            if (feature.declaredKeyword().has_value() && !feature.declaredKeyword()->empty())
+                text = QString::fromStdString(*feature.declaredKeyword());
+            return text + QLatin1Char(' ') + usageText(Model, id);
+        };
+        targets.append(QVariantMap{{QStringLiteral("path"), QString()},
+                                   {QStringLiteral("label"), keywordOf(element) + QLatin1Char(' ') +
+                                                             QString::fromStdString(element.name())}});
+        const auto add = [&](ElementId id, bool inherited) {
+            const auto &feature = Model.element(id);
+            if (feature.name().empty() || feature.kind() == ElementKind::Textual || feature.kind() == ElementKind::Import ||
+                feature.kind() == ElementKind::MetadataUsage || isNoteElement(Model, id))
+                return;
+            targets.append(QVariantMap{{QStringLiteral("path"), QString::fromStdString(
+                                                Diagram::SysMLCodeGenerator::formatName(feature.name()))},
+                                       {QStringLiteral("label"), (inherited ? QStringLiteral("^") : QString()) + label(id)}});
+        };
+        for (const ElementId child: Model.children(*targetId))
+            add(child, false);
+        for (const ElementId inherited: inheritedFeatures(Model, *targetId))
+            add(inherited, true);
+        return targets;
+    }
+
+    bool DiagramController::createAnnotation(const QString &source, const QString &target, const QString &path) {
         const auto sourceId = toId(source);
+        const auto targetId = toId(target);
+        if (!sourceId || !targetId || !allowedEdgeKinds(source, target).contains(int(DiagramTypes::Annotation)))
+            return false;
+        if (documentationEnds(*sourceId, *targetId))
+            return createEdge(DiagramTypes::Annotation, source, target);
+        // "comment c about part1::attribute1": a feature of the element (owned or inherited)
+        std::string reference = annotationReference(*sourceId, *targetId);
+        if (!path.isEmpty())
+            reference += "::" + path.toStdString();
+        const bool ok = runModelChange([&] { addAbout(*sourceId, reference); });
+        if (ok)
+            emit statusMessage(tr("Annotation created."));
+        return ok;
+    }
+
+    QVariantMap DiagramController::arrowReleased(const QString &source, qreal x, qreal y) {
+        const auto sourceId = toNodeId(source);
         if (!sourceId)
             return {};
         const QString target = nodeIdAt(QPointF(x, y), sourceId, false);
@@ -1985,9 +3485,12 @@ namespace StructuraSystems::Client {
             if (kinds.contains(*preset)) {
                 createEdge(*preset, source, target);
             } else if (const auto relationship = toRelationshipKind(*preset)) {
-                const auto targetId = toId(target);
-                emit statusMessage(QString::fromStdString(
-                        RelationshipRules::canRelate(Model, *relationship, *sourceId, *targetId).Reason));
+                const auto from = edgeEnd(source);
+                const auto to = edgeEnd(target);
+                if (from && to)
+                    emit statusMessage(QString::fromStdString(
+                            RelationshipRules::canRelate(Model, *relationship, from->first, to->first, from->second,
+                                                         to->second).Reason));
             } else {
                 emit statusMessage(tr("Composition is not possible here (a part is owned by a part, a requirement by a "
                                       "requirement or part)."));
@@ -2044,6 +3547,26 @@ namespace StructuraSystems::Client {
                 return tr("Perform (action)");
             case DiagramTypes::Aggregation:
                 return tr("Reference");
+            case DiagramTypes::Annotation:
+                return tr("Annotation (about)");
+            case DiagramTypes::VariantMembership:
+                return tr("Variant");
+            case DiagramTypes::Exhibit:
+                return tr("Exhibit (state)");
+            case DiagramTypes::Assert:
+                return tr("Assert (constraint)");
+            case DiagramTypes::Assume:
+                return tr("Assume (constraint)");
+            case DiagramTypes::Require:
+                return tr("Require (constraint)");
+            case DiagramTypes::Expose:
+                return tr("Expose");
+            case DiagramTypes::ReferenceSubsetting:
+                return tr("References");
+            case DiagramTypes::Membership:
+                return tr("Owned member");
+            case DiagramTypes::AliasMembership:
+                return tr("Alias");
             default:
                 return {};
         }
@@ -2250,6 +3773,14 @@ namespace StructuraSystems::Client {
             return tr("The name must not be empty.");
         if (kind == ElementKind::MetadataUsage && values.value(QStringLiteral("typeName")).toString().trimmed().isEmpty())
             return tr("Metadata needs its definition as type, e.g. Safety.");
+        if (kind == ElementKind::Alias && values.contains(QStringLiteral("target"))) {
+            // "alias Package2Alias for Package2": a further name of an element that exists (7.5.2)
+            const QVariantMap status = targetStatus(id, values.value(QStringLiteral("target")).toString());
+            if (values.value(QStringLiteral("target")).toString().trimmed().isEmpty())
+                return tr("The alias needs the element it names after 'for', e.g. Package2.");
+            if (!status.value(QStringLiteral("known")).toBool())
+                return status.value(QStringLiteral("message")).toString();
+        }
         if (requirementConstraint && !isRequirementOwner(ownerKind))
             return tr("require / assume constraint only in a requirement.");
         const auto [multiplicityValid, multiplicity] = parseMultiplicity(values.value(QStringLiteral("multiplicity")).toString());
@@ -2498,9 +4029,9 @@ namespace StructuraSystems::Client {
     }
 
     QVariantMap DiagramController::edgeDetails(const QString &key) const {
-        if (!key.startsWith(QStringLiteral("r:")))
+        if (!key.startsWith(QStringLiteral("r:")) && !key.startsWith(QStringLiteral("n:")))
             return {};
-        const auto id = key.mid(2).toULongLong();
+        const auto id = key.mid(2).section(QLatin1Char(':'), 0, 0).toULongLong();
         if (!Model.containsRelationship(id))
             return {};
         const auto &relationship = Model.relationship(id);
@@ -2511,7 +4042,25 @@ namespace StructuraSystems::Client {
                              relationship.Kind == RelationshipKind::Allocation ||
                              relationship.Kind == RelationshipKind::Dependency || behavior;
         const bool message = relationship.Kind == RelationshipKind::Message;
+        // n-ary: the further ends by name; binary connection / interface: the multiplicities of the ends
+        const auto names = [&](const std::vector<ElementId> &ends) {
+            QStringList list;
+            for (const ElementId end: ends)
+                list.append(QString::fromStdString(referenceTo(Model, Model.element(end).owner(), end)));
+            return list.join(QStringLiteral(", "));
+        };
+        const bool connection = relationship.Kind == RelationshipKind::Connection;
+        const bool multiplicities = (connection || relationship.Kind == RelationshipKind::Interface) && !relationship.Nary &&
+                                    relationship.ExtraTargets.empty() && relationship.SourceFeature.empty() &&
+                                    relationship.TargetFeature.empty();
         return {{QStringLiteral("kindLabel"), edgeKindName(int(toEdgeKind(relationship.Kind)))},
+                {QStringLiteral("hasEnds"), connection || relationship.Kind == RelationshipKind::Dependency},
+                {QStringLiteral("hasClients"), relationship.Kind == RelationshipKind::Dependency},
+                {QStringLiteral("moreTargets"), names(relationship.ExtraTargets)},
+                {QStringLiteral("moreSources"), names(relationship.ExtraSources)},
+                {QStringLiteral("hasMultiplicities"), multiplicities},
+                {QStringLiteral("sourceMultiplicity"), QString::fromStdString(relationship.SourceMultiplicity)},
+                {QStringLiteral("targetMultiplicity"), QString::fromStdString(relationship.TargetMultiplicity)},
                 {QStringLiteral("editable"), labeled},
                 {QStringLiteral("hasType"), !behavior && relationship.Kind != RelationshipKind::Dependency},
                 {QStringLiteral("hasSequence"), message},
@@ -2536,9 +4085,9 @@ namespace StructuraSystems::Client {
     }
 
     QString DiagramController::updateEdge(const QString &key, const QVariantMap &values) {
-        if (!key.startsWith(QStringLiteral("r:")))
+        if (!key.startsWith(QStringLiteral("r:")) && !key.startsWith(QStringLiteral("n:")))
             return tr("Only relationships have a name and a type.");
-        const auto id = key.mid(2).toULongLong();
+        const auto id = key.mid(2).section(QLatin1Char(':'), 0, 0).toULongLong();
         if (!Model.containsRelationship(id))
             return tr("The relationship does not exist anymore.");
         QString error;
@@ -2555,6 +4104,39 @@ namespace StructuraSystems::Client {
                     Model.setBehaviorDetails(id, values.value(QStringLiteral("guard")).toString().toStdString(),
                                              values.value(QStringLiteral("trigger")).toString().toStdString(),
                                              values.value(QStringLiteral("effect")).toString().toStdString());
+                // "connect (a, b, c)", "dependency a, b to c, d": the further ends, names separated by commas
+                if ((kind == RelationshipKind::Connection || kind == RelationshipKind::Dependency) &&
+                    (values.contains(QStringLiteral("moreTargets")) || values.contains(QStringLiteral("moreSources")))) {
+                    const auto &relationship = Model.relationship(id);
+                    const ElementId scope = Model.element(relationship.Source).owner();
+                    const auto resolveList = [&](const QString &text) {
+                        std::vector<ElementId> ends;
+                        for (const QString &name: text.split(QLatin1Char(','), Qt::SkipEmptyParts)) {
+                            const auto end = resolveReference(Model, scope, name.trimmed().toStdString());
+                            if (!end)
+                                throw Diagram::ModelError("'" + name.trimmed().toStdString() + "' is not found");
+                            ends.push_back(*end);
+                        }
+                        return ends;
+                    };
+                    auto targets = resolveList(values.value(QStringLiteral("moreTargets")).toString());
+                    auto sources = kind == RelationshipKind::Dependency
+                                   ? resolveList(values.value(QStringLiteral("moreSources")).toString())
+                                   : std::vector<ElementId>();
+                    const bool nary = kind == RelationshipKind::Connection && !targets.empty();
+                    Model.setExtraEnds(id, std::move(sources), std::move(targets), nary);
+                }
+                if ((kind == RelationshipKind::Connection || kind == RelationshipKind::Interface) &&
+                    values.contains(QStringLiteral("sourceMultiplicity"))) {
+                    const auto bracket = [](QString text) {
+                        text = text.trimmed();
+                        if (!text.isEmpty() && !text.startsWith(QLatin1Char('[')))
+                            text = QLatin1Char('[') + text + QLatin1Char(']');
+                        return text.toStdString();
+                    };
+                    Model.setEndMultiplicities(id, bracket(values.value(QStringLiteral("sourceMultiplicity")).toString()),
+                                               bracket(values.value(QStringLiteral("targetMultiplicity")).toString()));
+                }
             } catch (const std::exception &exception) {
                 error = QString::fromStdString(exception.what());
             }
@@ -2574,6 +4156,12 @@ namespace StructuraSystems::Client {
         const auto parseNumber = [](const QString &value, bool &ok) -> std::size_t {
             return static_cast<std::size_t>(value.trimmed().toULongLong(&ok));
         };
+
+        // bounds as expressions: "m", "1..n" (feature references, table 4 "[m]")
+        static const QRegularExpression expression(QStringLiteral("^[A-Za-z_][A-Za-z0-9_:.]*$|^[0-9]+\\s*\\.\\.\\s*[A-Za-z_][A-Za-z0-9_:.]*$|"
+                                                                  "^[A-Za-z_][A-Za-z0-9_:.]*\\s*\\.\\.\\s*([0-9]+|\\*|[A-Za-z_][A-Za-z0-9_:.]*)$"));
+        if (expression.match(text).hasMatch())
+            return {true, Multiplicity::expression(text.simplified().toStdString())};
 
         const auto separator = text.indexOf(QLatin1String(".."));
         bool ok = false;
@@ -2626,8 +4214,11 @@ namespace StructuraSystems::Client {
         std::vector<ElementId> nodeIds;
         std::function<void(ElementId)> collect = [&](ElementId owner) {
             for (const ElementId child: Model.children(owner)) {
-                if (!shownAsNode(child))
+                if (!shownAsNode(child)) {
+                    if (!Interconnection && emptiedByQualifiedNames(child))
+                        collect(child); // its members are drawn alone
                     continue;
+                }
                 nodeIds.push_back(child);
                 collect(child);
             }
@@ -2640,9 +4231,63 @@ namespace StructuraSystems::Client {
                 collect(*context);
             }
         } else {
+            // the views of the model to render the structure view by; with one: only what it exposes (and the
+            // owners on the way, so the nesting stays)
+            QVariantList views;
+            std::function<void(ElementId)> findViews = [&](ElementId owner) {
+                for (const ElementId child: Model.children(owner)) {
+                    if (Model.element(child).kind() == ElementKind::ViewUsage)
+                        views.append(QVariantMap{{QStringLiteral("id"), QString::number(child)},
+                                                 {QStringLiteral("title"), QString::fromStdString(Model.qualifiedName(child))}});
+                    findViews(child);
+                }
+            };
+            findViews(RootId);
+            if (views != Views) {
+                Views = views;
+                emit viewsChanged();
+            }
+            if (ViewElement && !Model.contains(*ViewElement)) {
+                ViewElement.reset();
+                emit viewChanged();
+            }
+            ViewKeep.clear();
+            if (ViewElement) {
+                for (const ElementId id: exposedElements()) {
+                    for (const ElementId step: Model.ownershipPath(id))
+                        ViewKeep.insert(step);
+                }
+                emit viewChanged(); // the info lines may have changed
+            }
             collect(RootId);
         }
-        // an import of a package shown here whose imported element is shown too: an «import» arrow, no node
+        // aliases in the name compartment of their element (notation "name", table 4) / as a line (○, table 3)
+        std::vector<std::pair<ElementId, ElementId>> aliasLines; // alias, aliased element
+        std::map<ElementId, QStringList> aliasNamesShown;
+        {
+            const std::set<ElementId> shown(nodeIds.begin(), nodeIds.end());
+            std::function<void(ElementId)> visit = [&](ElementId owner) {
+                for (const ElementId child: Model.children(owner)) {
+                    const auto &element = Model.element(child);
+                    if (element.kind() == ElementKind::Alias && !shown.count(child) && !Interconnection) {
+                        const auto aliased = resolveReference(Model, element.owner(), element.target());
+                        if (aliased && shown.count(*aliased)) {
+                            if (notationOf(child, QStringLiteral("aliases")) == QLatin1String("line") &&
+                                shown.count(element.owner()))
+                                aliasLines.emplace_back(child, *aliased);
+                            else
+                                // "P::PartDefAlias1" where the alias is in another namespace than the element (table 4)
+                                aliasNamesShown[*aliased].append(QString::fromStdString(
+                                        element.owner() == Model.element(*aliased).owner() ? element.name()
+                                                                                             : Model.qualifiedName(child)));
+                        }
+                    }
+                    visit(child);
+                }
+            };
+            visit(RootId);
+        }
+        // an import drawn as line (notation "imports") whose imported element is shown too: an «import» arrow, no node
         std::vector<std::pair<ElementId, ElementId>> importArrows; // import, imported element
         {
             const std::set<ElementId> shown(nodeIds.begin(), nodeIds.end());
@@ -2652,7 +4297,8 @@ namespace StructuraSystems::Client {
                 if (element.kind() == ElementKind::Import && element.owner() != RootId && shown.count(element.owner())) {
                     const auto imported = importedElement(Model, id);
                     if (imported && *imported != element.owner() && shown.count(*imported) &&
-                        !Model.isAncestor(element.owner(), *imported)) {
+                        !Model.isAncestor(element.owner(), *imported) &&
+                        notationOf(id, QStringLiteral("imports")) == QLatin1String("line")) {
                         importArrows.emplace_back(id, *imported);
                         continue;
                     }
@@ -2663,9 +4309,47 @@ namespace StructuraSystems::Client {
         }
         const std::set<ElementId> wanted(nodeIds.begin(), nodeIds.end());
 
+        // interconnection view: the ports a part inherits from its definition, on its border (as in the definition)
+        std::vector<ElementId> derivedIds;
+        if (!Interconnection) {
+            // structure view: inherited parts as nodes of their own (notation "inherited" = "nodes", table 4
+            // "Inherited Usage"): drawn only, no textual notation
+            for (const ElementId id: nodeIds) {
+                if (notationOf(id, QStringLiteral("inherited")) != QLatin1String("nodes"))
+                    continue;
+                for (const ElementId feature: inheritedFeatures(Model, id)) {
+                    if (Model.element(feature).kind() != ElementKind::PartUsage || Model.element(feature).name().empty())
+                        continue;
+                    auto [found, added] = DerivedIds.emplace(std::make_pair(id, feature), NextDerivedId);
+                    if (added) {
+                        DerivedPorts[NextDerivedId] = DerivedPort{id, feature};
+                        ++NextDerivedId;
+                    }
+                    derivedIds.push_back(found->second);
+                }
+            }
+        }
+        if (Interconnection) {
+            for (const ElementId id: nodeIds) {
+                if (Model.element(id).kind() != ElementKind::PartUsage)
+                    continue;
+                for (const ElementId feature: inheritedFeatures(Model, id)) {
+                    if (Model.element(feature).kind() != ElementKind::PortUsage || Model.element(feature).name().empty())
+                        continue;
+                    auto [found, added] = DerivedIds.emplace(std::make_pair(id, feature), NextDerivedId);
+                    if (added) {
+                        DerivedPorts[NextDerivedId] = DerivedPort{id, feature};
+                        ++NextDerivedId;
+                    }
+                    derivedIds.push_back(found->second);
+                }
+            }
+        }
+        const std::set<ElementId> derivedWanted(derivedIds.begin(), derivedIds.end());
+
         for (int row = Nodes->count() - 1; row >= 0; --row) {
             const auto id = Nodes->nodes()[std::size_t(row)].Id;
-            if (wanted.count(id) == 0) {
+            if (wanted.count(id) == 0 && derivedWanted.count(id) == 0) {
                 Measured.erase(id);
                 Nodes->removeAt(row);
             }
@@ -2677,12 +4361,100 @@ namespace StructuraSystems::Client {
             node.Id = id;
             node.Depth = int(Model.ownershipPath(id).size()) - 1;
             fillNode(node, element);
-            if (!node.Keyword.isEmpty())
-                node.Keyword = stereotypes(element) + node.Keyword; // «variation» «part def»
+            if (!node.Keyword.isEmpty() && node.Kind != DiagramTypes::PortNode)
+                node.Keyword = withStereotypes(element, node.Keyword); // «variation part def»
+            if (!Interconnection && notationApplies(id, QStringLiteral("qualified")) &&
+                notationOf(id, QStringLiteral("qualified")) == QLatin1String("qualified") && !element.name().empty()) {
+                // alone: "Package1::Package2::PartDef3" (table 4)
+                const QString name = QString::fromStdString(element.name());
+                const QString qualified = QString::fromStdString(Model.qualifiedName(id));
+                const auto at = node.Title.indexOf(name);
+                node.Title = at >= 0 ? node.Title.left(at) + qualified + node.Title.mid(at + name.size()) : qualified;
+            }
+            const bool generalsInName = !Interconnection &&
+                                        notationOf(id, QStringLiteral("specialization")) == QLatin1String("name");
+            QStringList generals; // "PartDef1 :> PartDef0" in the name compartment (table 4)
+            if (generalsInName) {
+                for (const auto &relationship: Model.relationships()) {
+                    if (relationship.Kind == RelationshipKind::Specialization && relationship.Source == id &&
+                        Model.contains(relationship.Target))
+                        generals.append(QString::fromStdString(Model.element(relationship.Target).name()));
+                }
+            }
+            const QString specializationKeyword = element.specializationKeyword().empty()
+                                                  ? QStringLiteral(":>") : QString::fromStdString(element.specializationKeyword());
+            if (Diagram::isUsageKind(element.kind()) && node.Kind != DiagramTypes::PortNode) {
+                // a usage (table 4): "subsets part1" / "redefines part1 = part2" on a line of its own below the name
+                QString second = generals.isEmpty() ? QString()
+                                                    : specializationKeyword + QLatin1Char(' ') + generals.join(QStringLiteral(", "));
+                QString redefinitions = redefinitionText(element);
+                if (!redefinitions.isEmpty() && !generalsInName && !Interconnection) {
+                    // drawn as redefinition line (doc figure "Redefinition"): only the line, no "redefines part2"
+                    // in the name; a redefined feature that is not shown stays written in the name
+                    QStringList kept;
+                    for (const auto &reference: element.redefinitions()) {
+                        const auto redefined = redefinedFeature(Model, id, reference);
+                        if (!redefined || !wanted.count(*redefined) || *redefined == id)
+                            kept.append(QString::fromStdString(reference));
+                    }
+                    if (kept.size() != int(element.redefinitions().size())) {
+                        const QString rest = kept.isEmpty() ? QString()
+                                                            : QString::fromStdString(element.redefinitionKeyword()) +
+                                                                  QLatin1Char(' ') + kept.join(QStringLiteral(", "));
+                        const auto at = node.Title.indexOf(QLatin1Char(' ') + redefinitions);
+                        if (at > 0)
+                            node.Title.replace(at, redefinitions.size() + 1, rest.isEmpty() ? QString() : QLatin1Char(' ') + rest);
+                        redefinitions = rest;
+                    }
+                }
+                if (!redefinitions.isEmpty()) {
+                    const auto at = node.Title.indexOf(QLatin1Char(' ') + redefinitions);
+                    if (at > 0) {
+                        second += (second.isEmpty() ? QString() : QStringLiteral(" ")) + node.Title.mid(at + 1);
+                        node.Title = node.Title.left(at);
+                    }
+                }
+                if (!second.isEmpty())
+                    node.Title += QLatin1Char('\n') + second;
+            } else if (!generals.isEmpty()) {
+                node.Title += QLatin1Char(' ') + specializationKeyword + QLatin1Char(' ') + generals.join(QStringLiteral(", "));
+            }
+            if (const auto aliases = aliasNamesShown.find(id); aliases != aliasNamesShown.end() && !node.Folder)
+                node.Subtitle = QStringLiteral("«alias» ") + aliases->second.join(QStringLiteral(", "));
+            if (notationOf(id, QStringLiteral("docs")) == QLatin1String("compartment") && !Interconnection &&
+                node.Kind != DiagramTypes::PackageNode &&
+                node.Kind != DiagramTypes::RequirementNode && node.Kind != DiagramTypes::CaseNode) // those have it already
+                node.Compartments = docCompartment(id) + node.Compartments;
+            if (AllCompartments && !Interconnection && node.Kind != DiagramTypes::PackageNode &&
+                node.Kind != DiagramTypes::PortNode && node.Kind != DiagramTypes::NoteNode &&
+                node.Kind != DiagramTypes::LibraryNode && element.kind() != ElementKind::Textual)
+                node.Compartments += extraCompartments(id);
             if (Interconnection && !nodeChildren(id).empty()) {
                 // a part around its parts: keyword and name on top, its parts inside
                 node.Container = true;
                 node.Compartments.clear();
+            }
+            if (nestedFeatures(id) &&
+                (!nodeChildren(id).empty() || notationOf(id, QStringLiteral("inherited")) == QLatin1String("nodes")))
+                node.Container = true; // table 9 "Part with graphical compartment": its parts inside, below its compartments
+            if (Interconnection && element.kind() == ElementKind::PartUsage) {
+                // the ports it inherits are drawn on its border (derived port nodes), not listed
+                for (int c = 0; c < node.Compartments.size(); ++c) {
+                    auto compartment = node.Compartments[c].toMap();
+                    if (compartment.value(QStringLiteral("title")).toString() != QLatin1String("ports"))
+                        continue;
+                    QVariantList kept;
+                    for (const auto &value: compartment.value(QStringLiteral("entries")).toList()) {
+                        if (!value.toMap().value(QStringLiteral("text")).toString().startsWith(QLatin1Char('^')))
+                            kept.append(value);
+                    }
+                    if (kept.isEmpty()) {
+                        node.Compartments.removeAt(c--);
+                    } else {
+                        compartment[QStringLiteral("entries")] = kept;
+                        node.Compartments[c] = compartment;
+                    }
+                }
             }
             if (Interconnection && node.Kind == DiagramTypes::PartDefinitionNode) // "part def" as context: a box
                 node.Kind = DiagramTypes::PartNode;
@@ -2720,6 +4492,49 @@ namespace StructuraSystems::Client {
             node.Rect = QRectF(position, size);
             Nodes->append(node);
         }
+        for (const ElementId id: derivedIds) {
+            const auto &derived = DerivedPorts.at(id);
+            DiagramNode node;
+            node.Id = id;
+            node.Depth = int(Model.ownershipPath(derived.Anchor).size());
+            fillNode(node, Model.element(derived.Port));
+            if (Model.element(derived.Port).kind() != ElementKind::PortUsage) {
+                // an inherited part: "^part1 : PartDef1", marked as drawn only (no textual notation)
+                node.Kind = DiagramTypes::PartNode;
+                node.Title = QLatin1Char('^') + node.Title;
+                node.Derived = true;
+                node.Compartments.clear();
+                const int row = Nodes->indexOf(id);
+                if (row >= 0) {
+                    Nodes->updateContent(row, node);
+                    continue;
+                }
+                // below the part it is inherited by, beside the others
+                QPointF position(40, 40);
+                if (const auto *anchorNode = Nodes->find(derived.Anchor))
+                    position = QPointF(anchorNode->Rect.left(), anchorNode->Rect.bottom() + 70);
+                for (const auto &other: Nodes->nodes()) {
+                    if (other.Kind != DiagramTypes::PackageNode && other.Kind != DiagramTypes::PortNode &&
+                        other.Rect.adjusted(-12, -12, 12, 12).intersects(QRectF(position, QSizeF(DefaultPartWidth, DefaultPartHeight))))
+                        position.setX(std::max(position.x(), other.Rect.right() + 24));
+                }
+                node.Rect = QRectF(position, QSizeF(DefaultPartWidth, DefaultPartHeight));
+                Nodes->append(node);
+                continue;
+            }
+            node.Kind = DiagramTypes::PortNode;
+            node.Keyword = portDirection(Model, derived.Port);
+            const int row = Nodes->indexOf(id);
+            if (row >= 0) {
+                Nodes->updateContent(row, node);
+                continue;
+            }
+            node.Rect = QRectF(0, 0, PortSize, PortSize);
+            Nodes->append(node);
+            AutoPlacedPorts.insert(id);
+            if (const int added = Nodes->indexOf(id); added >= 0)
+                Nodes->setRect(added, portSlot(id)); // its slot once it is among the ports of its part
+        }
 
         // Edges: ownership of a part by a part is drawn as composition, the rest are relationships.
         std::vector<DiagramEdge> edges;
@@ -2732,13 +4547,15 @@ namespace StructuraSystems::Client {
             const bool composed = (composes(ownerKind) && (kind == ElementKind::PartUsage || kind == ElementKind::OccurrenceUsage)) ||
                                   ((isPartLike(ownerKind) || isRequirementOwner(ownerKind)) && kind == ElementKind::RequirementUsage) ||
                                   isActionTreeNode(Model, id);
-            if (!composed)
+            if (!composed || nestedFeatures(owner) || detachedFromOwner(id)) // inside its owner / alone: no line
                 continue;
             DiagramEdge edge;
             // "ref part": a reference, no composition - a plain line
             const auto &prefixes = Model.element(id).prefixes();
             const bool reference = std::find(prefixes.begin(), prefixes.end(), "ref") != prefixes.end();
+            const bool variant = std::find(prefixes.begin(), prefixes.end(), "variant") != prefixes.end();
             edge.Kind = Diagram::isTemporalKeyword(Model.element(id).declaredKeyword()) ? DiagramTypes::Temporal
+                        : variant ? DiagramTypes::VariantMembership // a circle with a cross at the variation
                         : reference ? DiagramTypes::Aggregation : DiagramTypes::Composition;
             edge.Source = owner;
             edge.Target = id;
@@ -2755,6 +4572,40 @@ namespace StructuraSystems::Client {
             return std::nullopt;
         };
         for (const auto &relationship: Model.relationships()) {
+            if (relationship.Nary || !relationship.ExtraSources.empty() || !relationship.ExtraTargets.empty()) {
+                // n-ary connection / dependency: a line from each end shown to the dot where they meet
+                if (relationship.Kind == RelationshipKind::Succession || relationship.Kind == RelationshipKind::Transition)
+                    continue;
+                std::vector<std::pair<ElementId, int>> ends; // node, junction role
+                const bool dependency = relationship.Kind == RelationshipKind::Dependency;
+                const auto addEnd = [&](ElementId end, bool client) {
+                    const auto node = dependency ? shownIn(end) : (wanted.count(end) ? std::optional<ElementId>(end) : std::nullopt);
+                    if (node && std::none_of(ends.begin(), ends.end(), [&](const auto &other) { return other.first == *node; }))
+                        ends.emplace_back(*node, dependency ? (client ? 2 : 3) : 1);
+                };
+                addEnd(relationship.Source, true);
+                for (const ElementId end: relationship.ExtraSources)
+                    addEnd(end, true);
+                addEnd(relationship.Target, false);
+                for (const ElementId end: relationship.ExtraTargets)
+                    addEnd(end, false);
+                if (ends.size() < 2)
+                    continue;
+                for (std::size_t k = 0; k < ends.size(); ++k) {
+                    DiagramEdge edge;
+                    edge.Kind = toEdgeKind(relationship.Kind);
+                    edge.Source = ends[k].first;
+                    edge.Target = ends[k].first;
+                    edge.Junction = ends[k].second;
+                    edge.Group = edgeKey(false, relationship.Id);
+                    edge.Key = QStringLiteral("n:") + QString::number(relationship.Id) + QLatin1Char(':') + QString::number(k);
+                    edge.Selected = SelectedEdges.count(edge.Key) > 0;
+                    if (k == 0)
+                        edge.Label = edgeLabel(relationship);
+                    edges.push_back(edge);
+                }
+                continue;
+            }
             std::optional<ElementId> source = wanted.count(relationship.Source) ? std::optional<ElementId>(relationship.Source)
                                                                                 : std::nullopt;
             std::optional<ElementId> target = wanted.count(relationship.Target) ? std::optional<ElementId>(relationship.Target)
@@ -2777,21 +4628,200 @@ namespace StructuraSystems::Client {
                 detail = (from.isEmpty() ? QStringLiteral("·") : from) + QStringLiteral(" \u2192 ") +
                          (to.isEmpty() ? QStringLiteral("·") : to);
             }
+            // "connect tank.fuelOut to engine.fuelIn": to the inherited port drawn on the part
+            const auto toPort = [&](std::optional<ElementId> &end, ElementId element, const std::string &feature) {
+                if (!end || *end != element || feature.empty())
+                    return;
+                const std::string first = feature.substr(0, feature.find('.'));
+                for (const ElementId id: derivedIds) {
+                    const auto &derived = DerivedPorts.at(id);
+                    if (derived.Anchor == element && Model.element(derived.Port).name() == first) {
+                        end = id;
+                        return;
+                    }
+                }
+            };
+            toPort(source, relationship.Source, relationship.SourceFeature);
+            toPort(target, relationship.Target, relationship.TargetFeature);
             if (!source || !target || *source == *target)
                 continue;
             // successions and transitions belong to the behavior view
             if (relationship.Kind == RelationshipKind::Succession || relationship.Kind == RelationshipKind::Transition)
                 continue;
+            // ":> PartDef0" written in the name of the specializing element: no line (table 4)
+            if (relationship.Kind == RelationshipKind::Specialization &&
+                notationOf(relationship.Source, QStringLiteral("specialization")) == QLatin1String("name"))
+                continue;
             DiagramEdge edge;
             edge.Kind = toEdgeKind(relationship.Kind);
             edge.Source = *source;
             edge.Target = *target;
+            edge.Dashed = relationship.Kind == RelationshipKind::Flow && relationship.SuccessionFlow; // sflow: dashed
             edge.Key = edgeKey(false, relationship.Id);
             edge.Selected = SelectedEdges.count(edge.Key) > 0;
             edge.Label = edgeLabel(relationship);
             if (!detail.isEmpty())
                 edge.Label = (edge.Label + QLatin1Char(' ') + detail).trimmed();
+            // "connect [0..1] a to [1] b": the multiplicities at the ends
+            edge.SourceLabel = QString::fromStdString(relationship.SourceMultiplicity);
+            edge.TargetLabel = QString::fromStdString(relationship.TargetMultiplicity);
             edges.push_back(edge);
+        }
+        // notes (comment, doc, rep, metadata): a dashed line to each element they are about (annotation-link)
+        for (const ElementId id: nodeIds) {
+            const auto &element = Model.element(id);
+            const bool note = isNoteElement(Model, id);
+            if (!note && element.kind() != ElementKind::MetadataUsage)
+                continue;
+            const std::vector<std::string> about = note ? SysMLTextImporter::describeAnnotation(element.text()).About
+                                                        : element.about();
+            const auto addAnnotation = [&](ElementId target, int index, const QString &label, std::optional<ElementId> entry) {
+                DiagramEdge edge;
+                edge.Kind = DiagramTypes::Annotation;
+                edge.Source = id;
+                edge.Target = target;
+                edge.Key = QStringLiteral("a:") + QString::number(id) + QLatin1Char(':') + QString::number(index);
+                edge.Selected = SelectedEdges.count(edge.Key) > 0;
+                edge.Label = entry ? QString() : label; // at an entry the highlighted entry shows what is meant
+                if (entry) {
+                    // the line ends at the entry of the compartment (table 2: "Annotation"), highlighted in the node
+                    edge.TargetEntry = QString::number(*entry);
+                    const auto rect = EntryRects.find({target, edge.TargetEntry});
+                    if (rect != EntryRects.end())
+                        edge.TargetEntryRect = rect->second;
+                }
+                edges.push_back(edge);
+            };
+            for (std::size_t index = 0; index < about.size(); ++index) {
+                auto annotated = resolveReference(Model, element.owner(), about[index]);
+                std::optional<ElementId> node = annotated ? shownIn(*annotated) : std::nullopt;
+                if (!annotated) {
+                    // an inherited feature ("part1::attribute1" with attribute1 of Part1): an entry "^attribute1" of part1
+                    const auto segments = SysMLTextImporter::splitReference(about[index]);
+                    if (segments.size() > 1) {
+                        std::string prefix;
+                        for (std::size_t k = 0; k + 1 < segments.size(); ++k)
+                            prefix += (k > 0 ? "::" : "") + segments[k];
+                        const auto owner = resolveReference(Model, element.owner(), prefix);
+                        if (owner && wanted.count(*owner)) {
+                            for (const ElementId inherited: inheritedFeatures(Model, *owner)) {
+                                if (Model.element(inherited).name() == segments.back()) {
+                                    annotated = inherited;
+                                    node = owner;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+                if (!annotated || !node || *node == id)
+                    continue;
+                if (*annotated == *node) {
+                    addAnnotation(*node, int(index), QString(), std::nullopt);
+                    continue;
+                }
+                // an element inside a compartment ("part1::attribute1"): the line ends at its entry, the label names it
+                QStringList names;
+                if (Model.isAncestor(*node, *annotated)) {
+                    for (ElementId current = *annotated; current != *node; current = Model.element(current).owner())
+                        names.prepend(QString::fromStdString(Model.element(current).name()));
+                } else {
+                    names.append(QStringLiteral("^") + QString::fromStdString(Model.element(*annotated).name()));
+                }
+                addAnnotation(*node, int(index), names.join(QLatin1Char('.')), annotated);
+            }
+            // without "about": the owner is the annotated element (a package shows it by nesting)
+            if (about.empty() && element.owner() != RootId && wanted.count(element.owner()) &&
+                Model.element(element.owner()).kind() != ElementKind::Package)
+                addAnnotation(element.owner(), -1, QString(), std::nullopt);
+        }
+        // connection def / interface def between the definitions of its ends (graphical BNF: connection-def-graphical,
+        // table 11): a line with the role names and multiplicities at the ends, a dot for more than two ends
+        if (!Interconnection) {
+            for (const ElementId id: nodeIds) {
+                const auto &definition = Model.element(id);
+                if (!Diagram::isConnectionDefinitionKind(definition.kind()) && definition.kind() != ElementKind::InterfaceDefinition)
+                    continue;
+                std::vector<std::pair<ElementId, QString>> ends; // type shown, "role [multiplicity]"
+                bool complete = true;
+                for (const ElementId child: Model.children(id)) {
+                    const auto &end = Model.element(child);
+                    const auto &prefixes = end.prefixes();
+                    if (std::find(prefixes.begin(), prefixes.end(), "end") == prefixes.end())
+                        continue;
+                    std::string type = end.typeName();
+                    if (!type.empty() && type.front() == '~')
+                        type.erase(0, 1);
+                    const auto typed = type.empty() ? std::nullopt : resolveReference(Model, id, type);
+                    if (!typed || !wanted.count(*typed) || *typed == id) {
+                        complete = false;
+                        break;
+                    }
+                    QString role = QString::fromStdString(end.name());
+                    if (end.multiplicity().has_value())
+                        role += QLatin1Char(' ') + QString::fromStdString(end.multiplicity()->toString());
+                    ends.emplace_back(*typed, role);
+                }
+                if (!complete || ends.size() < 2)
+                    continue;
+                const QString label = keywordOf(definition) + QLatin1Char(' ') + QString::fromStdString(definition.name());
+                if (ends.size() == 2) {
+                    DiagramEdge edge;
+                    edge.Kind = DiagramTypes::Association;
+                    edge.Source = ends[0].first;
+                    edge.Target = ends[1].first;
+                    edge.Key = QStringLiteral("cd:") + QString::number(id);
+                    edge.Selected = SelectedEdges.count(edge.Key) > 0;
+                    edge.Label = label;
+                    edge.SourceLabel = ends[0].second;
+                    edge.TargetLabel = ends[1].second;
+                    if (edge.Source != edge.Target)
+                        edges.push_back(edge);
+                    continue;
+                }
+                std::set<ElementId> seen;
+                for (std::size_t k = 0; k < ends.size(); ++k) {
+                    if (!seen.insert(ends[k].first).second)
+                        continue; // one line per definition shown
+                    DiagramEdge edge;
+                    edge.Kind = DiagramTypes::Association;
+                    edge.Source = ends[k].first;
+                    edge.Target = ends[k].first;
+                    edge.Junction = 1;
+                    edge.Group = QStringLiteral("cd:") + QString::number(id);
+                    edge.Key = QStringLiteral("cd:") + QString::number(id) + QLatin1Char(':') + QString::number(k);
+                    edge.Selected = SelectedEdges.count(edge.Key) > 0;
+                    edge.SourceLabel = ends[k].second;
+                    if (k == 0)
+                        edge.Label = label;
+                    edges.push_back(edge);
+                }
+            }
+        }
+        // «expose» from a view to what it exposes, if shown (table 24: dashed, open head; «expose»*, «expose»**)
+        for (const ElementId id: nodeIds) {
+            if (Model.element(id).kind() != ElementKind::ViewUsage)
+                continue;
+            for (const ElementId child: Model.children(id)) {
+                const auto &expose = Model.element(child);
+                if (expose.kind() != ElementKind::Expose)
+                    continue;
+                const auto exposed = importedElement(Model, child);
+                const auto node = exposed ? shownIn(*exposed) : std::nullopt;
+                if (!node || *node == id)
+                    continue;
+                const QString target = QString::fromStdString(expose.target()).section(QLatin1Char('['), 0, 0);
+                DiagramEdge edge;
+                edge.Kind = DiagramTypes::Expose;
+                edge.Source = id;
+                edge.Target = *node;
+                edge.Key = QStringLiteral("x:") + QString::number(child);
+                edge.Selected = SelectedEdges.count(edge.Key) > 0;
+                edge.Label = QStringLiteral("«expose»") + (target.endsWith(QLatin1String("::**")) ? QStringLiteral("**")
+                                                           : target.endsWith(QLatin1String("::*")) ? QStringLiteral("*")
+                                                                                                    : QString());
+                edges.push_back(edge);
+            }
         }
         // «import» arrows from the importing package
         for (const auto &[import, imported]: importArrows) {
@@ -2804,12 +4834,50 @@ namespace StructuraSystems::Client {
             edge.Label = importLabel(Model.element(import));
             edges.push_back(edge);
         }
+        // an inherited part drawn as node: composed in the part inheriting it (unless drawn inside it)
+        for (const ElementId id: derivedIds) {
+            const auto &derived = DerivedPorts.at(id);
+            if (Model.element(derived.Port).kind() == ElementKind::PortUsage || nestedFeatures(derived.Anchor))
+                continue;
+            DiagramEdge edge;
+            edge.Kind = DiagramTypes::Composition;
+            edge.Source = derived.Anchor;
+            edge.Target = id;
+            edge.Key = QStringLiteral("h:") + QString::number(id);
+            edge.Selected = SelectedEdges.count(edge.Key) > 0;
+            edges.push_back(edge);
+        }
+        // aliases as line: from the package (circle) to the element, labelled with the alias name (table 3)
+        for (const auto &[alias, aliased]: aliasLines) {
+            DiagramEdge edge;
+            edge.Kind = DiagramTypes::AliasMembership;
+            edge.Source = Model.element(alias).owner();
+            edge.Target = aliased;
+            edge.Key = QStringLiteral("al:") + QString::number(alias);
+            edge.Selected = SelectedEdges.count(edge.Key) > 0;
+            edge.Label = QString::fromStdString(Model.element(alias).name());
+            edges.push_back(edge);
+        }
 
         for (const ElementId id: nodeIds) {
             const auto &element = Model.element(id);
-            // "defined by": a usage and its definition, both shown
-            if (Diagram::isUsageKind(element.kind()) && element.kind() != ElementKind::PortUsage &&
-                !element.typeName().empty()) {
+            // a package beside the package owning it, a definition in a part: the ⊕ line of an owned member (table 3)
+            const bool ownedDefinition = Diagram::isDefinitionKind(element.kind()) && element.owner() != RootId &&
+                                         composes(Model.element(element.owner()).kind()) && !nestedFeatures(element.owner());
+            if (((notationApplies(id, QStringLiteral("packages")) && detachedFromOwner(id)) || ownedDefinition) &&
+                wanted.count(element.owner())) {
+                DiagramEdge edge;
+                edge.Kind = DiagramTypes::Membership;
+                edge.Source = element.owner();
+                edge.Target = id;
+                edge.Key = edgeKey(true, id);
+                edge.Selected = SelectedEdges.count(edge.Key) > 0;
+                edges.push_back(edge);
+            }
+            // "defined by": a usage and its definition, both shown; only if asked for - the type is in the name of the
+            // usage already ("part2 : Part2", table 3 "Package with owned members" has no line)
+            if (notationOf(id, QStringLiteral("typing")) == QLatin1String("line") && Diagram::isUsageKind(element.kind()) &&
+                !portAnchor(Model, id) && !element.typeName().empty()) {
                 const auto type = resolveReference(Model, element.owner(), element.typeName());
                 if (type && wanted.count(*type) && typesUsage(Model.element(*type).kind(), element.kind())) {
                     DiagramEdge edge;
@@ -2821,8 +4889,23 @@ namespace StructuraSystems::Client {
                     edges.push_back(edge);
                 }
             }
-            // ":>> eng": the inherited feature it redefines, if shown
-            for (std::size_t index = 0; index < element.redefinitions().size(); ++index) {
+            // "references action3" / "::> part1": reference subsetting, if shown (hollow triangle with four dots)
+            if (!element.referencedFeature().empty()) {
+                const auto referenced = resolveReference(Model, element.owner(), element.referencedFeature());
+                if (referenced && wanted.count(*referenced) && *referenced != id) {
+                    DiagramEdge edge;
+                    edge.Kind = DiagramTypes::ReferenceSubsetting;
+                    edge.Source = id;
+                    edge.Target = *referenced;
+                    edge.Key = QStringLiteral("s:") + QString::number(id);
+                    edge.Selected = SelectedEdges.count(edge.Key) > 0;
+                    edges.push_back(edge);
+                }
+            }
+            // ":>> eng": the inherited feature it redefines, if shown (not when written in its name, table 4)
+            for (std::size_t index = 0;
+                 notationOf(id, QStringLiteral("specialization")) != QLatin1String("name") && index < element.redefinitions().size();
+                 ++index) {
                 const auto redefined = redefinedFeature(Model, id, element.redefinitions()[index]);
                 if (!redefined || !wanted.count(*redefined) || *redefined == id)
                     continue;
@@ -2861,6 +4944,7 @@ namespace StructuraSystems::Client {
                     continue;
                 DiagramEdge edge;
                 edge.Kind = DiagramTypes::Performs;
+                edge.Label = QStringLiteral("«perform»");
                 edge.Source = id;
                 edge.Target = *action;
                 edge.Key = QStringLiteral("p:") + QString::number(child);
@@ -2873,7 +4957,7 @@ namespace StructuraSystems::Client {
             edges.erase(std::remove_if(edges.begin(), edges.end(), [](const DiagramEdge &edge) {
                 return edge.Kind != DiagramTypes::Connection && edge.Kind != DiagramTypes::Flow &&
                        edge.Kind != DiagramTypes::Interface && edge.Kind != DiagramTypes::Binding &&
-                       edge.Kind != DiagramTypes::ValueFlow;
+                       edge.Kind != DiagramTypes::ValueFlow && edge.Kind != DiagramTypes::Message;
             }), edges.end());
         }
         Edges->setEdges(std::move(edges));
@@ -2899,14 +4983,112 @@ namespace StructuraSystems::Client {
         switch (element.kind()) {
             case ElementKind::Package:
                 node.Kind = DiagramTypes::PackageNode;
-                node.Title = decorate(element, QStringLiteral("package ") + name);
+                node.Title = decorate(element, name); // the tab holds the name only (table 3)
+                if (!Interconnection) {
+                    // packages / imports shown as text (notation "compartment"): compartments of the frame (table 3)
+                    QVariantList members;
+                    QVariantList packages;
+                    QVariantList imports;
+                    const bool membersAsText = notationOf(id, QStringLiteral("members")) == QLatin1String("compartment");
+                    // "part def PartDef3" (keyword bold) at a depth below the package listed as text
+                    const auto memberEntry = [&](ElementId member, int depth) {
+                        const auto &memberElement = Model.element(member);
+                        const QString keyword = kindText(memberElement) == QStringLiteral("statement")
+                                                ? QString() : QString::fromStdString(Diagram::defaultKeyword(memberElement.kind()));
+                        const QString name = Diagram::isUsageKind(memberElement.kind())
+                                             ? usageText(Model, member)
+                                             : QString::fromStdString(memberElement.name());
+                        QVariantMap value = entry(member, (keyword + QLatin1Char(' ') + decorate(memberElement, name)).trimmed());
+                        value[QStringLiteral("keyword")] = keyword;
+                        value[QStringLiteral("indent")] = depth;
+                        return value;
+                    };
+                    // a package listed as text keeps its content visible: below it, indented
+                    std::function<void(QVariantList &, ElementId, int)> addContent = [&](QVariantList &list, ElementId package,
+                                                                                    int depth) {
+                        for (const ElementId inner: Model.children(package)) {
+                            const auto &innerElement = Model.element(inner);
+                            if (isListedMemberKind(innerElement.kind())) {
+                                list.append(memberEntry(inner, depth));
+                                if (innerElement.kind() == ElementKind::Package)
+                                    addContent(list, inner, depth + 1);
+                            } else if (innerElement.kind() == ElementKind::Import || innerElement.kind() == ElementKind::Alias) {
+                                QVariantMap value = entry(inner, (innerElement.kind() == ElementKind::Alias ? QStringLiteral("alias ")
+                                                                                                          : QStringLiteral("import ")) +
+                                                                 targetText(innerElement));
+                                value[QStringLiteral("indent")] = depth;
+                                list.append(value);
+                            }
+                        }
+                    };
+                    for (const ElementId child: Model.children(id)) {
+                        const auto &childElement = Model.element(child);
+                        if (membersAsText && isPackageMemberKind(childElement.kind())) {
+                            // compartment 'members': definitions and usages, "part def PartDef1" (the keyword in bold)
+                            members.append(memberEntry(child, 0));
+                        }
+                        // compartment 'packages': the packages listed as text (graphical BNF: packages-compartment)
+                        if ((membersAsText && childElement.kind() == ElementKind::Package) ||
+                            (notationApplies(child, QStringLiteral("packages")) &&
+                             notationOf(child, QStringLiteral("packages")) == QLatin1String("compartment"))) {
+                            packages.append(memberEntry(child, 0));
+                            addContent(packages, child, 1);
+                        }
+                        if (notationApplies(child, QStringLiteral("imports")) &&
+                            notationOf(child, QStringLiteral("imports")) == QLatin1String("compartment")) {
+                            // "private import Package3::*" (table 3)
+                            QString text;
+                            for (const auto &prefix: childElement.prefixes())
+                                text += QString::fromStdString(prefix) + QLatin1Char(' ');
+                            text += childElement.declaredKeyword() == "import all" ? QStringLiteral("import all ")
+                                                                                     : QStringLiteral("import ");
+                            imports.append(entry(child, text + QString::fromStdString(childElement.target())));
+                        }
+                    }
+                    addCompartment(node.Compartments, QStringLiteral("members"), members);
+                    addCompartment(node.Compartments, QStringLiteral("packages"), packages);
+                    addCompartment(node.Compartments, QStringLiteral("imports"), imports);
+                }
                 return;
             case ElementKind::Textual: {
+                if (isNoteStatement(element)) {
+                    // table 2: a note; «comment» Name, «doc», «rep» with locale / language, the text below
+                    const auto note = SysMLTextImporter::describeAnnotation(element.text());
+                    node.Kind = DiagramTypes::NoteNode;
+                    // a bare "/* ... */" without keyword; "comment about x /* ... */" shows «comment» (table 2)
+                    const bool keyword = note.Keyword != "comment" || note.KeywordWritten;
+                    node.Keyword = keyword ? QStringLiteral("«") + QString::fromStdString(note.Keyword) + QStringLiteral("»") : QString();
+                    QString title = note.ShortName.empty() ? QString() : QStringLiteral("<") + QString::fromStdString(note.ShortName) +
+                                                                       QStringLiteral("> ");
+                    title += QString::fromStdString(note.Name);
+                    if (!note.Locale.empty())
+                        title += (title.isEmpty() ? QString() : QStringLiteral(" ")) + QStringLiteral("locale \"") +
+                                 QString::fromStdString(note.Locale) + QLatin1Char('"');
+                    node.Title = title.trimmed();
+                    QVariantList lines;
+                    if (!note.Language.empty())
+                        lines.append(entry(id, QStringLiteral("language \"") + QString::fromStdString(note.Language) + QLatin1Char('"')));
+                    const QString full = QString::fromStdString(note.Body);
+                    for (const QString &line: wrapLines(full, 44))
+                        lines.append(entry(id, line, full));
+                    addCompartment(node.Compartments, QString(), lines);
+                    return;
+                }
                 // any other statement on package level: a node with what can be read from its text
                 const auto summary = SysMLTextImporter::summarize(element);
                 node.Kind = DiagramTypes::TextualNode;
                 node.Keyword = QStringLiteral("«") + QString::fromStdString(element.keyword()) + QStringLiteral("»");
                 node.Title = name.isEmpty() ? QString::fromStdString(element.keyword()) : name;
+                if (element.keyword() == "dependency") {
+                    // ends not found in the model ("dependency Package2 to Package1;" without these packages):
+                    // the statement as written, so it is clear which ends are meant
+                    QString text = QString::fromStdString(SysMLTextImporter::oneLine(element.text())).trimmed();
+                    if (text.startsWith(QLatin1String("dependency")))
+                        text = text.mid(10).trimmed();
+                    if (text.endsWith(QLatin1Char(';')))
+                        text.chop(1);
+                    node.Title = text;
+                }
                 const QString fullText = QString::fromStdString(element.text());
                 QVariantList parameters;
                 for (const auto &parameter: summary.Parameters)
@@ -2952,6 +5134,32 @@ namespace StructuraSystems::Client {
                 QVariantList result;
                 QVariantList attributes;
                 fillFeatureEntries(element, parameters, result, attributes, node.Compartments, false);
+                // "return : ScalarValues::Real;" (an unnamed result, kept as written): in the result compartment
+                for (int c = 0; c < node.Compartments.size(); ++c) {
+                    auto compartment = node.Compartments[c].toMap();
+                    if (compartment.value(QStringLiteral("title")).toString() != QLatin1String("other"))
+                        continue;
+                    QVariantList kept;
+                    for (const auto &value: compartment.value(QStringLiteral("entries")).toList()) {
+                        const QString text = value.toMap().value(QStringLiteral("text")).toString();
+                        if (text.startsWith(QLatin1String("return ")) || text.startsWith(QLatin1String("return:"))) {
+                            auto map = value.toMap();
+                            QString shown = text.mid(6).trimmed();
+                            if (shown.endsWith(QLatin1Char(';')))
+                                shown.chop(1);
+                            map[QStringLiteral("text")] = shown; // "return" is put in front below
+                            result.append(map);
+                        } else {
+                            kept.append(value);
+                        }
+                    }
+                    if (kept.isEmpty()) {
+                        node.Compartments.removeAt(c--);
+                    } else {
+                        compartment[QStringLiteral("entries")] = kept;
+                        node.Compartments[c] = compartment;
+                    }
+                }
                 // the result is a parameter too: "return f :> ISQ::force = m*a" (slides: calc def Force)
                 for (auto &value: result) {
                     auto map = value.toMap();
@@ -2974,8 +5182,14 @@ namespace StructuraSystems::Client {
                     }
                 }
                 QVariantList ordered;
-                addCompartment(ordered, QStringLiteral("parameters"), parameters + result);
-                addCompartment(ordered, QStringLiteral("expression"), expressionEntries);
+                if (Diagram::isConstraintKind(kind)) {
+                    addCompartment(ordered, QStringLiteral("parameters"), parameters + result);
+                    addCompartment(ordered, QStringLiteral("expression"), expressionEntries);
+                } else {
+                    // calc def / calc (table 18): the parameters, and the result compartment with what is returned
+                    addCompartment(ordered, QStringLiteral("parameters"), parameters);
+                    addCompartment(ordered, QStringLiteral("result"), result + expressionEntries);
+                }
                 addCompartment(ordered, QStringLiteral("attributes"), attributes);
                 node.Compartments = ordered + node.Compartments;
                 return;
@@ -3041,9 +5255,18 @@ namespace StructuraSystems::Client {
                 node.Title = decorate(element, name, true) + specializationText(element);
                 break;
             case ElementKind::PortUsage:
+                if (!portAnchor(Model, id)) {
+                    // on package level: a usage of its own («port» fuel : FuelPort), drawn as the other usages
+                    node.Kind = DiagramTypes::PartNode;
+                    node.Keyword = QStringLiteral("«port»");
+                    node.Title = decorate(element, usageText(Model, id), true) + specializationText(element);
+                    node.Dashed = std::find(element.prefixes().begin(), element.prefixes().end(), "ref") != element.prefixes().end();
+                    break;
+                }
                 // a port on the border of its part: "fuelIn : ~FuelPort" next to the small square
                 node.Kind = DiagramTypes::PortNode;
                 node.Title = decorate(element, usageText(Model, id), true) + specializationText(element);
+                node.Keyword = portDirection(Model, id); // the arrow in the square
                 return;
             case ElementKind::AttributeDefinition:
             case ElementKind::EnumerationDefinition:
@@ -3124,8 +5347,8 @@ namespace StructuraSystems::Client {
                 return;
             }
             case ElementKind::MetadataUsage: {
-                // «metadata» SafetyFeature, its values and what it is about
-                node.Kind = DiagramTypes::DefinitionNode;
+                // table 26: a note «metadata» SafetyFeature with its values, a dashed line to what it is about
+                node.Kind = DiagramTypes::NoteNode;
                 node.Keyword = QStringLiteral("«metadata»");
                 node.Title = decorate(element, element.name().empty() ? QString::fromStdString(element.typeName())
                                                                       : usageText(Model, id));
@@ -3135,20 +5358,33 @@ namespace StructuraSystems::Client {
                     if (value.kind() == ElementKind::Attribute)
                         values.append(entry(child, usageText(Model, child) + valueText(value)));
                 }
-                addCompartment(node.Compartments, QStringLiteral("values"), values);
+                addCompartment(node.Compartments, QString(), values); // "toolName = \"X\"" as in the note of table 26
+                // what it is about: a dashed line where the element is shown, else listed
                 QVariantList about;
-                for (const auto &reference: element.about())
-                    about.append(entry(id, QString::fromStdString(reference)));
+                for (const auto &reference: element.about()) {
+                    const auto annotated = resolveReference(Model, element.owner(), reference);
+                    if (!annotated || !isNodeElement(Model, *annotated))
+                        about.append(entry(id, QString::fromStdString(reference)));
+                }
                 addCompartment(node.Compartments, QStringLiteral("about"), about);
                 return;
             }
             case ElementKind::Import:
-                if (element.owner() != RootId && !importedElement(Model, id)) {
-                    // a library package (ISQ, ScalarValues) inside the importing package: dashed, «import» * ISQ
+                if (element.owner() != RootId) {
+                    // the imported package (of the model or a library such as ISQ) inside the importing package: a
+                    // dashed package symbol; "Package2::*" as in table 3 («private» Package3), else «import» ** ISQ
                     node.Kind = DiagramTypes::LibraryNode;
-                    node.Keyword = (std::find(element.prefixes().begin(), element.prefixes().end(), "private") != element.prefixes().end()
-                                    ? QStringLiteral("private ") : QString()) +
-                                   importLabel(element);
+                    node.Keyword = importLabel(element);
+                    if (QString::fromStdString(element.target()).section(QLatin1Char('['), 0, 0).endsWith(QLatin1String("*"))) {
+                        node.Keyword.clear();
+                        for (const auto &prefix: element.prefixes()) {
+                            if (prefix == "private" || prefix == "protected")
+                                node.Keyword = QStringLiteral("«") + QString::fromStdString(prefix) + QStringLiteral("»");
+                        }
+                        // "Package2::**": recursively, marked with ** (as the «import» ** arrow)
+                        if (QString::fromStdString(element.target()).endsWith(QLatin1String("::**")))
+                            node.Keyword = (node.Keyword + QStringLiteral(" **")).trimmed();
+                    }
                     QString package = QString::fromStdString(element.target()).section(QLatin1Char('['), 0, 0);
                     for (const QLatin1String suffix: {QLatin1String("::**"), QLatin1String("::*")}) {
                         if (package.endsWith(suffix)) {
@@ -3161,6 +5397,19 @@ namespace StructuraSystems::Client {
                 }
                 [[fallthrough]];
             case ElementKind::Alias:
+                if (const auto aliased = resolveReference(Model, element.owner(), element.target());
+                    aliased && Model.element(*aliased).kind() == ElementKind::Package) {
+                    // table 3 "Package with alias member (unowned)": a package symbol, «alias» Package2Alias for Package2
+                    node.Kind = DiagramTypes::DefinitionNode;
+                    node.Folder = true;
+                    node.Keyword = QStringLiteral("«alias»");
+                    node.Title = (element.shortName().empty() ? QString()
+                                  : QStringLiteral("<") + QString::fromStdString(element.shortName()) + QStringLiteral("> ")) +
+                                 QString::fromStdString(element.name());
+                    node.Subtitle = QStringLiteral("for ") + QString::fromStdString(element.target());
+                    return;
+                }
+                [[fallthrough]];
             case ElementKind::Filter:
                 // «import» private ISQ::*, «alias» Car for Automobile, «filter» @Safety
                 node.Kind = DiagramTypes::DefinitionNode;
@@ -3177,6 +5426,7 @@ namespace StructuraSystems::Client {
                                ? QStringLiteral("«") + QString::fromStdString(*element.declaredKeyword()) + QStringLiteral("»")
                                : element.kind() == ElementKind::OccurrenceUsage ? QStringLiteral("«occurrence»")
                                : element.kind() == ElementKind::ItemUsage ? QStringLiteral("«item»")
+                               : element.kind() == ElementKind::Attribute ? QStringLiteral("«attribute»")
                                                                           : QStringLiteral("«part»");
                 node.Title = decorate(element, usageText(Model, id), true) + specializationText(element) + valueText(element);
                 node.Dashed = std::find(element.prefixes().begin(), element.prefixes().end(), "ref") != element.prefixes().end();
@@ -3192,6 +5442,241 @@ namespace StructuraSystems::Client {
         QVariantList all = parameters + result + attributes;
         addCompartment(node.Compartments, QStringLiteral("attributes"), all);
         node.Compartments += rest;
+    }
+
+    bool DiagramController::isDocInCompartment(ElementId id) const {
+        if (!Model.contains(id))
+            return false;
+        const auto &element = Model.element(id);
+        if (!isNoteElement(Model, id) || element.keyword() != "doc" || element.owner() == RootId)
+            return false;
+        // in a package frame (no compartments there) it stays a note
+        const ElementId owner = element.owner();
+        // (and on a port on the border of its part, a small square, it stays a note too)
+        return Model.element(owner).kind() != ElementKind::Package && Model.element(owner).kind() != ElementKind::Textual &&
+               !portAnchor(Model, owner) && isNodeElement(Model, owner);
+    }
+
+    QVariantList DiagramController::docCompartment(ElementId id) const {
+        // "doc" / "doc Document1" / "doc locale "fr_BE"": all of them in the compartment, in the order of the text
+        QVariantList entries;
+        for (const ElementId child: Model.children(id)) {
+            if (!isDocInCompartment(child))
+                continue;
+            const auto note = SysMLTextImporter::describeAnnotation(Model.element(child).text());
+            QString head = QString::fromStdString(note.Name);
+            if (!note.Locale.empty())
+                head += (head.isEmpty() ? QString() : QStringLiteral(" ")) + QStringLiteral("locale \"") +
+                        QString::fromStdString(note.Locale) + QLatin1Char('"');
+            if (!head.isEmpty())
+                entries.append(entry(child, head));
+            const QString full = QString::fromStdString(note.Body);
+            for (const QString &line: wrapLines(full, 44))
+                entries.append(entry(child, line, full));
+        }
+        QVariantList compartments;
+        addCompartment(compartments, QStringLiteral("doc"), entries);
+        return compartments;
+    }
+
+    QVariantList DiagramController::extraCompartments(ElementId id) const {
+        // graphical BNF 8.2.3: relationships-compartment (defines, specializes, connect to, performs, satisfies, ...),
+        // connections / interfaces / flows / allocations / messages compartments of the element they are written in,
+        // occurrences / individuals / timeslices / snapshots, variants
+        QVariantList compartments;
+        const auto &element = Model.element(id);
+        const auto nameOf = [&](ElementId other, const std::string &feature = {}) {
+            QString text = QString::fromStdString(Model.element(other).name());
+            if (text.isEmpty())
+                text = QString::fromStdString(Diagram::defaultKeyword(Model.element(other).kind()));
+            if (!feature.empty())
+                text += QLatin1Char('.') + QString::fromStdString(feature);
+            return text;
+        };
+        // relationships of the element itself
+        QVariantList relationships;
+        const auto add = [&](const QString &text) { relationships.append(entry(id, text)); };
+        if (Diagram::isUsageKind(element.kind()) && !element.typeName().empty())
+            add(QStringLiteral("defined by ") + QString::fromStdString(element.typeName()));
+        for (const auto &reference: element.externalSpecializations())
+            add(QStringLiteral("specializes ") + QString::fromStdString(reference));
+        for (const auto &reference: element.redefinitions())
+            add(QStringLiteral("redefines ") + QString::fromStdString(reference));
+        if (!element.referencedFeature().empty())
+            add(QStringLiteral("references ") + QString::fromStdString(element.referencedFeature()));
+        for (const auto &relationship: Model.relationships()) {
+            const bool source = relationship.Source == id ||
+                                std::find(relationship.ExtraSources.begin(), relationship.ExtraSources.end(), id) !=
+                                relationship.ExtraSources.end();
+            const bool target = relationship.Target == id ||
+                                std::find(relationship.ExtraTargets.begin(), relationship.ExtraTargets.end(), id) !=
+                                relationship.ExtraTargets.end();
+            if (!source && !target)
+                continue;
+            const QString other = source ? nameOf(relationship.Target, relationship.TargetFeature)
+                                         : nameOf(relationship.Source, relationship.SourceFeature);
+            switch (relationship.Kind) {
+                case RelationshipKind::Specialization:
+                    add((source ? QStringLiteral("specializes ") : QStringLiteral("specialized by ")) + other);
+                    break;
+                case RelationshipKind::Connection:
+                case RelationshipKind::Interface:
+                case RelationshipKind::Binding:
+                    add(QStringLiteral("connect to ") + other);
+                    break;
+                case RelationshipKind::Flow:
+                    add((source ? QStringLiteral("flow to ") : QStringLiteral("flow from ")) + other);
+                    break;
+                case RelationshipKind::Message:
+                    add((source ? QStringLiteral("message to ") : QStringLiteral("message from ")) + other);
+                    break;
+                case RelationshipKind::Allocation:
+                    add((source ? QStringLiteral("allocated to ") : QStringLiteral("allocated from ")) + other);
+                    break;
+                case RelationshipKind::Satisfy:
+                    add((source ? QStringLiteral("satisfies ") : QStringLiteral("satisfied by ")) + other);
+                    break;
+                case RelationshipKind::Verify:
+                    add((source ? QStringLiteral("verifies ") : QStringLiteral("verified by ")) + other);
+                    break;
+                case RelationshipKind::Dependency:
+                    add((source ? QStringLiteral("depends on ") : QStringLiteral("dependency of ")) + other);
+                    break;
+                case RelationshipKind::Exhibit:
+                    add((source ? QStringLiteral("exhibits ") : QStringLiteral("exhibited by ")) + other);
+                    break;
+                case RelationshipKind::Include:
+                    add((source ? QStringLiteral("includes ") : QStringLiteral("included by ")) + other);
+                    break;
+                case RelationshipKind::Frame:
+                    add((source ? QStringLiteral("frames ") : QStringLiteral("framed by ")) + other);
+                    break;
+                case RelationshipKind::Assert:
+                    add((source ? QStringLiteral("asserts ") : QStringLiteral("asserted by ")) + other);
+                    break;
+                case RelationshipKind::Assume:
+                    add((source ? QStringLiteral("assumes ") : QStringLiteral("assumed by ")) + other);
+                    break;
+                case RelationshipKind::Require:
+                    add((source ? QStringLiteral("requires ") : QStringLiteral("required by ")) + other);
+                    break;
+                default:
+                    break;
+            }
+        }
+        // what it performs, and (an action) by whom it is performed
+        for (const ElementId child: Model.children(id)) {
+            const auto &perform = Model.element(child);
+            if (perform.kind() == ElementKind::ActionPerformance && perform.performStyle() == Diagram::PerformStyle::ReferenceAction &&
+                perform.declaredKeyword().value_or("").empty())
+                add(QStringLiteral("performs ") + QString::fromStdString(perform.name()));
+        }
+        if (element.kind() == ElementKind::ActionUsage) {
+            std::function<void(ElementId)> visit = [&](ElementId owner) {
+                for (const ElementId child: Model.children(owner)) {
+                    const auto &perform = Model.element(child);
+                    if (perform.kind() == ElementKind::ActionPerformance &&
+                        perform.performStyle() == Diagram::PerformStyle::ReferenceAction &&
+                        perform.owner() != RootId && // looked up beside the performer (the perform carries the name)
+                        resolveReference(Model, Model.element(perform.owner()).owner(), perform.name()) == id)
+                        add(QStringLiteral("performed by ") + nameOf(perform.owner()));
+                    visit(child);
+                }
+            };
+            visit(RootId);
+        }
+        addCompartment(compartments, QStringLiteral("relationships"), relationships);
+
+        // the relationships written in its body: connections, interfaces, flows, allocations, messages
+        QVariantList connections;
+        QVariantList interfaces;
+        QVariantList flows;
+        QVariantList allocations;
+        QVariantList messages;
+        for (const auto &relationship: Model.relationships()) {
+            if (!Model.contains(relationship.Source) || !Model.contains(relationship.Target))
+                continue;
+            // the innermost element owning both ends
+            const auto pathSource = Model.ownershipPath(relationship.Source);
+            const auto pathTarget = Model.ownershipPath(relationship.Target);
+            std::size_t common = 0;
+            while (common < pathSource.size() && common < pathTarget.size() && pathSource[common] == pathTarget[common])
+                ++common;
+            const ElementId owner = common == 0 ? RootId : pathSource[common - 1];
+            const ElementId context = relationship.Context ? *relationship.Context : owner;
+            if (context != id || relationship.Source == id || relationship.Target == id)
+                continue;
+            const auto path = [&](ElementId end, const std::string &feature) {
+                QStringList names;
+                for (ElementId current = end; current != id && current != RootId; current = Model.element(current).owner())
+                    names.prepend(QString::fromStdString(Model.element(current).name()));
+                QString text = names.join(QLatin1Char('.'));
+                if (!feature.empty())
+                    text += QLatin1Char('.') + QString::fromStdString(feature);
+                return text;
+            };
+            const QString ends = path(relationship.Source, relationship.SourceFeature) + QStringLiteral(" to ") +
+                                 path(relationship.Target, relationship.TargetFeature);
+            const QString label = edgeLabel(relationship);
+            const QString named = label.isEmpty() ? QString() : label + QLatin1Char(' ');
+            switch (relationship.Kind) {
+                case RelationshipKind::Connection:
+                    connections.append(entry(id, named + QStringLiteral("connect ") + ends));
+                    break;
+                case RelationshipKind::Binding:
+                    connections.append(entry(id, QStringLiteral("bind ") + path(relationship.Source, relationship.SourceFeature) +
+                                                 QStringLiteral(" = ") + path(relationship.Target, relationship.TargetFeature)));
+                    break;
+                case RelationshipKind::Interface:
+                    interfaces.append(entry(id, named + QStringLiteral("connect ") + ends));
+                    break;
+                case RelationshipKind::Flow:
+                    flows.append(entry(id, (relationship.SuccessionFlow ? QStringLiteral("succession flow ") : QStringLiteral("flow ")) +
+                                           named + QStringLiteral("from ") + ends));
+                    break;
+                case RelationshipKind::Allocation:
+                    allocations.append(entry(id, named + QStringLiteral("allocate ") + ends));
+                    break;
+                case RelationshipKind::Message:
+                    messages.append(entry(id, QStringLiteral("message ") + named + QStringLiteral("from ") + ends));
+                    break;
+                default:
+                    break;
+            }
+        }
+        addCompartment(compartments, QStringLiteral("connections"), connections);
+        addCompartment(compartments, QStringLiteral("interfaces"), interfaces);
+        addCompartment(compartments, QStringLiteral("flows"), flows + messages);
+        addCompartment(compartments, QStringLiteral("allocations"), allocations);
+
+        // owned occurrences by their kind, variants of a variation
+        QVariantList occurrences;
+        QVariantList individuals;
+        QVariantList timeslices;
+        QVariantList snapshots;
+        QVariantList variants;
+        for (const ElementId child: Model.children(id)) {
+            const auto &owned = Model.element(child);
+            const auto &prefixes = owned.prefixes();
+            const QString text = usageText(Model, child);
+            const auto keyword = owned.declaredKeyword().value_or("");
+            if (std::find(prefixes.begin(), prefixes.end(), "variant") != prefixes.end())
+                variants.append(entry(child, text));
+            else if (keyword.find("timeslice") != std::string::npos)
+                timeslices.append(entry(child, text));
+            else if (keyword.find("snapshot") != std::string::npos)
+                snapshots.append(entry(child, text));
+            else if (std::find(prefixes.begin(), prefixes.end(), "individual") != prefixes.end())
+                individuals.append(entry(child, QString::fromStdString(Diagram::defaultKeyword(owned.kind())) + QLatin1Char(' ') + text));
+            else if (owned.kind() == ElementKind::OccurrenceUsage)
+                occurrences.append(entry(child, text));
+        }
+        addCompartment(compartments, QStringLiteral("variants"), variants);
+        addCompartment(compartments, QStringLiteral("occurrences"), occurrences);
+        addCompartment(compartments, QStringLiteral("individuals"), individuals);
+        addCompartment(compartments, QStringLiteral("timeslices"), timeslices);
+        addCompartment(compartments, QStringLiteral("snapshots"), snapshots);
+        return compartments;
     }
 
     void DiagramController::fillFeatureEntries(const Diagram::SysMLElement &element, QVariantList &parameters,
@@ -3228,6 +5713,13 @@ namespace StructuraSystems::Client {
         QVariantList stateActions; // "state actions": entry / do / exit
         QVariantList asserts;      // "assert constraints"
         const bool partLike = composes(element.kind());
+        // notations "features" / "ports" = "compartment": the parts / ports of a part as text (table 9)
+        const bool partsAsText = partLike && notationApplies(element.id(), QStringLiteral("features")) &&
+                                 notationOf(element.id(), QStringLiteral("features")) == QLatin1String("compartment");
+        const bool portsAsText = partLike && notationApplies(element.id(), QStringLiteral("ports")) &&
+                                 notationOf(element.id(), QStringLiteral("ports")) == QLatin1String("compartment");
+        const bool inheritedAsNodes = !Interconnection && partLike &&
+                                      notationOf(element.id(), QStringLiteral("inherited")) == QLatin1String("nodes");
         const bool portLike = element.kind() == ElementKind::PortDefinition || element.kind() == ElementKind::PortUsage;
         const bool requirementOwner = isRequirementOwner(element.kind());
         // one owned (or, with "^", inherited) feature into its compartment
@@ -3251,11 +5743,13 @@ namespace StructuraSystems::Client {
                     break;
                 }
                 case ElementKind::PortUsage:
-                    if (!partLike || inherited) // on a part its own ports are drawn on its border
+                    if (!partLike || inherited || portsAsText) // on a part its own ports are drawn on its border
                         ports.append(entry(child, mark + decorate(childElement, usageText(Model, child)) + specializationText(childElement)));
                     break;
                 case ElementKind::PartUsage:
-                    if (!partLike || inherited) // in an item: a list; in a part: its own parts are nodes with composition
+                    if (inherited && inheritedAsNodes)
+                        break; // drawn as node of its own (^part1)
+                    if (!partLike || inherited || partsAsText) // in an item: a list; in a part: its own parts are nodes with composition
                         parts.append(entry(child, mark + decorate(childElement, usageText(Model, child)) +
                                                   specializationText(childElement)));
                     break;
@@ -3272,7 +5766,7 @@ namespace StructuraSystems::Client {
                     break;
                 }
                 case ElementKind::OccurrenceUsage:
-                    if (!partLike || inherited) {
+                    if (!partLike || inherited || partsAsText) {
                         // "snapshot t0", "timeslice ownership[*]" in an item, port, action, ...
                         const std::string keyword = childElement.declaredKeyword().value_or("occurrence");
                         occurrences.append(entry(child, decorate(childElement, QString::fromStdString(keyword) +
@@ -3458,8 +5952,8 @@ namespace StructuraSystems::Client {
                     filters.append(entry(child, targetText(childElement)));
                     break;
                 case ElementKind::Textual: {
-                    if (isHiddenStatement(childElement))
-                        break;
+                    if (isHiddenStatement(childElement) || isNoteStatement(childElement))
+                        break; // notes are nodes of their own (the doc of a requirement / case: its compartment)
                     const auto summary = SysMLTextImporter::summarize(childElement);
                     const QString display = QString::fromStdString(summary.Display);
                     const QString tooltip = QString::fromStdString(childElement.text());
@@ -3505,19 +5999,19 @@ namespace StructuraSystems::Client {
         addCompartment(compartments, QStringLiteral("subject"), subject);
         addCompartment(compartments, requirementOwner ? QStringLiteral("stakeholders") : QStringLiteral("actors"), actors);
         addCompartment(compartments, QStringLiteral("objective"), objective);
-        addCompartment(compartments, QStringLiteral("include"), includes);
-        // in a requirement: "require {...}", "assume {...}" and other constraints together
-        addCompartment(compartments, QStringLiteral("constraints"),
-                       required + assumes + (requirementOwner ? constraints : QVariantList()));
+        addCompartment(compartments, QStringLiteral("include use cases"), includes);
+        // in a requirement (table 20): 'require constraints' and 'assume constraints'
+        addCompartment(compartments, QStringLiteral("require constraints"), required);
+        addCompartment(compartments, QStringLiteral("assume constraints"), assumes);
+        if (requirementOwner)
+            addCompartment(compartments, QStringLiteral("constraints"), constraints);
         addCompartment(compartments, QStringLiteral("enums"), literals);
         addCompartment(compartments, QStringLiteral("directed features"), directed);
         const bool ends = element.kind() == ElementKind::InterfaceDefinition ||
                           element.kind() == ElementKind::AllocationDefinition ||
                           Diagram::isConnectionDefinitionKind(element.kind());
-        // an interface def connects ports: "ports" (slide 42); allocation / connection defs: "ends"
-        addCompartment(compartments, ends && element.kind() != ElementKind::InterfaceDefinition ? QStringLiteral("ends")
-                                                                                                 : QStringLiteral("ports"),
-                       ports);
+        // interface / allocation / connection defs: 'ends' (tables 11, 12)
+        addCompartment(compartments, ends ? QStringLiteral("ends") : QStringLiteral("ports"), ports);
         addCompartment(compartments, QStringLiteral("items"), items);
         addCompartment(compartments, ends ? QStringLiteral("ends") : QStringLiteral("parts"), parts);
         addCompartment(compartments, QStringLiteral("occurrences"), occurrences);
@@ -3535,9 +6029,10 @@ namespace StructuraSystems::Client {
             addCompartment(compartments, QStringLiteral("constraints"), constraints);
         addCompartment(compartments, QStringLiteral("calcs"), calcs);
         addCompartment(compartments, QStringLiteral("views"), views);
-        addCompartment(compartments, QStringLiteral("expose"), exposes);
-        addCompartment(compartments, QStringLiteral("render"), renders);
-        addCompartment(compartments, QStringLiteral("filter"), filters);
+        // table 24: 'exposes', 'filters', 'rendering'
+        addCompartment(compartments, QStringLiteral("exposes"), exposes);
+        addCompartment(compartments, QStringLiteral("filters"), filters);
+        addCompartment(compartments, QStringLiteral("rendering"), renders);
         addCompartment(compartments, QStringLiteral("imports"), imports);
         addCompartment(compartments, QStringLiteral("metadata"), metadata);
         addCompartment(compartments, QStringLiteral("other"), other);
@@ -3568,6 +6063,8 @@ namespace StructuraSystems::Client {
         constexpr qreal ContainerPadding = 70.0; ///< interconnection view: room for port labels inside a part
         constexpr qreal MaximumRowWidth = 1400.0;
         constexpr qreal MaximumFrameRowWidth = 900.0;
+        /// Interconnection view: the parts of a part side by side (connections between their ports run left to right)
+        constexpr qreal MaximumContainerRowWidth = 1600.0;
 
         /// Places sizes in rows (left to right, wrapping at maxWidth). Returns the positions and the total size.
         QSizeF flow(const std::vector<QSizeF> &sizes, qreal maxWidth, std::vector<QPointF> &positions) {
@@ -3593,6 +6090,8 @@ namespace StructuraSystems::Client {
 
     std::vector<ElementId> DiagramController::nodeChildren(ElementId owner) const {
         std::vector<ElementId> result;
+        if (owner != RootId && !Model.contains(owner))
+            return result; // an inherited part drawn as node
         if (Interconnection && owner == RootId) {
             if (const auto context = interconnectionContext())
                 result.push_back(*context);
@@ -3609,6 +6108,8 @@ namespace StructuraSystems::Client {
 
     std::vector<ElementId> DiagramController::portsOf(ElementId anchor) const {
         std::vector<ElementId> ports;
+        if (!Model.contains(anchor))
+            return ports; // an inherited part drawn as node
         std::function<void(ElementId)> collect = [&](ElementId owner) {
             for (const ElementId child: Model.children(owner)) {
                 if (Model.element(child).kind() != ElementKind::PortUsage)
@@ -3618,18 +6119,26 @@ namespace StructuraSystems::Client {
             }
         };
         collect(anchor);
+        // inherited ports drawn on it (interconnection view), after its own
+        for (const auto &[id, derived]: DerivedPorts) {
+            if (derived.Anchor == anchor && derivedPort(id) && Nodes->find(id) &&
+                Model.element(derived.Port).kind() == ElementKind::PortUsage)
+                ports.push_back(id);
+        }
         return ports;
     }
 
     QRectF DiagramController::portSlot(ElementId port) const {
-        const auto anchor = portAnchor(Model, port);
+        const auto anchor = anchorOf(port);
         const auto *anchorNode = anchor ? Nodes->find(*anchor) : nullptr;
         if (!anchorNode)
             return QRectF(0, 0, PortSize, PortSize);
         // incoming ports on the left border, all others on the right, in the order of the text
+        // ("in port p", or a port whose directed features all go in: "port fuelIn : ~FuelPort" with "out item fuel")
         const auto incoming = [&](ElementId id) {
-            const auto &prefixes = Model.element(id).prefixes();
-            return std::find(prefixes.begin(), prefixes.end(), "in") != prefixes.end();
+            const auto &prefixes = Model.element(elementOf(id)).prefixes();
+            return std::find(prefixes.begin(), prefixes.end(), "in") != prefixes.end() ||
+                   portDirection(Model, elementOf(id)) == QLatin1String("in");
         };
         int index = 0;
         for (const ElementId other: portsOf(*anchor)) {
@@ -3690,9 +6199,41 @@ namespace StructuraSystems::Client {
         return {x, rect.bottom()};
     }
 
+    QStringList DiagramController::annotatedEntries(const QString &node) const {
+        QStringList entries;
+        const auto id = toId(node);
+        if (!id)
+            return entries;
+        for (const auto &edge: Edges->edges()) {
+            if (edge.Target == *id && !edge.TargetEntry.isEmpty() && !entries.contains(edge.TargetEntry))
+                entries.append(edge.TargetEntry);
+        }
+        return entries;
+    }
+
+    void DiagramController::setEntryRect(const QString &node, const QString &entry, const QRectF &rect) {
+        const auto id = toId(node);
+        if (!id)
+            return;
+        auto &stored = EntryRects[{*id, entry}];
+        if (stored == rect)
+            return;
+        stored = rect;
+        auto edges = Edges->edges();
+        bool changed = false;
+        for (auto &edge: edges) {
+            if (edge.Target == *id && edge.TargetEntry == entry && edge.TargetEntryRect != rect) {
+                edge.TargetEntryRect = rect;
+                changed = true;
+            }
+        }
+        if (changed)
+            Edges->setEdges(std::move(edges));
+    }
+
     QString DiagramController::portSide(const QString &id) const {
-        const auto elementId = toId(id);
-        const auto anchor = elementId ? portAnchor(Model, *elementId) : std::nullopt;
+        const auto elementId = toNodeId(id);
+        const auto anchor = elementId ? anchorOf(*elementId) : std::nullopt;
         const auto *node = elementId ? Nodes->find(*elementId) : nullptr;
         const auto *anchorNode = anchor ? Nodes->find(*anchor) : nullptr;
         if (!node || !anchorNode)
@@ -3727,7 +6268,7 @@ namespace StructuraSystems::Client {
     }
 
     QPointF DiagramController::portLabelOffset(const QString &id) const {
-        const auto elementId = toId(id);
+        const auto elementId = toNodeId(id);
         if (!elementId)
             return {PortSize + LabelGap, -LabelHeight + 1};
         computePortLabels();
@@ -3742,10 +6283,11 @@ namespace StructuraSystems::Client {
         int incoming = 0;
         int other = 0;
         for (const ElementId port: portsOf(*elementId)) {
-            if (portAnchor(Model, port) != elementId)
+            if (anchorOf(port) != elementId)
                 continue;
-            const auto &prefixes = Model.element(port).prefixes();
-            ++(std::find(prefixes.begin(), prefixes.end(), "in") != prefixes.end() ? incoming : other);
+            const auto &prefixes = Model.element(elementOf(port)).prefixes();
+            ++(std::find(prefixes.begin(), prefixes.end(), "in") != prefixes.end() ||
+               portDirection(Model, elementOf(port)) == QLatin1String("in") ? incoming : other);
         }
         const int perSide = std::max(incoming, other);
         return perSide == 0 ? 0 : PortTop + (perSide - 1) * PortSpacing + PortSize / 2 + 10;
@@ -3761,7 +6303,7 @@ namespace StructuraSystems::Client {
         std::vector<const DiagramNode *> ports;
         std::vector<const DiagramNode *> others;
         for (const auto &node: Nodes->nodes()) {
-            if (!Model.contains(node.Id)) // removed from the model, not yet from the nodes
+            if (!Model.contains(node.Id) && !derivedPort(node.Id)) // removed from the model, not yet from the nodes
                 continue;
             if (node.Kind == DiagramTypes::PortNode)
                 ports.push_back(&node);
@@ -3774,7 +6316,7 @@ namespace StructuraSystems::Client {
         });
         std::vector<QRectF> placed;
         for (const DiagramNode *port: ports) {
-            const auto anchor = portAnchor(Model, port->Id);
+            const auto anchor = anchorOf(port->Id);
             const DiagramNode *anchorNode = anchor ? Nodes->find(*anchor) : nullptr;
             const QString side = portSide(QString::number(port->Id));
             const qreal w = labelWidth(port->Title);
@@ -3942,6 +6484,100 @@ namespace StructuraSystems::Client {
         return suggestionsFor(Model.element(*elementId).kind(), text);
     }
 
+    QVariantList DiagramController::targetSuggestions(const QString &id, const QString &text) const {
+        const auto elementId = toId(id);
+        if (!elementId)
+            return {};
+        const auto &element = Model.element(*elementId);
+        const ElementKind kind = element.kind();
+        if (kind != ElementKind::Alias && kind != ElementKind::Import && kind != ElementKind::Expose)
+            return {};
+        const QString filter = text.trimmed();
+        struct Candidate {
+            QString Text;
+            QString Detail;
+            int Rank;
+        };
+        std::vector<Candidate> candidates;
+        const auto consider = [&](const QString &name, const QString &detail) {
+            int rank = 0;
+            if (!filter.isEmpty()) {
+                if (name.startsWith(filter, Qt::CaseInsensitive) ||
+                    name.section(QStringLiteral("::"), -1).startsWith(filter, Qt::CaseInsensitive))
+                    rank = 0;
+                else if (name.contains(filter, Qt::CaseInsensitive))
+                    rank = 1;
+                else
+                    return;
+            }
+            candidates.push_back({name, detail, rank});
+        };
+        std::function<void(ElementId)> collect = [&](ElementId owner) {
+            for (const ElementId child: Model.children(owner)) {
+                const auto &candidate = Model.element(child);
+                if (child == *elementId || candidate.name().empty() || candidate.kind() == ElementKind::Textual ||
+                    Diagram::isAnonymousKind(candidate.kind()) || candidate.kind() == ElementKind::Alias)
+                    continue;
+                const QString qualified = QString::fromStdString(Model.qualifiedName(child));
+                const QString detail = QString::fromStdString(Diagram::defaultKeyword(candidate.kind()));
+                const bool package = candidate.kind() == ElementKind::Package;
+                if (kind == ElementKind::Alias) {
+                    consider(qualified, detail);
+                } else if (package) {
+                    // "import P::*" (its members), "P::**" (recursively), "P" (the package itself)
+                    consider(qualified + QStringLiteral("::*"), tr("members of the package"));
+                    consider(qualified + QStringLiteral("::**"), tr("members, recursively"));
+                    consider(qualified, detail);
+                } else {
+                    consider(qualified, detail);
+                }
+                collect(child);
+            }
+        };
+        collect(RootId);
+        if (kind == ElementKind::Import) {
+            for (const char *library: {"ScalarValues::*", "ISQ::*", "SI::*", "USCustomaryUnits::*", "Quantities::*",
+                                       "MeasurementReferences::*", "ISQBase::*", "ISQSpaceTime::*", "ISQMechanics::*"})
+                consider(QString::fromLatin1(library), tr("library"));
+        }
+        std::stable_sort(candidates.begin(), candidates.end(), [](const Candidate &a, const Candidate &b) { return a.Rank < b.Rank; });
+        QVariantList result;
+        for (const auto &candidate: candidates) {
+            if (result.size() >= 15)
+                break;
+            if (candidate.Text == filter)
+                continue;
+            result.append(QVariantMap{{QStringLiteral("text"), candidate.Text}, {QStringLiteral("detail"), candidate.Detail}});
+        }
+        return result;
+    }
+
+    QVariantMap DiagramController::targetStatus(const QString &id, const QString &text) const {
+        const auto elementId = toId(id);
+        if (!elementId)
+            return {{QStringLiteral("known"), true}};
+        const auto &element = Model.element(*elementId);
+        const std::string target = text.trimmed().toStdString();
+        if (element.kind() != ElementKind::Alias || target.empty())
+            return {{QStringLiteral("known"), true}};
+        if (target.find('*') != std::string::npos)
+            return {{QStringLiteral("known"), false},
+                    {QStringLiteral("message"), tr("An alias names one element (e.g. Package2), no '*' - that is an import.")}};
+        // a library (ScalarValues::Real, ISQ::TorqueValue) is not in the model: taken as it is
+        static const std::set<std::string> libraries = {"ScalarValues", "ISQ", "SI", "USCustomaryUnits", "Quantities",
+                                                        "MeasurementReferences", "ISQBase", "ISQSpaceTime", "ISQMechanics",
+                                                        "Base", "ScalarFunctions", "Collections", "Time", "SIPrefixes"};
+        const auto segments = SysMLTextImporter::splitReference(target);
+        if (segments.size() > 1 && libraries.count(segments.front()) > 0)
+            return {{QStringLiteral("known"), true}};
+        const auto resolved = resolveReference(Model, element.owner(), target);
+        if (!resolved || *resolved == *elementId)
+            return {{QStringLiteral("known"), false},
+                    {QStringLiteral("message"), tr("'%1' is no element of the model: an alias is a further name of an element "
+                                                   "that exists - choose one from the list.").arg(text.trimmed())}};
+        return {{QStringLiteral("known"), true}};
+    }
+
     QVariantList DiagramController::portTypeSuggestions(const QString &text) const {
         return suggestionsFor(ElementKind::PortUsage, text);
     }
@@ -4105,7 +6741,7 @@ namespace StructuraSystems::Client {
     }
 
     QSizeF DiagramController::estimatedSize(const DiagramNode &node) const {
-        if (Measured.count(node.Id) > 0 || node.Kind == DiagramTypes::PortNode)
+        if ((Measured.count(node.Id) > 0 && !node.Container) || node.Kind == DiagramTypes::PortNode)
             return node.Rect.size();
         // Same structure as NodeDelegate: keyword, title, compartments with caption and entries.
         qreal longest = std::max(node.Keyword.size() * 7.0, node.Title.size() * 8.5);
@@ -4126,7 +6762,7 @@ namespace StructuraSystems::Client {
         const auto *node = Nodes->find(id);
         if (!node)
             return {};
-        const auto children = nodeChildren(id);
+        const auto children = layoutChildren(id);
         std::vector<QSizeF> childSizes;
         for (const ElementId child: children)
             childSizes.push_back(measure(child, extents, framePositions));
@@ -4136,16 +6772,20 @@ namespace StructuraSystems::Client {
             std::vector<QPointF> positions;
             const QSizeF content = flow(childSizes, MaximumFrameRowWidth, positions);
             framePositions[id] = positions;
+            const qreal header = FrameTitleSpace + frameHeaderExtra(*node); // below its compartments packages / imports
             extent = QSizeF(std::max(DefaultFrameWidth * 0.75, content.width() + 2 * FramePadding),
-                            std::max(DefaultFrameHeight * 0.6, content.height() + FrameTitleSpace + FramePadding));
-        } else if (Interconnection && !children.empty()) {
+                            std::max(DefaultFrameHeight * 0.6, content.height() + header + FramePadding));
+        } else if ((Interconnection || node->Container) && !children.empty()) {
             // a part around its parts; room for the labels of the ports on its border and on theirs
             std::vector<QPointF> positions;
-            const QSizeF content = flow(childSizes, MaximumFrameRowWidth, positions);
+            const QSizeF content = flow(childSizes, MaximumContainerRowWidth, positions);
             framePositions[id] = positions;
             const QSizeF own = estimatedSize(*node);
-            extent = QSizeF(std::max(own.width(), content.width() + 2 * ContainerPadding),
-                            std::max(own.height(), content.height() + FrameTitleSpace + ContainerPadding));
+            // structure view: below its name and compartments (table 9 "Part with graphical compartment")
+            const qreal header = Interconnection ? FrameTitleSpace : own.height() + 8;
+            const qreal padding = Interconnection ? ContainerPadding : FramePadding;
+            extent = QSizeF(std::max(own.width(), content.width() + 2 * padding),
+                            std::max(own.height(), content.height() + header + padding));
             extent.setHeight(std::max(extent.height(), PortTop + qreal(portsOf(id).size()) * PortSpacing / 2 + 8));
         } else {
             QSizeF own = estimatedSize(*node);
@@ -4181,14 +6821,17 @@ namespace StructuraSystems::Client {
             return;
         const auto &node = Nodes->nodes()[std::size_t(row)];
         const QSizeF extent = extents.at(id);
-        const auto children = nodeChildren(id);
+        const auto children = layoutChildren(id);
 
-        if (node.Kind == DiagramTypes::PackageNode || (Interconnection && !children.empty())) {
+        if (node.Kind == DiagramTypes::PackageNode || ((Interconnection || node.Container) && !children.empty())) {
+            const bool package = node.Kind == DiagramTypes::PackageNode;
+            const qreal header = package ? FrameTitleSpace + frameHeaderExtra(node)
+                                 : Interconnection ? FrameTitleSpace : estimatedSize(node).height() + 8;
             Nodes->setRect(row, QRectF(topLeft, extent));
             const auto &positions = framePositions.at(id);
-            const qreal padding = node.Kind == DiagramTypes::PackageNode ? FramePadding : ContainerPadding;
+            const qreal padding = package || !Interconnection ? FramePadding : ContainerPadding;
             for (std::size_t i = 0; i < children.size() && i < positions.size(); ++i)
-                place(children[i], topLeft + QPointF(padding, FrameTitleSpace) + positions[i], extents, framePositions);
+                place(children[i], topLeft + QPointF(padding, header) + positions[i], extents, framePositions);
             return;
         }
 
@@ -4214,14 +6857,16 @@ namespace StructuraSystems::Client {
         syncNow();
         std::map<ElementId, QSizeF> extents;
         std::map<ElementId, std::vector<QPointF>> framePositions;
-        const auto roots = nodeChildren(RootId);
+        const auto roots = layoutChildren(RootId);
         std::vector<QSizeF> sizes;
         for (const ElementId id: roots)
             sizes.push_back(measure(id, extents, framePositions));
         std::vector<QPointF> positions;
         flow(sizes, MaximumRowWidth, positions);
         for (std::size_t i = 0; i < roots.size(); ++i)
-            place(roots[i], QPointF(LayoutMargin, LayoutMargin) + positions[i], extents, framePositions);
+            place(roots[i], QPointF(LayoutMargin, LayoutMargin) + positions[i] +
+                            (ViewElement && !Interconnection ? QPointF(30, 100) : QPointF()), // room for the view frame
+                  extents, framePositions);
         for (const auto &node: Nodes->nodes()) {
             if (node.Kind == DiagramTypes::PartNode || node.Kind == DiagramTypes::PartDefinitionNode)
                 placePorts(node.Id);
@@ -4237,12 +6882,24 @@ namespace StructuraSystems::Client {
     }
 
     std::string DiagramController::uniqueName(const std::string &base, ElementId owner) const {
-        const auto &siblings = Model.children(owner);
+        // packages are numbered through the whole model (Package1, Package2, ... also when nested): a package moved out
+        // of another one never meets one of the same name
+        std::set<std::string> used;
+        if (base == "Package") {
+            std::function<void(ElementId)> collect = [&](ElementId parent) {
+                for (const ElementId child: Model.children(parent)) {
+                    used.insert(Model.element(child).name());
+                    collect(child);
+                }
+            };
+            collect(RootId);
+        } else {
+            for (const ElementId sibling: Model.children(owner))
+                used.insert(Model.element(sibling).name());
+        }
         for (int index = 1;; ++index) {
             const std::string candidate = base + std::to_string(index);
-            const bool used = std::any_of(siblings.begin(), siblings.end(),
-                                          [&](ElementId sibling) { return Model.element(sibling).name() == candidate; });
-            if (!used)
+            if (used.count(candidate) == 0)
                 return candidate;
         }
     }

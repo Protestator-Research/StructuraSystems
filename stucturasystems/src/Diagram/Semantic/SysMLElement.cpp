@@ -19,7 +19,15 @@ namespace StructuraSystems::Diagram {
         return Multiplicity{lower, upper};
     }
 
+    Multiplicity Multiplicity::expression(std::string text) {
+        Multiplicity result;
+        result.Text = std::move(text);
+        return result;
+    }
+
     std::string Multiplicity::toString() const {
+        if (!Text.empty())
+            return "[" + Text + "]";
         if (!Upper.has_value()) {
             if (Lower == 0)
                 return "[*]";
@@ -295,6 +303,14 @@ namespace StructuraSystems::Diagram {
                 return "Dependency";
             case RelationshipKind::Frame:
                 return "Frame";
+            case RelationshipKind::Exhibit:
+                return "Exhibit";
+            case RelationshipKind::Assert:
+                return "Assert";
+            case RelationshipKind::Assume:
+                return "Assume";
+            case RelationshipKind::Require:
+                return "Require";
         }
         return "Unknown";
     }

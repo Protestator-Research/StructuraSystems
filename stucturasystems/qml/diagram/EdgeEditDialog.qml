@@ -25,16 +25,35 @@ Dialog {
         effectField.text = details.effect !== undefined ? details.effect : ""
         sequencedBox.checked = details.sequenced === true
         definitionField.text = details.definition !== undefined ? details.definition : ""
+        moreSourcesField.text = details.moreSources !== undefined ? details.moreSources : ""
+        moreTargetsField.text = details.moreTargets !== undefined ? details.moreTargets : ""
+        sourceMultiplicityField.text = details.sourceMultiplicity !== undefined ? details.sourceMultiplicity : ""
+        targetMultiplicityField.text = details.targetMultiplicity !== undefined ? details.targetMultiplicity : ""
         errorLabel.text = ""
         open()
         nameField.forceActiveFocus()
     }
 
     function apply() {
-        const error = controller.updateEdge(edgeKey, { name: nameField.text, typeName: typeField.text,
+        let error = controller.updateEdge(edgeKey, { name: nameField.text, typeName: typeField.text,
                                                        guard: guardField.text, trigger: triggerField.text,
                                                        effect: effectField.text, sequenced: sequencedBox.checked,
                                                        definition: definitionField.text })
+        if (error.length === 0 && details.hasEnds === true) {
+            const values = { name: nameField.text, typeName: typeField.text, moreTargets: moreTargetsField.text }
+            if (details.hasClients === true)
+                values.moreSources = moreSourcesField.text
+            const more = controller.updateEdge(edgeKey, values)
+            if (more.length > 0)
+                error = more
+        }
+        if (error.length === 0 && details.hasMultiplicities === true) {
+            const more = controller.updateEdge(edgeKey, { name: nameField.text, typeName: typeField.text,
+                                                          sourceMultiplicity: sourceMultiplicityField.text,
+                                                          targetMultiplicity: targetMultiplicityField.text })
+            if (more.length > 0)
+                error = more
+        }
         if (error.length > 0)
             errorLabel.text = error
         else
@@ -139,6 +158,55 @@ Dialog {
             Layout.fillWidth: true
             placeholderText: "action ignite"
             onAccepted: dialog.apply()
+        }
+
+        // n-ary: "connect (a, b, c)", "dependency a, b to c, d"
+        Label {
+            visible: dialog.details.hasClients === true
+            text: qsTr("More clients")
+            color: Theme.textSecondary
+        }
+        TextField {
+            id: moreSourcesField
+            visible: dialog.details.hasClients === true
+            Layout.fillWidth: true
+            placeholderText: qsTr("optional: names, separated by commas")
+            onAccepted: dialog.apply()
+        }
+        Label {
+            visible: dialog.details.hasEnds === true
+            text: dialog.details.hasClients === true ? qsTr("More suppliers") : qsTr("More ends")
+            color: Theme.textSecondary
+        }
+        TextField {
+            id: moreTargetsField
+            objectName: "moreEndsField"
+            visible: dialog.details.hasEnds === true
+            Layout.fillWidth: true
+            placeholderText: qsTr("optional: names, separated by commas")
+            onAccepted: dialog.apply()
+        }
+        // "connect [0..1] a to [1] b"
+        Label {
+            visible: dialog.details.hasMultiplicities === true
+            text: qsTr("Multiplicity (source / target)")
+            color: Theme.textSecondary
+        }
+        RowLayout {
+            visible: dialog.details.hasMultiplicities === true
+            Layout.fillWidth: true
+            TextField {
+                id: sourceMultiplicityField
+                Layout.fillWidth: true
+                placeholderText: "0..1"
+                onAccepted: dialog.apply()
+            }
+            TextField {
+                id: targetMultiplicityField
+                Layout.fillWidth: true
+                placeholderText: "1..*"
+                onAccepted: dialog.apply()
+            }
         }
 
         // message: "then message ..." - after the message written before it

@@ -77,6 +77,20 @@ namespace StructuraSystems::Diagram {
         bool operator==(const CallExpression &other) const = default;
     };
 
+    /// A comment, documentation or textual representation as the graphical notation shows it (table 2):
+    /// comment [<short>] [name] [about a, b] [locale "x"] /* body */,  doc [name] [locale "x"] /* body */,
+    /// rep [name] language "x" /* body */  (and a bare /* body */, a comment without keyword).
+    struct AnnotationStatement {
+        std::string Keyword;  ///< "comment", "doc" or "rep" (empty: not an annotation)
+        std::string ShortName;
+        std::string Name;
+        std::vector<std::string> About; ///< as written: "part1", "Vehicle::mass"
+        std::string Locale;   ///< without quotes
+        std::string Language; ///< without quotes
+        std::string Body;     ///< see commentBody
+        bool KeywordWritten = true; ///< false for a bare "/* ... */"
+    };
+
     class SysMLTextImporter {
     public:
         enum class Dialect {
@@ -108,6 +122,10 @@ namespace StructuraSystems::Diagram {
         static std::string docStatement(const std::string &body);
         /// The doc statement owned by an element (the first one), std::nullopt if there is none.
         static std::optional<ElementId> docOf(const SemanticModel &model, ElementId id);
+        /// A comment / doc / rep statement taken apart (Keyword empty if the text is none, e.g. a "//" note).
+        static AnnotationStatement describeAnnotation(const std::string &statement);
+        /// The statement again (names quoted where needed, "*/" in the body escaped).
+        static std::string annotationStatement(const AnnotationStatement &annotation);
 
         // --- expressions (used by the parametric view) ---
 

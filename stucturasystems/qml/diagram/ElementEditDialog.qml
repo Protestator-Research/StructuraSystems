@@ -346,15 +346,18 @@ Dialog {
             text: dialog.details.targetLabel !== undefined ? dialog.details.targetLabel : ""
             color: Theme.textSecondary
         }
-        TextField {
+        // a list of what the model has (an alias names an element that exists)
+        TypeField {
             id: targetField
             objectName: "targetField"
             visible: dialog.details.hasTarget === true
             Layout.fillWidth: true
-            font.family: Theme.monoFamily
+            canCreate: false
+            accessibleName: qsTr("Target")
             placeholderText: dialog.details.targetPlaceholder !== undefined ? dialog.details.targetPlaceholder : ""
+            suggest: text => dialog.controller ? dialog.controller.targetSuggestions(dialog.elementId, text) : []
+            check: text => dialog.controller ? dialog.controller.targetStatus(dialog.elementId, text) : ({ known: true })
             onAccepted: dialog.apply()
-            Accessible.name: qsTr("Target")
         }
         // metadata: the annotated elements
         Label {

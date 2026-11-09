@@ -1,5 +1,5 @@
 //
-// UseCaseController: use cases, actors, the system boundary and «include» - read and written.
+// UseCaseController: use cases, actors, the subject and «include» - read and written (SysML v2, table 23).
 //
 
 #include "../TestFramework.h"
@@ -47,7 +47,7 @@ namespace {
     }
 }
 
-TEST_CASE("Use cases: read with actors, boundary and include") {
+TEST_CASE("Use cases: read with actors, subject and include") {
     SemanticModel model;
     CHECK(SysMLTextImporter::importText(
             "package Mission {\n"
@@ -75,16 +75,23 @@ TEST_CASE("Use cases: read with actors, boundary and include") {
     CHECK_EQ(count(view, DiagramTypes::UseCaseNode), 5);
     CHECK_EQ(count(view, DiagramTypes::ActorNode), 3); // driver (twice declared), passengers, mechanic
     CHECK_EQ(count(view, DiagramTypes::BoundaryNode), 1);
-    CHECK_EQ(edges(view, DiagramTypes::Association), 4);
+    CHECK_EQ(edges(view, DiagramTypes::Association), 6); // 4 of the actors, 2 of the subject (Drive, Refuel)
     CHECK_EQ(edges(view, DiagramTypes::Include), 3); // refuel -> Refuel, park, maintain -> drive
-    // the boundary is around its use cases
+    // the subject: a node «subject» above its use cases with a line to each of them
     const ElementId drive = *find(model, mission, "Drive");
     const ElementId refuel = *find(model, mission, "Refuel");
     const ElementId vehicle = model.children(drive).at(0);
-    const QRectF boundary = view.nodeRect(key(vehicle));
-    CHECK(boundary.contains(view.nodeRect(key(drive))));
-    CHECK(boundary.contains(view.nodeRect(key(refuel))));
-    CHECK(!boundary.contains(view.nodeRect(key(*find(model, mission, "maintain")))));
+    const QRectF subject = view.nodeRect(key(vehicle));
+    CHECK(!subject.intersects(view.nodeRect(key(drive))));
+    CHECK(subject.bottom() < view.nodeRect(key(drive)).top());
+    int subjectLines = 0;
+    for (const auto &edge: view.edges()->edges()) {
+        if (edge.Kind == DiagramTypes::Association && edge.Source == vehicle) {
+            ++subjectLines;
+            CHECK((edge.Target == drive || edge.Target == refuel));
+        }
+    }
+    CHECK_EQ(subjectLines, 2);
     // actors left of the use cases
     const ElementId driver = model.children(drive).at(1);
     CHECK(view.nodeRect(key(driver)).right() < view.nodeRect(key(drive)).left());
@@ -105,10 +112,10 @@ TEST_CASE("Use cases: drawing writes the SysML text") {
     CHECK(!subject.isEmpty());
     CHECK(view.updateGroup(subject, {{"name", "vehicle"}, {"typeName", "Vehicle"}, {"multiplicity", ""}}).isEmpty());
     CHECK(view.updateGroup(actor, {{"name", "driver"}, {"typeName", "Person"}, {"multiplicity", ""}}).isEmpty());
-    // a second use case dropped into the boundary belongs to the same system
-    const QRectF boundary = view.nodeRect(subject);
-    CHECK(boundary.contains(driveRect));
-    const QString refuel = view.addNode(DiagramTypes::ToolUseCaseDefinition, boundary.center().x(), boundary.bottom() - 10);
+    // a second use case dropped onto the subject belongs to the same system
+    const QRectF subjectRect = view.nodeRect(subject);
+    CHECK(!subjectRect.intersects(driveRect));
+    const QString refuel = view.addNode(DiagramTypes::ToolUseCaseDefinition, subjectRect.center().x(), subjectRect.center().y());
     CHECK(model.children(refuel.toULongLong()).size() == 1);
     CHECK(model.element(model.children(refuel.toULongLong()).front()).kind() == ElementKind::Subject);
     // the actor takes part in it, drive includes it
@@ -144,7 +151,7 @@ TEST_CASE("Use cases: drawing writes the SysML text") {
     CHECK_EQ(count(view, DiagramTypes::BoundaryNode), 1);
     CHECK_EQ(edges(view, DiagramTypes::Include), 2);
 
-    // renaming the actor renames both declarations; moving the boundary moves its use cases
+    // renaming the actor renames both declarations; the subject moves on its own
     CHECK(view.updateGroup(actor, {{"name", "pilot"}, {"typeName", ""}, {"multiplicity", "1"}}).isEmpty());
     text = generated(model);
     CHECK(text.find("actor pilot[1];") != std::string::npos);
@@ -152,7 +159,7 @@ TEST_CASE("Use cases: drawing writes the SysML text") {
     const QRectF before = view.nodeRect(drive);
     const QRectF frame = view.nodeRect(subject);
     view.moveNode(subject, frame.x() + 100, frame.y() + 50);
-    CHECK(view.nodeRect(drive).topLeft() == before.topLeft() + QPointF(100, 50));
+    CHECK(view.nodeRect(drive).topLeft() == before.topLeft());
     CHECK(view.nodeRect(subject).topLeft() == frame.topLeft() + QPointF(100, 50));
 
     // deleting: a line of the actor, the include, the whole actor
