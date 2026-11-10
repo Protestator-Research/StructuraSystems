@@ -43,7 +43,9 @@ namespace StructuraSystems::Client {
         /** Removes and deletes the document. */
         void remove(int index);
         [[nodiscard]] int indexOfKey(const QString &key) const;
-        [[nodiscard]] DocumentModel *at(int index) const;
+        [[nodiscard]] Q_INVOKABLE StructuraSystems::Client::DocumentModel *at(int index) const;
+        /** @return the index of the document or -1 if it is not open. */
+        Q_INVOKABLE int indexOfDocument(StructuraSystems::Client::DocumentModel *document) const;
 
     signals:
         void countChanged();

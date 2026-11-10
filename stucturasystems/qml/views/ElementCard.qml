@@ -18,6 +18,8 @@ Pane {
     required property int problemCount
     required property ElementTreeModel elementTree
     required property int elementCount
+    /** The document of the card; its last parse supplies the names of the libraries for the code completion. */
+    property DocumentModel document
     property bool first: false
     property bool last: false
     /** True while no editing is allowed (background work in progress). */
@@ -653,8 +655,64 @@ Pane {
                         language: languageBox.currentText
                     }
 
+                    // Suggestions of keywords, snippets and names (IDE style). Never takes the focus.
+                    CompletionPopup {
+                        id: completion
+
+                        editor: area
+                        document: card.document
+                        language: languageBox.currentText
+                        blocked: card.locked || !Theme.isCode(languageBox.currentText)
+                    }
+
+                    // Applies a result of CodeEditAssist with remove/insert, so the change stays in the undo stack.
+                    function _applyEdit(result) {
+                        if (result.removeEnd > result.removeStart)
+                            area.remove(result.removeStart, result.removeEnd);
+                        if (result.insert !== "")
+                            area.insert(result.removeStart, result.insert);
+                        if (result.selectionStart >= 0)
+                            area.select(result.selectionStart, result.selectionEnd);
+                        else
+                            area.cursorPosition = result.cursor;
+                    }
+
+                    // Indentation, bracket pairs and Tab for SysMLv2/KerML. Returns true if the key was consumed.
+                    function _assistCode(event) {
+                        if (card.locked || !Theme.isCode(languageBox.currentText) || area.preeditText !== "")
+                            return false;
+                        // Shortcuts like Ctrl+Enter or Ctrl+Backspace keep their own meaning. Brackets are recognized by
+                        // their text only: on many layouts (e.g. German) they need AltGr, which Windows reports as Ctrl+Alt,
+                        // or Option on macOS, which is reported as Alt.
+                        const command = (event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier)) !== 0;
+                        const s = area.selectionStart;
+                        const e = area.selectionEnd;
+                        let result = null;
+                        if (!command && (event.key === Qt.Key_Return || event.key === Qt.Key_Enter))
+                            result = CodeEditAssist.newline(area.text, s, e);
+                        else if (!command && event.key === Qt.Key_Backspace)
+                            result = CodeEditAssist.backspace(area.text, s, e);
+                        else if (!command && event.key === Qt.Key_Tab)
+                            result = CodeEditAssist.indent(area.text, s, e);
+                        else if (!command && event.key === Qt.Key_Backtab)
+                            result = CodeEditAssist.outdent(area.text, s, e);
+                        else if (event.text === "{" || event.text === "(" || event.text === "[")
+                            result = CodeEditAssist.openBracket(area.text, s, e, event.text);
+                        else if (event.text === "}" || event.text === ")" || event.text === "]")
+                            result = CodeEditAssist.closeBracket(area.text, s, e, event.text);
+                        if (result === null || !result.handled)
+                            return false;
+                        _applyEdit(result);
+                        return true;
+                    }
+
                     Keys.onPressed: event => {
-                        if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter) && (event.modifiers & Qt.ControlModifier) && !card.locked) {
+                        // The suggestion list comes first: it takes the arrow keys, Enter, Tab and Esc while it is open.
+                        if (completion.handleKey(event)) {
+                            event.accepted = true;
+                        } else if (_assistCode(event)) {
+                            event.accepted = true;
+                        } else if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter) && (event.modifiers & Qt.ControlModifier) && !card.locked) {
                             editor.commit();
                             event.accepted = true;
                         } else if (event.key === Qt.Key_Escape) {

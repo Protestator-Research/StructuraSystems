@@ -41,6 +41,21 @@ Pane {
             visible: AppController.busy
             indeterminate: true
         }
+        // The standard library is loaded in the background (from the start of the application): the step and how far it is.
+        Label {
+            visible: AppController.libraryWarmUp.loading
+            text: AppController.libraryWarmUp.status
+            font.pixelSize: 12
+            color: Theme.textSecondary
+        }
+        ProgressBar {
+            Layout.preferredWidth: 120
+            Layout.preferredHeight: 4
+            visible: AppController.libraryWarmUp.loading
+            from: 0
+            to: 1
+            value: AppController.libraryWarmUp.progress
+        }
         Label {
             visible: bar.elementCount >= 0
             text: bar.elementCount === 1 ? qsTr("1 element") : qsTr("%1 elements").arg(bar.elementCount)

@@ -3,6 +3,8 @@
 //
 
 #include "ProjectItemModel.h"
+
+#include <boost/uuid/uuid_io.hpp>
 #include "ProjectTreeViewItem.h"
 #include <sysmlv2/rest/entities/Project.h>
 
@@ -50,6 +52,10 @@ namespace StructuraSystems::Client {
                 const auto project = item->getProject();
                 return project ? QVariant(QString::fromStdString(project->getDescription())) : QVariant(QString());
             }
+            case IdRole: {
+                const auto project = item->getProject();
+                return project ? QVariant(QString::fromStdString(boost::uuids::to_string(project->getId()))) : QVariant(QString());
+            }
             default:
                 return {};
         }
@@ -59,7 +65,8 @@ namespace StructuraSystems::Client {
         return {
             {Qt::DisplayRole, "display"},
             {NameRole, "name"},
-            {DescriptionRole, "description"}
+            {DescriptionRole, "description"},
+            {IdRole, "projectId"}
         };
     }
 

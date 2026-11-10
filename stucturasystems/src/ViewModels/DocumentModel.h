@@ -30,7 +30,9 @@ namespace KerML::Entities {
 
 namespace StructuraSystems::Client {
     class DocumentWorkspace;
+    class NameIndex;
     class LibraryWorkspace;
+    class RemoteLibraries;
 
     /**
      * Input of one parser run for a single textual element. Plain data, so it can be handed to a worker thread.
@@ -53,6 +55,10 @@ namespace StructuraSystems::Client {
          * above are plain data, made while the workspace was locked.)
          */
         std::vector<std::shared_ptr<KerML::Entities::Element>> InstanceElements;
+        /** Names are unresolved and the libraries of the project usages on the server are not downloaded yet (see DocumentWorkspace). */
+        bool NeedsRemoteDownload = false;
+        /** The names of the model (libraries and document) for the code completion, a snapshot of plain data. Null if there is none. */
+        std::shared_ptr<const NameIndex> Names;
     };
 
     /**
@@ -164,6 +170,16 @@ namespace StructuraSystems::Client {
          */
         void attachLibraries(std::shared_ptr<LibraryWorkspace> libraries, const QString &ownFile = QString());
         [[nodiscard]] bool hasWorkspace() const;
+        /**
+         * Lets the document use the libraries of the project usages of its project on the server (SysML v2 API: ProjectUsage),
+         * from the cache of @p remote. Only online documents have usages.
+         */
+        void attachRemote(std::shared_ptr<RemoteLibraries> remote);
+        /**
+         * Takes over the commit that was created on the server for something else than the content of this document (a project
+         * usage). Unlike applyCommit the unsaved changes are kept.
+         */
+        void updateCommit(std::shared_ptr<SysMLv2::REST::Commit> commit);
         /** Uses a workspace that was prepared (or recycled) elsewhere instead of creating one on the first parser run. */
         void adoptWorkspace(std::shared_ptr<DocumentWorkspace> workspace);
         /** Hands the workspace over (to be recycled when the document is closed). The document creates a new one if it is parsed again. */
@@ -173,6 +189,11 @@ namespace StructuraSystems::Client {
         /** Synchronous convenience: parseInputs + runParser + applyParseResult. @return the problems found. */
         QList<Problem> parse();
         [[nodiscard]] QList<Problem> problems() const;
+        /**
+         * The names of the model as of the last parse, for the code completion. Plain data that can be read on the GUI thread
+         * while the document is parsed again. Null before the first parse.
+         */
+        [[nodiscard]] std::shared_ptr<const NameIndex> nameIndex() const;
         [[nodiscard]] const std::vector<std::shared_ptr<KerML::Entities::Element>> &instanceElements() const;
 
         /**
@@ -228,6 +249,8 @@ namespace StructuraSystems::Client {
         };
 
         void loadRows();
+        /** Gives the workspace the project and commit whose usages it may use. */
+        void syncRemote();
         void updateHeader(Row &row) const;
         void syncElementOrder();
         void rebuildTableOfContents();
@@ -242,8 +265,10 @@ namespace StructuraSystems::Client {
         std::shared_ptr<DocumentWorkspace> Workspace;
         std::shared_ptr<LibraryWorkspace> Libraries;
         QString OwnFile;
+        std::shared_ptr<RemoteLibraries> Remote;
         std::vector<std::shared_ptr<KerML::Entities::Element>> InstanceElements;
         QList<Problem> ParserProblems;
+        std::shared_ptr<const NameIndex> Names;
         bool Modified = false;
         bool IsOnline = false;
         bool IsLocalFile = false;

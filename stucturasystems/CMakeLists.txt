@@ -50,13 +50,14 @@ set(SOURCES
         src/Models/Parser/Markdown/CommonmarkParser/utf8.h
         src/Models/Parser/Markdown/CommonmarkParser/xml.c
         resources/Resources.qrc
-        ../resources/sysml.qrc
         src/Models/Libraries/CodeScanner.cpp
         src/Models/Libraries/CodeScanner.h
         src/Models/Libraries/DocumentWorkspace.cpp
         src/Models/Libraries/DocumentWorkspace.h
         src/Models/Libraries/LibraryWorkspace.cpp
         src/Models/Libraries/LibraryWorkspace.h
+        src/Models/Libraries/RemoteLibraries.cpp
+        src/Models/Libraries/RemoteLibraries.h
         src/Models/Libraries/WorkspaceConfig.cpp
         src/Models/Libraries/WorkspaceConfig.h
         src/Models/SettingsModel.cpp
@@ -81,9 +82,15 @@ qt_add_executable(StructuraSystems ${SOURCES})
 
 set_source_files_properties(qml/Theme.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
 
+# NO_GENERATE_QTCONF: since Qt 6.12 the generated qt.conf part depends on the ${target}_qmlimportscan target,
+# which the Qt6::Qml deploy finalizer creates. The Conan generated Qt6 config never registers that finalizer
+# (Qt6QmlConfigExtras.cmake checks __qt_Qml_targets_file_included), so the target is missing and the build fails.
+# The module lives in the executable itself and has no QML module dependencies, so no qt.conf is needed
+# (Qt <= 6.11 did not generate one for it either).
 qt_add_qml_module(StructuraSystems
         URI StructuraSystems
         VERSION 1.0
+        NO_GENERATE_QTCONF
         QML_FILES
             qml/Main.qml
             qml/Theme.qml
@@ -99,6 +106,7 @@ qt_add_qml_module(StructuraSystems
             qml/components/LanguageMenu.qml
             qml/components/NavigationRail.qml
             qml/components/NavRailItem.qml
+            qml/components/CompletionPopup.qml
             qml/components/ConfirmDeleteDialog.qml
             qml/components/ProjectList.qml
             qml/components/ProjectTree.qml
@@ -108,12 +116,14 @@ qt_add_qml_module(StructuraSystems
             qml/views/DigitalTwinPane.qml
             qml/views/HistoryPanel.qml
             qml/views/EditorView.qml
+            qml/views/EditorPane.qml
             qml/views/ElementCard.qml
             qml/views/ExplorerPane.qml
             qml/views/OnlinePane.qml
             qml/views/ProblemsSheet.qml
             qml/views/StatusBar.qml
             qml/dialogs/AboutDialog.qml
+            qml/dialogs/AddUsageDialog.qml
             qml/dialogs/CloseDocumentDialog.qml
             qml/dialogs/CommitDialog.qml
             qml/dialogs/DetailsDialog.qml
@@ -148,6 +158,14 @@ qt_add_qml_module(StructuraSystems
         SOURCES
             src/ViewModels/SysMLHighlighter.cpp
             src/ViewModels/SysMLHighlighter.h
+            src/ViewModels/CodeEditAssist.cpp
+            src/ViewModels/CodeEditAssist.h
+            src/ViewModels/LanguageKeywords.cpp
+            src/ViewModels/LanguageKeywords.h
+            src/ViewModels/CompletionEngine.cpp
+            src/ViewModels/CompletionEngine.h
+            src/ViewModels/CompletionController.cpp
+            src/ViewModels/CompletionController.h
             src/ViewModels/AppController.cpp
             src/ViewModels/AppController.h
             src/ViewModels/BranchListModel.cpp
@@ -168,6 +186,8 @@ qt_add_qml_module(StructuraSystems
             src/ViewModels/ProjectFilterModel.h
             src/ViewModels/LibraryController.cpp
             src/ViewModels/LibraryController.h
+            src/ViewModels/LibraryWarmUpStatus.cpp
+            src/ViewModels/LibraryWarmUpStatus.h
             src/ViewModels/LocalProjectTreeModel.cpp
             src/ViewModels/LocalProjectTreeModel.h
             src/ViewModels/SettingsController.cpp
@@ -237,7 +257,7 @@ if(RUN_TESTS)
     add_subdirectory(tests)
 endif()
 
-if (!UNIX)
+if(WIN32 OR APPLE)
 set_target_properties(StructuraSystems PROPERTIES
         WIN32_EXECUTABLE ON
         MACOSX_BUNDLE ON

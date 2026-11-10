@@ -144,6 +144,7 @@ Item {
                 elementId: delegate.elementId
                 elementTree: delegate.elementTree
                 elementCount: delegate.elementCount
+                document: view.document
                 tableOfContents: view.document ? view.document.tableOfContents : []
                 first: delegate.index === 0
                 last: delegate.index === list.count - 1

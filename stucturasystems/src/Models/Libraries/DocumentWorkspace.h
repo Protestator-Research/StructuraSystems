@@ -10,6 +10,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <set>
 #include <string>
 #include <vector>
@@ -18,7 +19,9 @@
 #include <QString>
 #include <QStringList>
 
+#include "../../ViewModels/CompletionEngine.h"
 #include "LibraryWorkspace.h"
+#include "RemoteLibraries.h"
 
 namespace KerML::Entities {
     class Element;
@@ -57,6 +60,11 @@ namespace StructuraSystems::Client {
     struct WorkspaceResult {
         std::vector<WorkspaceRow> Rows;
         QList<WorkspaceDiagnostic> Diagnostics;
+        /**
+         * Names stay unresolved, and the project usages of the document lead to libraries that are not in the cache yet: downloading
+         * them (RemoteLibraries::ensureClosure) may resolve more names.
+         */
+        bool NeedsRemoteDownload = false;
     };
 
     /**
@@ -64,6 +72,22 @@ namespace StructuraSystems::Client {
      * here: once update() returned, the workspace can be recycled (and the model disposed) by another thread.
      */
     using RowVisitor = std::function<void(const WorkspaceRow &)>;
+
+    /** One step of DocumentWorkspace::warmUp(), see there. */
+    struct WarmUpStep {
+        enum Kind {
+            Loading,     ///< The files of the standard library are read: Done of Total files are finished
+            Resolving,   ///< The names of the standard library are resolved
+            Indexing,    ///< The names of the standard library are collected for the name index
+            Ready        ///< The workspace is warm
+        };
+        Kind Step = Loading;
+        int Done = 0;
+        int Total = 0;
+    };
+
+    /** Called by DocumentWorkspace::warmUp() from the thread that runs it, or (while loading) from one of the loading threads, never concurrently. */
+    using WarmUpProgress = std::function<void(const WarmUpStep &)>;
 
     /**
      * The name resolution of one document: a SysMLv2::Files::Workspace with the standard library (level 0), the local
@@ -103,17 +127,54 @@ namespace StructuraSystems::Client {
         DocumentWorkspace(const DocumentWorkspace &) = delete;
         DocumentWorkspace &operator=(const DocumentWorkspace &) = delete;
 
+        /**
+         * The format of the standard library of this workspace: LibraryWorkspace::standardFormat() as it was when the workspace was
+         * created. A later LibraryWorkspace::setStandardFormat() does not change it, so the standard library is never a mix of formats.
+         */
+        [[nodiscard]] StandardFormat standardFormat() const { return Format; }
+
         /** Sets the libraries and the file of the document. The loaded libraries are dropped by the next update(). */
         void setLibraries(std::shared_ptr<LibraryWorkspace> libraries, QString ownFile);
 
         /**
+         * Sets the project usages of the document: the libraries that the usages of the commit of an online project lead to
+         * (SysML v2 API: ProjectUsage), read from the cache of @p remote, which this class never fills (no network access here).
+         * They are used for the names that the standard library and the local libraries do not resolve. Takes effect at the start
+         * of the next update(); setting the same values again changes nothing.
+         * @param remote null for none.
+         */
+        void setRemote(std::shared_ptr<RemoteLibraries> remote, QString projectId, QString commitId);
+
+        /**
          * Loads and resolves the standard library now (it takes seconds), so that the first update() is fast. Meant for a worker
          * thread. Stops early (and leaves nothing behind) if beginShutdown() is called meanwhile.
+         *
+         * The steps are reported to @p progress in this order: Loading (Done = 0, then once for every finished file, Total = the number
+         * of files), Resolving, Indexing (the part of the name index that holds the names of the library is built now, so that the first
+         * buildNameIndex() is cheap) and Ready. Nothing more is reported if the warm-up fails or is cancelled. Cheap if the workspace is warm already.
          */
-        void warmUp();
+        void warmUp(const WarmUpProgress &progress = {});
 
-        /** The application quits: running warm-ups stop, and workspaces are no longer disposed (the process ends anyway). */
+        /** Whether the workspace holds the loaded and resolved standard library: warmUp() completed, or an update() did, and the workspace was not disposed since. Thread safe, never waits. */
+        [[nodiscard]] bool isWarm() const { return Warm.load(); }
+
+        /**
+         * The number of threads that read the files of the standard library when a workspace is built (warmUp() or the first update()):
+         * 4 by default (fewer on a machine with fewer cores), 1 reads them one after the other, 0 uses one per core. In a debug build the heap
+         * of the runtime is locked, so more threads can make it slower there. Thread safe; takes effect for the workspaces that start loading
+         * afterwards.
+         */
+        static void setLoadThreads(unsigned threads);
+        static unsigned loadThreads();
+
+        /**
+         * The application quits: running warm-ups and updates stop (a cancelled load leaves nothing behind), and workspaces are no
+         * longer disposed (the process ends anyway).
+         */
         static void beginShutdown();
+
+        /** Undoes beginShutdown(), for tests: warm-ups and updates work again. A workspace whose warm-up was cancelled is left empty and loads again. */
+        static void resetShutdownForTests();
 
         /**
          * Makes the workspace ready for another document: the document blocks and the libraries are disposed, the standard
@@ -132,16 +193,28 @@ namespace StructuraSystems::Client {
         /** Library files that are currently loaded, relative to the opened folder. */
         [[nodiscard]] QStringList loadedLibraryFiles() const;
 
+        /**
+         * Snapshot of the names of the model for the code completion: the standard library, the loaded libraries and the blocks
+         * of the document, as they are now. Plain QStrings, so the result can be used on any thread. Takes the lock of the
+         * workspace, so it waits for a running update(); call it after update() on the worker thread. The part of the libraries
+         * is built once and kept until the libraries change; the part of the document is built every time.
+         * @return an empty index if the workspace has no model (not parsed yet, or disposed).
+         */
+        [[nodiscard]] std::shared_ptr<const NameIndex> buildNameIndex();
+
     private:
         struct LoadedLibrary {
             QString File;
             qint64 Stamp = -1;
             int Level = 1;
+            bool Remote = false;             ///< A used project of the server; File is its name for messages, the level comes from the usages
             QStringList Triggers;            ///< Package names that made the file necessary
             std::vector<size_t> Sources;
         };
 
-        void ensureSpace();
+        void ensureSpace(const WarmUpProgress &progress = {});
+        /** Builds the library part of the name index if it is not there for the current epoch (see buildNameIndex()). */
+        void ensureLibraryIndex();
         /** Replaces all sources but the standard library by an empty text, so that their model is freed. */
         void disposeNonStandard();
         void disposeAll();
@@ -150,10 +223,19 @@ namespace StructuraSystems::Client {
         void refreshLibraries(QList<WorkspaceDiagnostic> &diagnostics);
         void reloadLibrary(LoadedLibrary &library);
         void loadLibraryFile(const QString &file, const QString &trigger, QList<WorkspaceDiagnostic> &diagnostics);
+        void loadRemoteLibrary(const RemoteLibrary &remote, QList<WorkspaceDiagnostic> &diagnostics);
+        /** After a remote library raised RemoteMax: the local libraries (and the document) move above the remote ones. */
+        void relevelLocalLibraries(QList<WorkspaceDiagnostic> &diagnostics);
+        void parseDocumentBlocks();
         void resolveWithLibraries(QList<WorkspaceDiagnostic> &diagnostics);
         const PackageLookup &lookup(const QString &package);
         LibraryLevelInfo levelOf(const QString &file);
+        /** The level of a local library in this workspace: its level in the folder, above all remote libraries. */
+        int effectiveLevel(const QString &file);
+        const RemoteClosure &remoteClosure();
+        void addRemoteNote(const QString &note);
         [[nodiscard]] QString hintFor(const std::string &written, bool isImport);
+        [[nodiscard]] QString hintForLocal(const std::string &written, bool isImport);
 
         mutable std::mutex Mutex;
         std::mutex PendingMutex;
@@ -161,11 +243,35 @@ namespace StructuraSystems::Client {
         std::shared_ptr<LibraryWorkspace> PendingLibraries;
         QString PendingOwnFile;
 
+        bool HasPendingRemote = false;
+        std::shared_ptr<RemoteLibraries> PendingRemote;
+        QString PendingRemoteProject;
+        QString PendingRemoteCommit;
+
         std::shared_ptr<LibraryWorkspace> Libraries;
         QString OwnFile;
+        std::shared_ptr<RemoteLibraries> Remote;
+        QString RemoteProject;                       ///< The project and commit of the document on the server
+        QString RemoteCommit;
+        int RemoteMax = 0;                           ///< Highest level of the loaded remote libraries
+        std::optional<RemoteClosure> ClosureCache;
+        quint64 ClosureGeneration = 0;
+        QStringList RemoteNotes;                     ///< Package conflicts between remote libraries (and local files), kept while the libraries are loaded
+        QStringList RemoteProblems;                  ///< What is missing of the usages, set by the last resolve
+        bool NeedsRemoteDownload = false;
+        std::vector<DocumentSource> CurrentSources;  ///< The blocks of the running update()
+        QString CurrentName;
+        std::vector<QString> BlockFailures;
         std::shared_ptr<const std::vector<StandardSource>> StandardLibrary;
+        StandardFormat Format = StandardFormat::Xmi;   ///< The format of the standard library, taken when the workspace was created
         std::unique_ptr<SysMLv2::Files::Workspace> Space;
+        std::atomic<bool> Warm{false};               ///< see isWarm()
         quint64 LibraryGeneration = 0;
+        // Names of everything but the document blocks, see buildNameIndex(). ModelEpoch counts the changes of those sources.
+        quint64 ModelEpoch = 0;
+        quint64 LibraryNamesEpoch = 0;
+        bool LibraryNamesValid = false;
+        std::shared_ptr<const NameIndex> LibraryIndex;   ///< the first stage of every index of this epoch
         bool ForceReparse = false;
         std::vector<size_t> DocumentSlots;           ///< Source index per block of the document
         std::vector<std::string> DocumentTexts;

@@ -5,6 +5,7 @@
 #include "LibraryWorkspace.h"
 
 #include <algorithm>
+#include <atomic>
 #include <functional>
 #include <set>
 
@@ -14,19 +15,26 @@
 #include <QFileInfo>
 #include <QSet>
 
+#include <sysmlv2/service/StandardLibraryResources.h>
+
 namespace StructuraSystems::Client {
     namespace {
-        /** Files of the standard library that are KerML. The resources only keep an alias without suffix, so the language is listed here. */
-        const QSet<QString> &kermlAliases() {
-            static const QSet<QString> aliases = {
-                "Collections", "ScalarValues", "VectorValues",
-                "BaseFunctions", "BooleanFunctions", "CollectionFunctions", "ComplexFunctions", "ControlFunctions", "DataFunctions",
-                "IntegerFunctions", "NaturalFunctions", "NumericalFunctions", "OccurrenceFunctions", "RationalFunctions",
-                "RealFunctions", "ScalarFunctions", "SequenceFunctions", "StringFunctions", "TrigFunctions", "VectorFunctions",
-                "Base", "Clocks", "ControlPerformances", "FeatureReferencingPerformances", "KerML", "Links", "Metaobjects", "Objects",
-                "Observation", "Occurrences", "Performances", "SpatialFrames", "StatePerformances", "Transfers",
-                "TransitionPerformances", "Triggers"};
-            return aliases;
+        std::atomic<StandardFormat> CurrentStandardFormat{StandardFormat::Xmi};
+
+        /** The files of sysmllib in one format as StandardSources, in the order of the library. */
+        std::vector<StandardSource> readStandardLibrary(StandardFormat format) {
+            const auto files = format == StandardFormat::Xmi ? SysMLv2::API::standardLibraryXmi() : SysMLv2::API::standardLibraryText();
+            std::vector<StandardSource> sources;
+            sources.reserve(files.size());
+            for (const auto &file : files) {
+                StandardSource source;
+                source.Name = file.name;
+                source.Text = std::string(file.content);
+                source.Xmi = file.language == SysMLv2::Files::SourceLanguage::Xmi;
+                source.KerML = file.language == SysMLv2::Files::SourceLanguage::KerML;
+                sources.push_back(std::move(source));
+            }
+            return sources;
         }
 
         bool isHidden(const QString &relativePath) {
@@ -45,28 +53,24 @@ namespace StructuraSystems::Client {
     LibraryWorkspace::~LibraryWorkspace() = default;
 
     const std::vector<StandardSource> &LibraryWorkspace::standardLibrary() {
-        static const std::vector<StandardSource> library = []() {
-            std::vector<StandardSource> sources;
-            QStringList aliases;
-            QDirIterator iterator(QStringLiteral(":/sysml"), QDir::Files);
-            while (iterator.hasNext()) {
-                iterator.next();
-                aliases.append(iterator.fileName());
-            }
-            aliases.sort();
-            for (const auto &alias : std::as_const(aliases)) {
-                QFile file(QStringLiteral(":/sysml/") + alias);
-                if (!file.open(QIODevice::ReadOnly))
-                    continue;
-                StandardSource source;
-                source.KerML = kermlAliases().contains(alias);
-                source.Name = (alias + (source.KerML ? QStringLiteral(".kerml") : QStringLiteral(".sysml"))).toStdString();
-                source.Text = file.readAll().toStdString();
-                sources.push_back(std::move(source));
-            }
-            return sources;
-        }();
-        return library;
+        return standardLibrary(CurrentStandardFormat.load());
+    }
+
+    const std::vector<StandardSource> &LibraryWorkspace::standardLibrary(StandardFormat format) {
+        // (function local statics are initialized once, thread safe: one list per format, built when it is first asked for)
+        static const std::vector<StandardSource> text = readStandardLibrary(StandardFormat::Text);
+        if (format == StandardFormat::Text)
+            return text;
+        static const std::vector<StandardSource> xmi = readStandardLibrary(StandardFormat::Xmi);
+        return xmi;
+    }
+
+    void LibraryWorkspace::setStandardFormat(StandardFormat format) {
+        CurrentStandardFormat.store(format);
+    }
+
+    StandardFormat LibraryWorkspace::standardFormat() {
+        return CurrentStandardFormat.load();
     }
 
     // ------------------------------------------------------------------ folder
