@@ -8,10 +8,10 @@ include(CMakeDependentOption)
 option(RUN_TESTS "Build the tests" OFF)
 
 if(APPLE)
-    list(APPEND CMAKE_PREFIX_PATH "~/Qt/6.11.1/macos/")
+    list(APPEND CMAKE_PREFIX_PATH "~/Qt/6.12.0/macos/")
 endif(APPLE)
 if(WIN32)
-    list(APPEND CMAKE_PREFIX_PATH "C:/Qt/6.11.1/msvc2022_64")
+    list(APPEND CMAKE_PREFIX_PATH "C:/Qt/6.12.0/msvc2022_64")
 endif(WIN32)
 
 # With Conan the Qt tools (rcc, qmlimportscanner, qmlcachegen, qtpaths, ...) of the target Qt cannot start, because

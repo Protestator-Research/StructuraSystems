@@ -116,6 +116,7 @@ qt_add_qml_module(StructuraSystems
             qml/views/DigitalTwinPane.qml
             qml/views/HistoryPanel.qml
             qml/views/EditorView.qml
+            qml/views/EditorPane.qml
             qml/views/ElementCard.qml
             qml/views/ExplorerPane.qml
             qml/views/OnlinePane.qml
