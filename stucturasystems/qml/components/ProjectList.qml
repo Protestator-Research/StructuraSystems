@@ -24,6 +24,8 @@ ListView {
     signal projectActivated(int sourceRow)
     /** Emitted if the user wants to delete a project. Reports the row in the SOURCE model. */
     signal deleteRequested(int sourceRow, string name)
+    /** Emitted on a right click (or the menu key) on an entry. Reports the row in the SOURCE model. */
+    signal contextMenuRequested(int sourceRow, string projectId, string name)
 
     /** Selects the first entry and moves the keyboard focus into the list. */
     function focusFirst() {
@@ -67,6 +69,15 @@ ListView {
             deleteRequested(source, filter.data(filter.index(currentIndex, 0), Qt.DisplayRole))
     }
     Keys.onReturnPressed: if (currentIndex >= 0) _activate(currentIndex)
+    // The Menu key and Shift+F10 open the context menu of the current entry (like a right click).
+    Keys.onPressed: event => {
+        if (currentIndex >= 0 && (event.key === Qt.Key_Menu || (event.key === Qt.Key_F10 && (event.modifiers & Qt.ShiftModifier)))) {
+            const source = filter.sourceRow(currentIndex)
+            if (source >= 0)
+                contextMenuRequested(source, filter.data(filter.index(currentIndex, 0), ProjectListModel.IdRole), filter.data(filter.index(currentIndex, 0), Qt.DisplayRole))
+            event.accepted = true
+        }
+    }
     Keys.onEnterPressed: if (currentIndex >= 0) _activate(currentIndex)
 
     delegate: ItemDelegate {
@@ -75,6 +86,7 @@ ListView {
         required property int index
         required property string name
         required property string description
+        required property string projectId
 
         width: ListView.view.width
         height: 52
@@ -82,6 +94,16 @@ ListView {
         hoverEnabled: true
         onClicked: list.currentIndex = index
         onDoubleClicked: list._activate(index)
+
+        TapHandler {
+            acceptedButtons: Qt.RightButton
+            onTapped: {
+                list.currentIndex = entry.index
+                const source = filter.sourceRow(entry.index)
+                if (source >= 0)
+                    list.contextMenuRequested(source, entry.projectId, entry.name)
+            }
+        }
 
         ToolTip.visible: hovered && description.length > 0
         ToolTip.text: description

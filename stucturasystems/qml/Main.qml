@@ -28,7 +28,158 @@ ApplicationWindow {
     /** Narrow windows start without side panel; it can still be opened by hand. */
     readonly property bool compact: width < 1100
     property bool _restored: false
+
+    /** Width of the side panel, adjustable by dragging its right edge. */
+    property real panelWidth: Theme.panelWidth
+    readonly property real panelMinWidth: 200
+    readonly property real panelMaxWidth: Math.max(panelMinWidth, Math.min(600, width * 0.45))
+    readonly property real effectivePanelWidth: clampPanelWidth(panelWidth)
+    property bool panelResizing: false
+
+    // Split editor: root.doc (the current document) is always the document of the active side.
+    /** The document on the inactive side, null while the editor is not split. */
+    property DocumentModel otherDoc: null
+    /** 0 left, 1 right */
+    property int activePane: 0
+    readonly property bool splitOpen: otherDoc !== null
+    // The documents shown on both sides. They are set by _syncPanes() only once a change is complete, so a side never
+    // shows an intermediate document (that would rebuild its editor and drop the focus of the clicked card).
+    property DocumentModel leftDoc: null
+    property DocumentModel rightDoc: null
     property bool forceClose: false
+
+    function clampPanelWidth(w) {
+        return Math.max(panelMinWidth, Math.min(panelMaxWidth, w))
+    }
+
+    function _syncPanes() {
+        leftDoc = activePane === 0 ? doc : otherDoc
+        rightDoc = activePane === 1 ? doc : otherDoc
+    }
+
+    function closeSplit() {
+        otherDoc = null
+        activePane = 0
+        _syncPanes()
+    }
+
+    // The other document may have been closed (and deleted) or became the current one.
+    function validateSplit() {
+        if (otherDoc === null)
+            return
+        if (otherDoc === doc || AppController.documents.indexOfDocument(otherDoc) < 0)
+            closeSplit()
+    }
+
+    function activatePane(pane) {
+        if (!splitOpen || pane === activePane)
+            return
+        const newActive = otherDoc
+        const newIndex = AppController.documents.indexOfDocument(newActive)
+        if (newIndex < 0) {
+            closeSplit()
+            return
+        }
+        otherDoc = doc
+        activePane = pane
+        AppController.currentIndex = newIndex
+    }
+
+    // Shows the tab on the other side of the editor; the current document stays where it is.
+    function openToSide(index) {
+        const target = AppController.documents.at(index)
+        if (!target || target === doc)
+            return
+        if (splitOpen) {
+            otherDoc = target
+            _syncPanes()
+        } else {
+            otherDoc = doc
+            activePane = 1
+            AppController.currentIndex = index
+        }
+    }
+
+    // Makes the tab the current document; the tab of the inactive side switches the side.
+    function showTab(index) {
+        const target = AppController.documents.at(index)
+        if (!target || target === doc)
+            return
+        if (splitOpen && target === otherDoc)
+            activatePane(1 - activePane)
+        else
+            AppController.currentIndex = index
+    }
+
+    function toggleSplit() {
+        if (splitOpen) {
+            closeSplit()
+            return
+        }
+        const count = AppController.documents.count
+        if (count < 2 || doc === null)
+            return
+        openToSide((AppController.currentIndex + 1) % count)
+    }
+
+    /**
+     * Shows the document on the given side (0 left, 1 right) and makes that side the active one, like dropping a tab
+     * there. The document that was on that side moves to the other side if the dropped one came from there.
+     */
+    function placeDocument(document, side) {
+        const index = AppController.documents.indexOfDocument(document)
+        if (index < 0)
+            return
+        const sideDoc = side === 0 ? leftDoc : rightDoc
+        const opposite = side === 0 ? rightDoc : leftDoc
+        if (sideDoc === document) {
+            activatePane(side)
+            return
+        }
+        let keep
+        if (splitOpen)
+            keep = opposite === document ? sideDoc : opposite
+        else if (document !== doc)
+            keep = doc
+        else {
+            // The only visible document moves to a side; the other side shows the next tab.
+            const count = AppController.documents.count
+            if (count < 2)
+                return
+            keep = AppController.documents.at((index + 1) % count)
+        }
+        if (!keep || keep === document)
+            return
+        otherDoc = keep
+        activePane = side
+        if (document === doc)
+            _syncPanes()
+        else
+            AppController.currentIndex = index  // the change of the current document updates both sides
+    }
+
+    // ---- dragging a tab onto a side of the editor
+    /** The document of the tab being dragged, null while no tab is dragged. */
+    property DocumentModel draggedDoc: null
+    property string draggedTitle: ""
+
+    function beginTabDrag(document, title, scenePos) {
+        draggedDoc = document
+        draggedTitle = title
+        moveTabDrag(scenePos)
+    }
+
+    function moveTabDrag(scenePos) {
+        tabDragGhost.x = scenePos.x - tabDragGhost.width / 2
+        tabDragGhost.y = scenePos.y - tabDragGhost.height / 2
+    }
+
+    function endTabDrag() {
+        if (draggedDoc !== null)
+            tabDragGhost.Drag.drop()
+        draggedDoc = null
+        draggedTitle = ""
+    }
 
     function requestClose(index, title, modified) {
         if (index < 0 || busy)
@@ -87,6 +238,11 @@ ApplicationWindow {
         AppController.settings.save()
     }
 
+    function confirmRemoveUsage(usageId, usedProjectName) {
+        removeUsageDialog.usageDocument = root.doc
+        removeUsageDialog.openForUsage(usageId, usedProjectName, root.doc ? root.doc.title : "")
+    }
+
     function selectDestination(index) {
         if (destination === index && panelOpen) {
             panelOpen = false
@@ -117,6 +273,7 @@ ApplicationWindow {
                                             Math.min(problemsSheet.maxBodyHeight, windowState.problemsHeight))
         panelOpen = windowState.panelOpen && !compact
         historyOpen = windowState.historyOpen
+        panelWidth = clampPanelWidth(windowState.panelWidth)
         if (windowState.maximized)
             visibility = Window.Maximized
         _restored = true
@@ -145,6 +302,8 @@ ApplicationWindow {
         if (_restored)
             panelOpen = !compact
     }
+    // A new current document is shown on the active side (tab click, opened or closed document, side switch).
+    onDocChanged: _syncPanes()
     onPanelOpenChanged: if (_restored) windowState.panelOpen = panelOpen
     onHistoryOpenChanged: if (_restored) windowState.historyOpen = historyOpen
     onDestinationChanged: if (_restored) windowState.destination = destination
@@ -184,6 +343,7 @@ ApplicationWindow {
         property bool historyOpen: false
         property int destination: 0
         property int problemsHeight: 190
+        property int panelWidth: Theme.panelWidth
     }
 
     Binding {
@@ -214,6 +374,11 @@ ApplicationWindow {
         onActivated: root.requestClose(AppController.currentIndex, root.doc.title, root.doc.modified)
     }
     Shortcut { sequences: ["Ctrl+,"]; onActivated: settingsDialog.open() }
+    Shortcut {
+        sequences: ["Ctrl+\\"]
+        enabled: root.splitOpen || AppController.documents.count > 1
+        onActivated: root.toggleSplit()
+    }
     Shortcut { sequences: [StandardKey.Quit]; onActivated: root.close() }
 
     // ---------------------------------------------------------------- reactions to the view models
@@ -222,6 +387,23 @@ ApplicationWindow {
 
         function onNotify(level, message, details) {
             snackbar.show(level, message, details)
+        }
+    }
+
+    // The document of the other side may disappear or become the current one.
+    Connections {
+        target: AppController.documents
+
+        function onCountChanged() {
+            root.validateSplit()
+        }
+    }
+
+    Connections {
+        target: AppController
+
+        function onCurrentDocumentChanged() {
+            root.validateSplit()
         }
     }
 
@@ -254,14 +436,15 @@ ApplicationWindow {
         // Collapsible side panel. The content keeps its width while the container animates.
         Item {
             Layout.fillHeight: true
-            Layout.preferredWidth: root.panelOpen ? Theme.panelWidth : 0
+            Layout.preferredWidth: root.panelOpen ? root.effectivePanelWidth : 0
             clip: true
             Behavior on Layout.preferredWidth {
+                enabled: !root.panelResizing
                 NumberAnimation { duration: Theme.animationDuration; easing.type: Easing.OutCubic }
             }
 
             StackLayout {
-                width: Theme.panelWidth
+                width: root.effectivePanelWidth
                 height: parent.height
                 currentIndex: root.destination
 
@@ -273,6 +456,10 @@ ApplicationWindow {
                 OnlinePane {
                     onNewProjectRequested: root.newProject(true)
                     onSettingsRequested: settingsDialog.open()
+                    onAddUsageRequested: (projectId, name) => addUsageDialog.openFor(projectId, name)
+                    onAddUsagePickerRequested: addUsageDialog.openPicker()
+                    onManageUsagesRequested: settingsDialog.open()
+                    onRemoveUsageRequested: (usageId, name) => root.confirmRemoveUsage(usageId, name)
                 }
                 DigitalTwinPane {
                     onCreateRequested: wizard.openWizard()
@@ -285,7 +472,44 @@ ApplicationWindow {
                 anchors.top: parent.top
                 anchors.bottom: parent.bottom
                 width: 1
-                color: Theme.outline
+                color: panelHandle.containsMouse || root.panelResizing ? Theme.accent : Theme.outline
+            }
+
+            // Drag handle on the right edge to resize the panel; double click restores the default width.
+            MouseArea {
+                id: panelHandle
+
+                property real startX: 0
+                property real startWidth: 0
+
+                anchors.right: parent.right
+                anchors.top: parent.top
+                anchors.bottom: parent.bottom
+                width: 6
+                visible: root.panelOpen
+                hoverEnabled: true
+                cursorShape: Qt.SplitHCursor
+                preventStealing: true
+
+                onPressed: mouse => {
+                    startX = mapToItem(null, mouse.x, 0).x
+                    startWidth = root.effectivePanelWidth
+                    root.panelResizing = true
+                }
+                onPositionChanged: mouse => {
+                    if (!pressed)
+                        return
+                    root.panelWidth = root.clampPanelWidth(startWidth + mapToItem(null, mouse.x, 0).x - startX)
+                }
+                onReleased: {
+                    root.panelResizing = false
+                    windowState.panelWidth = Math.round(root.panelWidth)
+                }
+                onCanceled: root.panelResizing = false
+                onDoubleClicked: {
+                    root.panelWidth = Theme.panelWidth
+                    windowState.panelWidth = Theme.panelWidth
+                }
             }
         }
 
@@ -323,7 +547,13 @@ ApplicationWindow {
                         Material.background: "transparent"
                         background: null
                         onCurrentIndexChanged: {
-                            if (currentIndex !== AppController.currentIndex)
+                            if (currentIndex === AppController.currentIndex)
+                                return
+                            // The tab of the inactive side switches the side instead of showing the document twice.
+                            if (root.splitOpen && currentIndex >= 0
+                                    && currentIndex === AppController.documents.indexOfDocument(root.otherDoc))
+                                root.activatePane(1 - root.activePane)
+                            else
                                 AppController.currentIndex = currentIndex
                         }
 
@@ -336,10 +566,60 @@ ApplicationWindow {
                                 required property int index
                                 required property string title
                                 required property bool modified
+                                required property DocumentModel document
 
                                 width: Math.min(Math.max(implicitWidth, 120), 240)
                                 padding: 6
                                 leftPadding: 12
+
+                                // The tab shown on the inactive side of the split editor.
+                                readonly property bool onOtherSide: root.splitOpen && tab.document === root.otherDoc
+
+                                // The menu gets the index of its tab; the current document is not changed.
+                                function openMenu() {
+                                    tabMenu.tabIndex = tab.index
+                                    tabMenu.tabOnline = tab.document !== null && tab.document.isOnline
+                                    tabMenu.popup()
+                                }
+
+                                Rectangle {
+                                    anchors.bottom: parent.bottom
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    height: 2
+                                    visible: tab.onOtherSide
+                                    color: Theme.outline
+                                }
+
+                                TapHandler {
+                                    acceptedButtons: Qt.RightButton
+                                    onTapped: tab.openMenu()
+                                }
+                                // Dragging a tab onto a side of the editor shows it there (see the DropArea of the editor).
+                                DragHandler {
+                                    target: null
+                                    acceptedButtons: Qt.LeftButton
+                                    dragThreshold: 10
+                                    grabPermissions: PointerHandler.CanTakeOverFromAnything
+                                    enabled: !root.busy
+                                    onActiveChanged: {
+                                        if (active)
+                                            root.beginTabDrag(tab.document, tab.title, centroid.scenePosition)
+                                        else
+                                            root.endTabDrag()
+                                    }
+                                    onCentroidChanged: {
+                                        if (active)
+                                            root.moveTabDrag(centroid.scenePosition)
+                                    }
+                                }
+                                // The Menu key and Shift+F10 open the menu of the focused tab.
+                                Keys.onPressed: event => {
+                                    if (event.key === Qt.Key_Menu || (event.key === Qt.Key_F10 && (event.modifiers & Qt.ShiftModifier))) {
+                                        tab.openMenu()
+                                        event.accepted = true
+                                    }
+                                }
 
                                 contentItem: RowLayout {
                                     spacing: 6
@@ -374,6 +654,13 @@ ApplicationWindow {
                         }
                     }
 
+                    IconToolButton {
+                        iconSource: Theme.iconSplit
+                        checked: root.splitOpen
+                        enabled: root.splitOpen || AppController.documents.count > 1
+                        tip: root.splitOpen ? qsTr("Close split view") : qsTr("Split editor (Ctrl+\\)")
+                        onClicked: root.toggleSplit()
+                    }
                     BranchChip {
                         visible: root.isOnlineDoc
                         enabled: !root.busy && AppController.connected
@@ -456,25 +743,81 @@ ApplicationWindow {
                     Layout.fillHeight: true
                     spacing: 0
 
-                    DetachedBanner {
-                        Layout.fillWidth: true
-                        shown: root.doc !== null && root.doc.detached
-                        commitId: root.doc ? root.doc.commitId : ""
-                        branchName: root.doc ? root.doc.branchName : ""
-                        busy: root.busy
-                        onReturnRequested: AppController.returnToBranchHead()
-                        onNewBranchRequested: newBranchDialog.openFor(root.doc ? root.doc.commitId : "")
-                    }
-
                     Item {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
 
-                        EditorView {
-                            id: editor
+                        SplitView {
+                            id: splitView
+
                             anchors.fill: parent
+                            orientation: Qt.Horizontal
                             visible: root.doc !== null
-                            document: root.doc
+
+                            handle: Rectangle {
+                                implicitWidth: 1
+                                color: SplitHandle.pressed || SplitHandle.hovered ? Theme.accent : Theme.outline
+                            }
+
+                            EditorPane {
+                                id: leftPane
+
+                                SplitView.fillWidth: true
+                                SplitView.minimumWidth: 320
+                                document: root.leftDoc
+                                active: root.activePane === 0
+                                split: root.splitOpen
+                                onActivationRequested: root.activatePane(0)
+                                onReturnRequested: AppController.returnToBranchHead()
+                                onNewBranchRequested: newBranchDialog.openFor(document ? document.commitId : "")
+                            }
+
+                            EditorPane {
+                                id: rightPane
+
+                                SplitView.preferredWidth: splitView.width / 2
+                                SplitView.minimumWidth: 320
+                                visible: root.splitOpen
+                                document: root.rightDoc
+                                active: root.activePane === 1
+                                split: root.splitOpen
+                                onActivationRequested: root.activatePane(1)
+                                onReturnRequested: AppController.returnToBranchHead()
+                                onNewBranchRequested: newBranchDialog.openFor(document ? document.commitId : "")
+                            }
+                        }
+
+                        // Drop target for dragged tabs: the side under the pointer is highlighted and gets the document.
+                        DropArea {
+                            id: tabDropArea
+
+                            /** 0 left, 1 right */
+                            property int side: 0
+                            readonly property real splitX: root.splitOpen ? leftPane.width : width / 2
+
+                            anchors.fill: parent
+                            enabled: root.doc !== null
+                            keys: ["structura/tab"]
+                            onEntered: drag => side = drag.x < splitX ? 0 : 1
+                            onPositionChanged: drag => side = drag.x < splitX ? 0 : 1
+                            onDropped: drop => {
+                                const side = drop.x < splitX ? 0 : 1
+                                drop.accept()
+                                // Changing the documents while the drop is delivered could delete the drag source.
+                                const document = root.draggedDoc
+                                Qt.callLater(() => root.placeDocument(document, side))
+                            }
+
+                            Rectangle {
+                                visible: tabDropArea.containsDrag
+                                x: tabDropArea.side === 0 ? 0 : tabDropArea.splitX
+                                y: 0
+                                width: tabDropArea.side === 0 ? tabDropArea.splitX : tabDropArea.width - tabDropArea.splitX
+                                height: tabDropArea.height
+                                color: Qt.alpha(Theme.accent, 0.12)
+                                border.width: 2
+                                border.color: Theme.accent
+                            }
                         }
 
                         EmptyState {
@@ -536,13 +879,45 @@ ApplicationWindow {
                 id: problemsSheet
                 Layout.fillWidth: true
                 visible: root.doc !== null
-                onProblemActivated: row => editor.scrollToRow(row)
+                onProblemActivated: row => (root.activePane === 0 ? leftPane : rightPane).scrollToRow(row)
             }
         }
     }
 
     footer: StatusBar {
         elementCount: root.doc ? root.doc.count : -1
+    }
+
+    // Follows the pointer while a tab is dragged; it carries the drag to the DropArea of the editor.
+    Rectangle {
+        id: tabDragGhost
+
+        parent: Overlay.overlay
+        z: 1000
+        visible: root.draggedDoc !== null
+        width: Math.min(Math.max(ghostLabel.implicitWidth + 24, 120), 240)
+        height: 32
+        radius: 4
+        color: Theme.card
+        border.width: 1
+        border.color: Theme.accent
+        opacity: 0.9
+
+        Drag.active: root.draggedDoc !== null
+        Drag.keys: ["structura/tab"]
+        Drag.hotSpot.x: width / 2
+        Drag.hotSpot.y: height / 2
+
+        Label {
+            id: ghostLabel
+            anchors.fill: parent
+            anchors.leftMargin: 12
+            anchors.rightMargin: 12
+            verticalAlignment: Text.AlignVCenter
+            text: root.draggedTitle
+            elide: Text.ElideRight
+            color: Theme.textPrimary
+        }
     }
 
     Snackbar {
@@ -574,7 +949,69 @@ ApplicationWindow {
         onAccepted: AppController.openFiles(selectedFiles)
     }
 
-    SettingsDialog { id: settingsDialog }
+    SettingsDialog {
+        id: settingsDialog
+        onAddUsageRequested: addUsageDialog.openPicker()
+        onRemoveUsageRequested: (usageId, name) => root.confirmRemoveUsage(usageId, name)
+    }
+    // The one dialog for adding a project usage, and the one that asks before one is removed (used by the project list, the tab
+    // menu and the settings).
+    AddUsageDialog { id: addUsageDialog }
+    ConfirmDeleteDialog {
+        id: removeUsageDialog
+        // The document the confirmation was asked for; the usage belongs to it, not to whatever tab is shown now.
+        property var usageDocument: null
+        onConfirmed: (row, usageId) => {
+            if (usageDocument !== root.doc) {
+                AppController.notify(2, qsTr("The project usage was not removed."),
+                                     qsTr("The current document changed while the confirmation was open."))
+                return
+            }
+            AppController.removeRemoteUsage(usageId)
+        }
+    }
+
+    // Context menu of a tab: split view and, for online documents, their project usages.
+    Menu {
+        id: tabMenu
+
+        /** Index of the tab the menu was opened for. */
+        property int tabIndex: -1
+        property bool tabOnline: false
+        readonly property bool usable: AppController.connected
+
+        MenuItem {
+            enabled: tabMenu.tabIndex >= 0 && AppController.documents.at(tabMenu.tabIndex) !== root.doc
+            text: root.splitOpen ? qsTr("Open on the other side") : qsTr("Open to the side")
+            onTriggered: root.openToSide(tabMenu.tabIndex)
+        }
+        MenuItem {
+            enabled: root.splitOpen
+            text: qsTr("Close split view")
+            onTriggered: root.closeSplit()
+        }
+        MenuSeparator { visible: tabMenu.tabOnline }
+        MenuItem {
+            visible: tabMenu.tabOnline
+            height: visible ? implicitHeight : 0
+            enabled: tabMenu.usable && !root.busy
+            text: qsTr("Add project usage...")
+            onTriggered: {
+                // The usages belong to the current document.
+                root.showTab(tabMenu.tabIndex)
+                addUsageDialog.openPicker()
+            }
+        }
+        MenuItem {
+            visible: tabMenu.tabOnline
+            height: visible ? implicitHeight : 0
+            text: qsTr("Manage project usages...")
+            onTriggered: {
+                root.showTab(tabMenu.tabIndex)
+                settingsDialog.open()
+            }
+        }
+    }
     NewProjectDialog { id: newProjectDialog }
     CommitDialog { id: commitDialog }
     NewBranchDialog { id: newBranchDialog }

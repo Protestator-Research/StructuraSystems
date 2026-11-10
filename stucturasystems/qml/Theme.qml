@@ -94,6 +94,7 @@ QtObject {
     readonly property url iconSearch: _ui + "4622503-user-interface/png/047-search.png"
     readonly property url iconEdit: _sci + "024-notepad.png"
     readonly property url iconPreview: _ui + "3032829-user-interface/png/046-eye.png"
+    readonly property url iconSplit: _ui + "3032829-user-interface/png/046-eye.png"
     readonly property url iconClose: "qrc:/icons/userinterface/Delete"
     readonly property url iconTrash: _cloud + "010-delete.png"
     // The alias names in the qrc are swapped: "UpGreen" shows a chevron pointing down and vice versa.

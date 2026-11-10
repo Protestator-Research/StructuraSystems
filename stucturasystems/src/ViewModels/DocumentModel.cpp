@@ -28,8 +28,10 @@
 #include <sysmlv2/rest/entities/Commit.h>
 #include <sysmlv2/service/implementation/ElementNavigationService.h>
 
+#include "CompletionEngine.h"
 #include "../Models/Libraries/DocumentWorkspace.h"
 #include "../Models/Libraries/LibraryWorkspace.h"
+#include "../Models/Libraries/RemoteLibraries.h"
 #include "../Models/Parser/StructuraSystemsParser.h"
 #include "../Models/Parser/Markdown/CommonmarkParser/cmark.h"
 
@@ -657,6 +659,9 @@ namespace StructuraSystems::Client {
                 }
             });
 
+            result.NeedsRemoteDownload = resolved.NeedsRemoteDownload;
+            // Right after update() (still on the worker): the names are copied into plain data, the model is not touched later.
+            result.Names = workspace->buildNameIndex();
             for (const auto &diagnostic : std::as_const(resolved.Diagnostics)) {
                 Problem problem;
                 problem.Message = diagnostic.Message;
@@ -679,7 +684,27 @@ namespace StructuraSystems::Client {
     std::shared_ptr<DocumentWorkspace> DocumentModel::workspace() {
         if (Workspace == nullptr)
             Workspace = std::make_shared<DocumentWorkspace>(Libraries, OwnFile);
+        syncRemote();   // the commit may have changed since the last run
         return Workspace;
+    }
+
+    void DocumentModel::syncRemote() {
+        if (Workspace == nullptr)
+            return;
+        if (IsOnline && Remote != nullptr && Project != nullptr && Commit != nullptr)
+            Workspace->setRemote(Remote, projectId(), commitId());
+        else
+            Workspace->setRemote(nullptr, QString(), QString());
+    }
+
+    void DocumentModel::attachRemote(std::shared_ptr<RemoteLibraries> remote) {
+        Remote = std::move(remote);
+        syncRemote();
+    }
+
+    void DocumentModel::updateCommit(std::shared_ptr<SysMLv2::REST::Commit> commit) {
+        Commit = std::move(commit);
+        emit identityChanged();
     }
 
     void DocumentModel::attachLibraries(std::shared_ptr<LibraryWorkspace> libraries, const QString &ownFile) {
@@ -697,6 +722,7 @@ namespace StructuraSystems::Client {
         Workspace = std::move(workspace);
         if (Workspace != nullptr)
             Workspace->setLibraries(Libraries, OwnFile);
+        syncRemote();
     }
 
     std::shared_ptr<DocumentWorkspace> DocumentModel::releaseWorkspace() {
@@ -707,6 +733,7 @@ namespace StructuraSystems::Client {
         // Previous errors and instance elements are replaced, not accumulated.
         InstanceElements = std::move(result.InstanceElements);
         ParserProblems = std::move(result.Problems);
+        Names = std::move(result.Names);
 
         for (size_t i = 0; i < Rows.size(); i++) {
             const int rowIndex = int(i);
@@ -736,6 +763,10 @@ namespace StructuraSystems::Client {
 
     QList<Problem> DocumentModel::problems() const {
         return ParserProblems;
+    }
+
+    std::shared_ptr<const NameIndex> DocumentModel::nameIndex() const {
+        return Names;
     }
 
     const std::vector<std::shared_ptr<KerML::Entities::Element>> &DocumentModel::instanceElements() const {

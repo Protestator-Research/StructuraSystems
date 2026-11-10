@@ -30,6 +30,7 @@ namespace SysMLv2::REST {
     class DigitalTwin;
     class DigitalTwinRequest;
     class CommitRequest;
+    class ProjectUsage;
 }
 
 namespace KerML::Entities {
@@ -50,6 +51,16 @@ namespace StructuraSystems::Client {
         std::string Group;
         int Role = 0;
         bool MustChangePassword = false;
+    };
+
+    /**
+     * What a commit holds that the project usages need: its TextualRepresentations and its project usages. The usages are no elements of the model; they are
+     * Data of the commit that pin a commit of another project (SysML v2 API: ProjectUsage).
+     */
+    struct CommitData {
+        /** The TextualRepresentations of the commit (the rows of a document), only if they were asked for. */
+        std::vector<std::shared_ptr<KerML::Entities::Element>> Elements;
+        std::vector<std::shared_ptr<SysMLv2::REST::ProjectUsage>> Usages;
     };
 
     /**
@@ -85,6 +96,11 @@ namespace StructuraSystems::Client {
          * @param transport Sends one GET request.
          */
         CommunicationService(std::string serverAddress, HttpTransport transport);
+
+        /**
+         * Like above, and the POST requests of the queries are sent by the given transport too.
+         */
+        CommunicationService(std::string serverAddress, HttpTransport transport, HttpPostTransport postTransport);
 
         /**
          * D-Tor
@@ -232,6 +248,64 @@ namespace StructuraSystems::Client {
         std::vector<std::shared_ptr<KerML::Entities::Element>> getAllElementsOfCommit(boost::uuids::uuid projectId, boost::uuids::uuid commitId);
 
         /**
+         * Reads the project usages of a commit and, if wanted, its texts. This is the one place where the usages of a commit are
+         * read.
+         *
+         * The usages are Data of the commit but no elements of the model, and the list of the elements
+         * (GET projects/{p}/commits/{c}/elements) does not contain them. They are read with an ad-hoc query on the type (SysML v2 API,
+         * QueryService, the query is not stored on the server):
+         *
+         *     POST projects/{projectId}/query-results?commitId={commitId}
+         *     {"@type":"Query","select":[],"scope":[],"orderBy":[],"where":{"@type":"PrimitiveConstraint","property":"@type",
+         *      "operator":"=","value":"ProjectUsage"}}
+         *
+         * The rows are the usages (`usedProject` and `usedProjectCommit` as references); the sysmllib deserializes them as
+         * SysMLv2::REST::ProjectUsage. The answer is paged like every list; the following pages are requested with the same body.
+         * The texts (only if @p withTexts) come from the list of the elements; the entries of the type TextualRepresentation are
+         * deserialized, nothing else. A usages-only read does not request the elements at all.
+         * @param projectId UUID ("@id") of the project.
+         * @param commitId UUID ("@id") of the commit.
+         * @param withTexts false: only the usages are read.
+         * @throws SysMLv2::API::EXCEPTIONS::HTTPException If the server answers with a status outside of 2xx.
+         * @throws SysMLv2::API::EXCEPTIONS::ConnectionError If the server is not reachable.
+         */
+        [[nodiscard]] CommitData getCommitData(boost::uuids::uuid projectId, boost::uuids::uuid commitId, bool withTexts = true) const;
+
+        /**
+         * Downloads one project (GET projects/{projectId}), for example to show the name of a used project.
+         * @throws SysMLv2::API::EXCEPTIONS::HTTPException If the server answers with a status outside of 2xx.
+         * @throws SysMLv2::API::EXCEPTIONS::ConnectionError If the server is not reachable.
+         */
+        [[nodiscard]] std::shared_ptr<SysMLv2::REST::Project> getProjectWithId(boost::uuids::uuid projectId) const;
+
+        /**
+         * Changes the project usages of a project with one commit on a branch: the usages are created and deleted as changes of
+         * the commit (a ProjectUsage is Data like an element: a DataVersion with the usage as payload creates it, one without
+         * payload deletes it by its identity). The elements of the model stay as they are.
+         * @param projectId UUID ("@id") of the project that uses the others.
+         * @param branchId UUID ("@id") of the branch that receives the commit.
+         * @param description The description of the commit.
+         * @param removeUsageIds The ids of the usages that are deleted.
+         * @param addUsages Pairs of used project id and used commit id of the usages that are created.
+         * @return The commit created by the server.
+         * @throws std::invalid_argument If there is nothing to change.
+         * @throws SysMLv2::API::EXCEPTIONS::HTTPException If the server answers with a status outside of 2xx.
+         * @throws SysMLv2::API::EXCEPTIONS::ConnectionError If the server is not reachable.
+         */
+        /**
+         * The request of commitProjectUsages(): the changes of the commit (see there). Public so that it can be checked without a server.
+         * @throws std::invalid_argument If there is nothing to change.
+         */
+        static std::shared_ptr<SysMLv2::REST::CommitRequest> buildProjectUsageRequest(
+            const std::string &description, const std::vector<boost::uuids::uuid> &removeUsageIds,
+            const std::vector<std::pair<boost::uuids::uuid, boost::uuids::uuid>> &addUsages);
+
+        std::shared_ptr<SysMLv2::REST::Commit> commitProjectUsages(boost::uuids::uuid projectId, boost::uuids::uuid branchId,
+                                                                   const std::string &description,
+                                                                   const std::vector<boost::uuids::uuid> &removeUsageIds,
+                                                                   const std::vector<std::pair<boost::uuids::uuid, boost::uuids::uuid>> &addUsages);
+
+        /**
          * Sets and checks internally the user, that the server is connected to.
          * @param username The username or email of the user to login.
          * @param password The password of the user to login.
@@ -314,6 +388,7 @@ namespace StructuraSystems::Client {
         std::string ServerAddress;
 
         HttpTransport Transport;
+        HttpPostTransport PostTransport;
 
         std::string BarrierString = "";
 

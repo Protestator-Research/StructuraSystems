@@ -8,6 +8,8 @@
 //---------------------------------------------------------
 // External Classes
 //---------------------------------------------------------
+#include <algorithm>
+#include <cctype>
 #include <utility>
 #include <sysmlv2/rest/entities/IEntity.h>
 #include <sysmlv2/rest/entities/Project.h>
@@ -15,6 +17,11 @@
 #include <sysmlv2/rest/entities/Branch.h>
 #include <sysmlv2/rest/entities/ProjectRequest.h>
 #include <sysmlv2/rest/entities/CommitRequest.h>
+#include <sysmlv2/rest/entities/DataIdentity.h>
+#include <sysmlv2/rest/entities/DataVersion.h>
+#include <sysmlv2/rest/entities/ProjectUsage.h>
+#include <sysmlv2/rest/entities/QueryRequest.h>
+#include <sysmlv2/rest/entities/Constraint.h>
 #include <sysmlv2/rest/serialization/SysMLv2Deserializer.h>
 #include <kerml/root/annotations/TextualRepresentation.h>
 #include <kerml/root/elements/Element.h>
@@ -131,7 +138,11 @@ namespace StructuraSystems::Client {
     }
 
     CommunicationService::CommunicationService(std::string serverAddress, HttpTransport transport) :
-        Transport(std::move(transport)) {
+        CommunicationService(std::move(serverAddress), std::move(transport), curlPostTransport()) {
+    }
+
+    CommunicationService::CommunicationService(std::string serverAddress, HttpTransport transport, HttpPostTransport postTransport) :
+        Transport(std::move(transport)), PostTransport(std::move(postTransport)) {
         ServerAddress = std::move(serverAddress);
         APIImplementation = std::make_unique<SysMLv2::API::SysMLAPIImplementation>(ServerAddress);
     }
@@ -139,7 +150,7 @@ namespace StructuraSystems::Client {
     CommunicationService::~CommunicationService() = default;
 
     std::shared_ptr<CommunicationService> CommunicationService::createIndependentConnection() const {
-        auto connection = std::make_shared<CommunicationService>(ServerAddress, Transport);
+        auto connection = std::make_shared<CommunicationService>(ServerAddress, Transport, PostTransport);
         connection->BarrierString = BarrierString;
         return connection;
     }
@@ -159,6 +170,69 @@ namespace StructuraSystems::Client {
     std::vector<std::shared_ptr<KerML::Entities::Element>> CommunicationService::elementsOfCommit(boost::uuids::uuid projectId, boost::uuids::uuid commitId) const {
         const auto entries = getAllPagesOf("projects/" + boost::lexical_cast<std::string>(projectId) + "/commits/" + boost::lexical_cast<std::string>(commitId) + "/elements");
         return entitiesFromJson<KerML::Entities::Element>(entries);
+    }
+
+    CommitData CommunicationService::getCommitData(boost::uuids::uuid projectId, boost::uuids::uuid commitId, bool withTexts) const {
+        const auto project = boost::lexical_cast<std::string>(projectId);
+        const auto commit = boost::lexical_cast<std::string>(commitId);
+        CommitData data;
+
+        // The usages: an ad-hoc query on the type (see the description in the header); the elements do not list them.
+        const SysMLv2::REST::QueryRequest query(
+            "", {}, {}, {},
+            std::make_shared<SysMLv2::REST::PrimitiveConstraint>(false, "@type", SysMLv2::REST::Operator::Equal, "ProjectUsage"));
+        const auto rows = postAllPages(buildUrl(ServerAddress, "projects/" + project + "/query-results?commitId=" + commit), BarrierString,
+                                       const_cast<SysMLv2::REST::QueryRequest &>(query).serializeToJson(), PostTransport);
+        data.Usages = entitiesFromJson<SysMLv2::REST::ProjectUsage>(rows);
+
+        if (withTexts) {
+            const auto entries = getAllPagesOf("projects/" + project + "/commits/" + commit + "/elements");
+            // The deserializer of the sysmllib compares the "@type" without regard to the case, so this does too.
+            const auto lower = [](std::string text) {
+                std::transform(text.begin(), text.end(), text.begin(), [](unsigned char c) { return char(std::tolower(c)); });
+                return text;
+            };
+            std::vector<nlohmann::json> texts;
+            for (const auto &entry : entries)
+                if (entry.is_object() && entry.contains("@type") && entry["@type"].is_string() &&
+                    lower(entry["@type"].get<std::string>()) == "textualrepresentation")
+                    texts.push_back(entry);
+            data.Elements = entitiesFromJson<KerML::Entities::Element>(texts);
+        }
+        return data;
+    }
+
+    std::shared_ptr<SysMLv2::REST::Project> CommunicationService::getProjectWithId(boost::uuids::uuid projectId) const {
+        const auto json = getJson(buildUrl(ServerAddress, "projects/" + boost::lexical_cast<std::string>(projectId)), BarrierString, Transport);
+        if (!json.is_object() || !json.contains("@id"))
+            throw std::runtime_error("The server answered with an entry that is not a project.");
+        return std::make_shared<SysMLv2::REST::Project>(json.dump());
+    }
+
+    std::shared_ptr<SysMLv2::REST::CommitRequest> CommunicationService::buildProjectUsageRequest(
+        const std::string &description, const std::vector<boost::uuids::uuid> &removeUsageIds,
+        const std::vector<std::pair<boost::uuids::uuid, boost::uuids::uuid>> &addUsages) {
+        std::vector<std::shared_ptr<SysMLv2::REST::DataVersion>> changes;
+        // Deletions refer to the identity of the usage, creations carry the usage as payload (like the changes of CommitDelta).
+        for (const auto &usageId : removeUsageIds)
+            changes.push_back(std::make_shared<SysMLv2::REST::DataVersion>(nullptr, std::make_shared<SysMLv2::REST::DataIdentity>(usageId)));
+        for (const auto &[usedProjectId, usedCommitId] : addUsages) {
+            nlohmann::json projectReference;
+            projectReference["@id"] = boost::uuids::to_string(usedProjectId);
+            const auto usedProject = std::make_shared<SysMLv2::REST::Project>(projectReference.dump());
+            const auto usedCommit = std::make_shared<SysMLv2::REST::Commit>(usedCommitId, "", usedProject);
+            changes.push_back(std::make_shared<SysMLv2::REST::DataVersion>(std::make_shared<SysMLv2::REST::ProjectUsage>(usedCommit)));
+        }
+        if (changes.empty())
+            throw std::invalid_argument("There is no project usage to change.");
+        return std::make_shared<SysMLv2::REST::CommitRequest>(description, changes);
+    }
+
+    std::shared_ptr<SysMLv2::REST::Commit> CommunicationService::commitProjectUsages(
+        boost::uuids::uuid projectId, boost::uuids::uuid branchId, const std::string &description,
+        const std::vector<boost::uuids::uuid> &removeUsageIds,
+        const std::vector<std::pair<boost::uuids::uuid, boost::uuids::uuid>> &addUsages) {
+        return postCommitToBranch(projectId, branchId, buildProjectUsageRequest(description, removeUsageIds, addUsages));
     }
 
     std::vector<std::shared_ptr<SysMLv2::REST::Project>> CommunicationService::getAllProjects() {

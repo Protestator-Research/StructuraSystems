@@ -12,6 +12,8 @@
 #include <utility>
 
 #include <QDir>
+#include <QCryptographicHash>
+#include <QStandardPaths>
 #include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
@@ -32,18 +34,23 @@
 #include <sysmlv2/rest/entities/DataVersion.h>
 #include <sysmlv2/rest/entities/Project.h>
 #include <sysmlv2/rest/entities/Tag.h>
+#include <sysmlv2/rest/entities/ProjectUsage.h>
+#include <kerml/root/annotations/TextualRepresentation.h>
 
 #include "BranchListModel.h"
 #include "CommitHistoryModel.h"
 #include "DigitalTwinProjectModel.h"
 #include "DocumentModel.h"
 #include "LibraryController.h"
+#include "LibraryWarmUpStatus.h"
 #include "LocalProjectTreeModel.h"
 #include "OpenDocumentsModel.h"
 #include "ProblemListModel.h"
 #include "SettingsController.h"
 #include "../Models/ItemModels/ProjectItemModel.h"
+#include "../Models/Libraries/CodeScanner.h"
 #include "../Models/Libraries/DocumentWorkspace.h"
+#include "../Models/Libraries/RemoteLibraries.h"
 #include "../Models/Parser/StructuraSystemsParser.h"
 #include "../Services/BECommunicationService.h"
 #include "../Services/CommitDelta.h"
@@ -124,6 +131,87 @@ namespace StructuraSystems::Client {
             return QString::fromStdString(boost::uuids::to_string(id));
         }
 
+        boost::uuids::uuid uuidOf(const QString &text) {
+            return boost::uuids::string_generator()(text.toStdString());
+        }
+
+        /**
+         * Reads the SysML / KerML text and the project usages of one commit of a project on the server. This is what the remote
+         * libraries cache: the TextualRepresentations of the commit (the same rows a document shows) in the order of the
+         * server, and the ProjectUsages of the commit. The names of the used projects are read too, to show them.
+         */
+        RemoteLibraryContent fetchRemoteContent(CommunicationService &service, const QString &projectId, const QString &commitId, bool withSources,
+                                                const std::atomic<bool> &cancelled) {
+            // Stops the page requests and aborts the transfer in progress when the application quits.
+            CancelScope cancelScope(&cancelled);
+            const auto project = uuidOf(projectId);
+            const auto data = service.getCommitData(project, uuidOf(commitId), withSources);
+
+            RemoteLibraryContent content;
+            try {
+                if (cancelled)
+                    throw std::runtime_error("The application is closing.");
+                if (const auto details = service.getProjectWithId(project))
+                    content.ProjectName = QString::fromStdString(details->getName());
+            } catch (const std::exception &) {
+                // The name is only for messages; the entry is read again once if it is missing (RemoteLibraryContent::NameResolved).
+                content.NameResolved = false;
+            }
+            for (const auto &element : data.Elements) {
+                const auto textual = std::dynamic_pointer_cast<KerML::Entities::TextualRepresentation>(element);
+                if (textual == nullptr)
+                    continue;
+                const auto language = CodeScanner::codeLanguage(QString::fromStdString(textual->language()));
+                if (!language.isEmpty())
+                    content.Sources.append({QStringLiteral("block"), language, QString::fromStdString(textual->body())});
+            }
+            for (const auto &usage : data.Usages) {
+                const auto usedCommit = usage->getUsedProjectCommit();
+                const auto usedProject = usage->getUsedProject();
+                if (usedCommit == nullptr || usedProject == nullptr)
+                    continue;
+                RemoteUsageRef reference;
+                reference.UsageId = uuidText(usage->getId());
+                reference.ProjectId = uuidText(usedProject->getId());
+                reference.CommitId = uuidText(usedCommit->getId());
+                try {
+                    if (cancelled)
+                        throw std::runtime_error("The application is closing.");
+                    if (const auto details = service.getProjectWithId(usedProject->getId()))
+                        reference.ProjectName = QString::fromStdString(details->getName());
+                } catch (const std::exception &) {
+                    content.NameResolved = false;
+                }
+                content.Usages.append(reference);
+            }
+            return content;
+        }
+
+        /**
+         * A project usage is a change of the branch head. If the branch has newer commits than the document shows, the document
+         * would silently jump to a state it has not loaded; the user has to update the document first.
+         */
+        void requireBranchHead(CommunicationService &service, const boost::uuids::uuid &projectId, const boost::uuids::uuid &branchId,
+                               const QString &documentCommitId) {
+            for (const auto &branch : service.getAllBranchesForProjectWithID(projectId)) {
+                if (branch == nullptr || branch->getId() != branchId)
+                    continue;
+                const auto head = branch->getHead();
+                if (head != nullptr && uuidText(head->getId()) != documentCommitId)
+                    throw std::runtime_error("The branch has newer commits than this document shows. Return to the branch head "
+                                             "(reload the document) first, then change the project usages.");
+                return;
+            }
+            throw std::runtime_error("The branch of this document does not exist (any more) on the server.");
+        }
+
+        /** What a background task reports back: a value or the text of the error. */
+        template<typename T>
+        struct Reply {
+            T Value{};
+            QString Error;
+        };
+
         /** Downloads a commit and its elements. */
         CommitContent downloadCommit(const std::shared_ptr<CommunicationService> &service, const boost::uuids::uuid &projectId,
                                      const boost::uuids::uuid &commitId) {
@@ -138,6 +226,12 @@ namespace StructuraSystems::Client {
         const QStringList PROJECT_FILE_FILTERS = {"*.md", "*.kerml", "*.sysml", "*.xml", "*.json"};
     }
 
+    /** The connection the fetch function of the remote libraries uses; replaced before every download. */
+    struct RemoteConnection {
+        std::mutex Mutex;
+        std::shared_ptr<CommunicationService> Service;
+    };
+
     AppController::AppController(QObject *parent) :
         QObject(parent),
         Settings(new SettingsController(this)),
@@ -151,10 +245,34 @@ namespace StructuraSystems::Client {
         Branches(new BranchListModel(this)),
         CommitHistory(new CommitHistoryModel(this)),
         StatusText(tr("Ready")) {
+        WarmUpStatus = new LibraryWarmUpStatus(this);
         Settings->initWithDefaultsIfEmpty();
         // Warm-ups and recycling of the document workspaces run one after another, never in parallel.
         WorkspacePool.setMaxThreadCount(1);
         connect(Settings, &SettingsController::saved, this, &AppController::onSettingsSaved);
+
+        RemotePool.setMaxThreadCount(1);
+        // The libraries of the project usages on the server: cached under <AppData>/libraries/<project id>/<commit id>/.
+        RemoteUsages = new RemoteUsageModel(this);
+        RemoteConnectionHolder = std::make_shared<RemoteConnection>();
+        RemoteCache = std::make_shared<RemoteLibraries>(
+            QString(),   // set by updateRemoteCacheDirectory(): the directory depends on the server
+            [holder = RemoteConnectionHolder](const QString &projectId, const QString &commitId, bool withSources, const std::atomic<bool> &cancelled) {
+                std::shared_ptr<CommunicationService> service;
+                {
+                    std::lock_guard lock(holder->Mutex);
+                    service = holder->Service;
+                }
+                if (service == nullptr)
+                    throw std::runtime_error("Not connected to the backend.");
+                try {
+                    return fetchRemoteContent(*service, projectId, commitId, withSources, cancelled);
+                } catch (const std::exception &ex) {
+                    throw std::runtime_error(CommunicationService::describeBackendError(ex));
+                }
+            });
+
+        updateRemoteCacheDirectory(Settings->serverPath());
 
         // The tree shows the level of the libraries; it has to follow the settings and the index.
         LocalProjectTree->setLibraryLevelProvider([this](const QString &path) { return Libraries->levelOf(path); });
@@ -163,10 +281,39 @@ namespace StructuraSystems::Client {
 
         // Deferred, so that the QML side is already connected to notify() when the folder is loaded.
         QTimer::singleShot(0, this, &AppController::openWorkingDirectoryIfPresent);
+        // The standard library is loaded in the background from the start, so that the first document does not wait for it; the
+        // status bar shows how far it is. After the folder was opened: that does not wait for the standard library.
+        QTimer::singleShot(0, this, [this]() { prepareSpareWorkspace(true); });
+    }
+
+    namespace {
+        QString serverKey(const QString &serverAddress) {
+            auto address = serverAddress.trimmed().toLower();
+            while (address.endsWith(QLatin1Char('/')))
+                address.chop(1);
+            return QString::fromLatin1(QCryptographicHash::hash(address.toUtf8(), QCryptographicHash::Sha1).toHex().left(16));
+        }
+    }
+
+    void AppController::updateRemoteCacheDirectory(const QString &serverAddress) {
+        // The cache of a server is kept apart from the others: the same project and commit ids can exist on two servers.
+        CacheKey = serverKey(serverAddress);
+        const auto changed = RemoteCache->setCacheDirectory(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + QStringLiteral("/libraries/") + CacheKey);
+        if (changed) {
+            // The connection that was used belongs to the other server; the next download makes a new one.
+            std::lock_guard lock(RemoteConnectionHolder->Mutex);
+            RemoteConnectionHolder->Service.reset();
+        }
     }
 
     AppController::~AppController() {
-        // Do not wait for a warm-up and do not take the workspaces apart on the way out: the process ends anyway.
+        // Downloads of project usages stop after the request in progress.
+        RemoteCache->cancel();
+        RemotePool.clear();
+        RemotePool.waitForDone();
+        // Do not wait for a warm-up and do not take the workspaces apart on the way out: the process ends anyway. The warm-up stops
+        // quickly; after waitForDone() no thread calls into WarmUpStatus any more (it is deleted with this object), and what it
+        // queued is dropped with it.
         DocumentWorkspace::beginShutdown();
         WorkspacePool.clear();
         WorkspacePool.waitForDone();
@@ -186,6 +333,73 @@ namespace StructuraSystems::Client {
     ProblemListModel *AppController::problems() const { return Problems; }
     SettingsController *AppController::settings() const { return Settings; }
     LibraryController *AppController::libraries() const { return Libraries; }
+    RemoteUsageModel *AppController::remoteUsages() const { return RemoteUsages; }
+    bool AppController::remoteUsagesLoading() const { return RemoteUsagesLoading; }
+
+    QStringList AppController::usageBranchNames() const {
+        // The head commit is part of the text: the usage pins exactly that commit.
+        QStringList names;
+        for (const auto &branch : UsageBranches)
+            names.append(branch.HeadCommitId.isEmpty() ? tr("%1 (no commits)").arg(branch.Name)
+                                                       : tr("%1 (head %2)").arg(branch.Name, branch.HeadCommitId.left(8)));
+        return names;
+    }
+
+    QStringList AppController::usageBranchIds() const {
+        QStringList ids;
+        for (const auto &branch : UsageBranches)
+            ids.append(branch.Id);
+        return ids;
+    }
+
+    int AppController::usageDefaultBranchIndex() const { return UsageDefaultBranch; }
+    bool AppController::usageBranchesLoading() const { return UsageBranchesLoading; }
+
+    namespace {
+        /** The project of the list with the id, null if there is none. */
+        std::shared_ptr<SysMLv2::REST::Project> findProject(const ProjectList &projects, const QString &projectId) {
+            for (const auto &project : projects)
+                if (project != nullptr && uuidText(project->getId()) == projectId)
+                    return project;
+            return nullptr;
+        }
+    }
+
+    AppController::UsageState AppController::usageState(const QString &projectId) const {
+        const auto document = CurrentDocument;
+        if (!document)
+            return UsageState::NoDocument;
+        if (!document->isOnline())
+            return UsageState::NotOnline;
+        const auto project = findProject(OnlineProjects->getProjects(), projectId);
+        if (project == nullptr)
+            return UsageState::Invalid;
+        if (projectId == document->projectId())
+            return UsageState::Self;
+        if (document->detached())
+            return UsageState::Detached;
+        // Nothing can be changed (and the list may be old) without the server.
+        if (!Connected)
+            return UsageState::Offline;
+        if (!usageIdOf(projectId).isEmpty())
+            return UsageState::Used;
+        return UsageState::Ready;
+    }
+
+    QString AppController::usageIdOf(const QString &projectId) const {
+        for (const auto &entry : RemoteUsages->entries())
+            if (entry.ProjectId == projectId)
+                return entry.UsageId;
+        return {};
+    }
+
+
+    void AppController::setRemoteUsagesLoading(bool loading) {
+        if (RemoteUsagesLoading == loading)
+            return;
+        RemoteUsagesLoading = loading;
+        emit remoteUsagesLoadingChanged();
+    }
     BranchListModel *AppController::branches() const { return Branches; }
     CommitHistoryModel *AppController::commitHistory() const { return CommitHistory; }
     bool AppController::historyLoading() const { return HistoryLoading; }
@@ -230,10 +444,10 @@ namespace StructuraSystems::Client {
     }
 
     template<typename Result, typename Work, typename Done>
-    void AppController::runAsync(const QString &description, Work work, Done done) {
+    bool AppController::runAsync(const QString &description, Work work, Done done) {
         if (Busy) {
             emitNotify(2, tr("Another operation is still running. Please wait until it has finished."));
-            return;
+            return false;
         }
         setBusy(true);
         setStatusText(description + QStringLiteral("..."));
@@ -264,6 +478,7 @@ namespace StructuraSystems::Client {
             setStatusText(tr("Ready"));
             done(std::move(outcome.Value));
         });
+        return true;
     }
 
     bool AppController::requireConnection() {
@@ -283,6 +498,10 @@ namespace StructuraSystems::Client {
     }
 
     void AppController::onSettingsSaved() {
+        // Before the first connection the address in the settings decides; afterwards the cache belongs to the server that was connected
+        // (changing the address does not change the server of a live connection).
+        if (CacheFollowsSettings)
+            updateRemoteCacheDirectory(Settings->serverPath());
         const auto directory = Settings->workingDirectory();
         if (!directory.isEmpty() && directory != LoadedFolder && QDir(directory).exists())
             loadFolder(directory);
@@ -398,6 +617,7 @@ namespace StructuraSystems::Client {
         if (document->isLocalFile() && QDir::cleanPath(LocalFolders.value(document->title())) == QDir::cleanPath(Libraries->workspace()->root()))
             ownFile = document->title();
         document->attachLibraries(Libraries->workspace(), ownFile);
+        document->attachRemote(RemoteCache);
         // The next document will probably be parsed too; its workspace is made ready meanwhile.
         prepareSpareWorkspace();
         connect(document, &DocumentModel::problemsChanged, this, [this, document]() {
@@ -417,25 +637,50 @@ namespace StructuraSystems::Client {
 
     std::shared_ptr<DocumentWorkspace> AppController::takeWorkspace() {
         std::shared_ptr<DocumentWorkspace> workspace;
+        std::shared_ptr<std::atomic<bool>> reports;
         {
             std::lock_guard lock(SpareMutex);
             workspace = std::move(SpareWorkspace);
             SpareWorkspace.reset();
+            reports = std::move(SpareReports);
+            SpareReports.reset();
         }
         if (workspace == nullptr)
             workspace = std::make_shared<DocumentWorkspace>();
+        // A document waits for the warm-up of this workspace (the parser run starts with it): show how far it is, if it was silent so far.
+        if (reports != nullptr && !workspace->isWarm())
+            reports->store(true);
         return workspace;
     }
 
-    void AppController::prepareSpareWorkspace() {
+    void AppController::prepareSpareWorkspace(bool reportProgress) {
         std::lock_guard lock(SpareMutex);
-        if (SpareWorkspace != nullptr)
+        if (SpareWorkspace != nullptr) {
+            // A spare that was made silently (a document was opened first) and is still loading: from now on it reports.
+            if (reportProgress && SpareReports != nullptr && !SpareWorkspace->isWarm())
+                SpareReports->store(true);
             return;
+        }
         // Parsing the standard library takes seconds. The first parser run of the document that gets this workspace waits for it
         // if it is not ready yet.
         SpareWorkspace = std::make_shared<DocumentWorkspace>();
+        SpareReports = std::make_shared<std::atomic<bool>>(reportProgress);
         const auto workspace = SpareWorkspace;
-        WorkspacePool.start([workspace]() { workspace->warmUp(); });
+        const auto reports = SpareReports;
+        // The status object outlives this thread: ~AppController waits for WorkspacePool before it is deleted (a QPointer alone is not
+        // thread safe). It is only used through post() and postFailure(), which queue the call onto the GUI thread.
+        const QPointer<LibraryWarmUpStatus> status(WarmUpStatus);
+        WorkspacePool.start([workspace, reports, status]() {
+            // The steps are handed to the GUI thread one by one (queued, so they arrive in order): the loading reports once per file,
+            // the others once per step. The status object is not deleted while this runs (see ~AppController()).
+            workspace->warmUp([reports, status](const WarmUpStep &step) {
+                if (reports->load() && status != nullptr)
+                    status->post(step);
+            });
+            // Cancelled or failed: the status bar must not stay in the loading state
+            if (!workspace->isWarm() && reports->load() && status != nullptr)
+                status->postFailure();
+        });
     }
 
     void AppController::recycleWorkspace(std::shared_ptr<DocumentWorkspace> workspace) {
@@ -447,8 +692,11 @@ namespace StructuraSystems::Client {
             workspace->recycle();
             {
                 std::lock_guard lock(SpareMutex);
-                if (SpareWorkspace == nullptr)
+                // (a workspace that recycle() had to dispose is not warm: it is dropped, prepareSpareWorkspace() makes a new spare)
+                if (SpareWorkspace == nullptr && workspace->isWarm()) {
                     SpareWorkspace = std::move(workspace);
+                    SpareReports.reset();
+                }
             }
             // Outside the lock: disposing a surplus workspace must not block takeWorkspace() on the GUI thread.
             workspace.reset();
@@ -564,6 +812,11 @@ namespace StructuraSystems::Client {
             refreshProblems();
             updateHistoryContext();
             loadHistory();
+            // The usages belong to the document: the list of the other one must not stay, and the new one is read.
+            ++RemoteUsageGeneration;
+            RemoteUsages->setEntries({});
+            // Cache only: the server is asked when a name stays unresolved, or when the usages are shown.
+            refreshRemoteUsages(false);
         }
     }
 
@@ -658,19 +911,29 @@ namespace StructuraSystems::Client {
         const auto document = CurrentDocument;
         if (!document)
             return;
+        // An explicit run may download the libraries of the project usages again (what failed before is tried again).
+        RemoteAttempted.remove(document->projectId() + QLatin1Char('@') + document->commitId());
+        parseDocument(document, false);
+    }
 
+    void AppController::parseDocument(DocumentModel *document, bool automatic) {
         const auto inputs = document->parseInputs();
         if (inputs.isEmpty()) {
-            emitNotify(0, tr("The document contains no SysML or KerML text to parse."));
+            if (!automatic)
+                emitNotify(0, tr("The document contains no SysML or KerML text to parse."));
             return;
         }
+        if (automatic && Busy)
+            return;   // the user started something else; the downloaded libraries are used by the next run
 
         const auto title = document->title();
         if (!document->hasWorkspace())
             document->adoptWorkspace(takeWorkspace());
         const auto workspace = document->workspace();
         QPointer<DocumentModel> guard(document);
-        runAsync<ParseResult>(tr("Parsing %1").arg(title),
+        // A workspace that is still loading the standard library makes the run wait for it (see DocumentWorkspace::warmUp()).
+        const auto description = workspace->isWarm() ? tr("Parsing %1").arg(title) : tr("Parsing %1 (waiting for the standard library)").arg(title);
+        runAsync<ParseResult>(description,
             [inputs, title, workspace]() { return DocumentModel::runParser(inputs, title, workspace); },
             [this, guard, title](ParseResult result) {
                 // The parser may have built the package index of the opened folder.
@@ -682,11 +945,353 @@ namespace StructuraSystems::Client {
                 for (const auto &problem : std::as_const(result.Problems))
                     (problem.Severity >= 3 ? errors : warnings)++;
                 const auto elementCount = result.InstanceElements.size();
+                const bool needsRemote = result.NeedsRemoteDownload;
                 guard->applyParseResult(std::move(result));
 
                 const auto summary = tr("%1: %n error(s), %2 warning(s), %3 element(s)", nullptr, errors).arg(title).arg(warnings).arg(elementCount);
                 setStatusText(summary);
                 emitNotify(errors > 0 ? 3 : (warnings > 0 ? 2 : 1), summary);
+
+                // Names stay unresolved and the libraries of the project usages are not in the cache: fetch them in the
+                // background (not as part of the parser run, which must not wait for the network).
+                if (needsRemote)
+                    startRemoteDownload(guard);
+            });
+    }
+
+    void AppController::startRemoteDownload(DocumentModel *document) {
+        if (!Connected || BackendConnection == nullptr || RemoteBusy || !document->isOnline() || ConnectedKey != CacheKey)
+            return;
+        const auto projectId = document->projectId();
+        const auto commitId = document->commitId();
+        const auto key = projectId + QLatin1Char('@') + commitId;
+        if (projectId.isEmpty() || commitId.isEmpty() || RemoteAttempted.contains(key))
+            return;
+        RemoteAttempted.insert(key);
+
+        {
+            // Its own connection: the one of runAsync is not thread safe and may be in use.
+            std::lock_guard lock(RemoteConnectionHolder->Mutex);
+            RemoteConnectionHolder->Service = BackendConnection->createIndependentConnection();
+        }
+        RemoteBusy = true;
+        setRemoteUsagesLoading(true);
+        setStatusText(tr("Downloading the project usages of %1...").arg(document->title()));
+        QPointer<DocumentModel> guard(document);
+        const auto remote = RemoteCache;
+        QtConcurrent::run(&RemotePool, [remote, projectId, commitId]() {
+            try {
+                return remote->ensureClosure(projectId, commitId);
+            } catch (...) {
+                return 0;   // failures of single fetches are kept by RemoteLibraries and shown with the next parser run
+            }
+        }).then(this, [this, guard](int) {
+            RemoteBusy = false;
+            setRemoteUsagesLoading(false);
+            if (!Busy)
+                setStatusText(tr("Ready"));
+            if (guard)
+                parseDocument(guard, true);
+            if (guard && guard == CurrentDocument)
+                refreshRemoteUsages();
+        });
+    }
+
+    // ------------------------------------------------------------------ project usages
+
+    void AppController::refreshRemoteUsages(bool askServer) {
+        const auto document = CurrentDocument;
+        if (!document || !document->isOnline() || document->projectId().isEmpty() || document->commitId().isEmpty()) {
+            ++RemoteUsageGeneration;
+            RemoteUsages->setEntries({});
+            setRemoteUsagesLoading(false);
+            return;
+        }
+
+        const auto projectId = document->projectId();
+        const auto commitId = document->commitId();
+        // The server is only asked if the connection is free; otherwise the cache is shown.
+        const bool useServer = askServer && Connected && BackendConnection != nullptr && !RemoteBusy && ConnectedKey == CacheKey;
+        if (useServer) {
+            std::lock_guard lock(RemoteConnectionHolder->Mutex);
+            RemoteConnectionHolder->Service = BackendConnection->createIndependentConnection();
+            RemoteBusy = true;
+        }
+        const auto generation = ++RemoteUsageGeneration;
+        setRemoteUsagesLoading(true);
+        const auto remote = RemoteCache;
+        QtConcurrent::run(&RemotePool, [remote, projectId, commitId, useServer]() {
+            Reply<QList<RemoteUsageEntry>> reply;
+            try {
+                if (useServer)
+                    remote->ensureClosure(projectId, commitId);
+                const auto root = remote->cached(projectId, commitId, false);
+                const auto closure = remote->closure(projectId, commitId);
+                if (!root) {
+                    reply.Error = closure.Problems.join(QLatin1Char(' '));
+                    return reply;
+                }
+                for (const auto &usage : root->Usages) {
+                    RemoteUsageEntry entry;
+                    entry.UsageId = usage.UsageId;
+                    entry.ProjectId = usage.ProjectId;
+                    entry.ProjectName = usage.ProjectName;
+                    entry.CommitId = usage.CommitId;
+                    bool found = false;
+                    for (const auto &library : closure.Libraries) {
+                        if (library.Content.ProjectId == usage.ProjectId && library.Content.CommitId == usage.CommitId) {
+                            entry.Level = library.Level;
+                            if (entry.ProjectName.isEmpty())
+                                entry.ProjectName = library.Content.ProjectName;
+                            found = true;
+                        }
+                    }
+                    if (!found) {
+                        const auto failure = remote->failure(usage.ProjectId, usage.CommitId);
+                        entry.Status = failure.isEmpty() ? QStringLiteral("not downloaded") : QStringLiteral("download failed: %1").arg(failure);
+                    }
+                    reply.Value.append(entry);
+                }
+            } catch (const std::exception &ex) {
+                reply.Error = QString::fromUtf8(ex.what());
+            }
+            return reply;
+        }).then(this, [this, generation, useServer](Reply<QList<RemoteUsageEntry>> reply) {
+            if (useServer)
+                RemoteBusy = false;
+            if (generation != RemoteUsageGeneration)
+                return;
+            setRemoteUsagesLoading(false);
+            RemoteUsages->setEntries(reply.Value);
+            if (!reply.Error.isEmpty())
+                emitNotify(2, tr("The project usages could not be read."), reply.Error);
+        });
+    }
+
+    void AppController::loadUsageBranches(const QString &projectId) {
+        UsageBranches.clear();
+        UsageDefaultBranch = -1;
+        emit usageBranchNamesChanged();
+        const auto setLoading = [this](bool loading) {
+            if (UsageBranchesLoading == loading)
+                return;
+            UsageBranchesLoading = loading;
+            emit usageBranchesLoadingChanged();
+        };
+        const auto used = findProject(OnlineProjects->getProjects(), projectId);
+        if (used == nullptr) {
+            ++UsageBranchGeneration;
+            setLoading(false);
+            if (!projectId.isEmpty())
+                emitNotify(2, tr("The project is not in the list (any more). Refresh the list of projects."));
+            return;
+        }
+        if (!requireConnection()) {
+            ++UsageBranchGeneration;
+            setLoading(false);
+            return;
+        }
+
+        const auto generation = ++UsageBranchGeneration;
+        setLoading(true);
+        const auto defaultBranch = used->getDefaultBranch();
+        const auto defaultBranchId = defaultBranch != nullptr ? uuidText(defaultBranch->getId()) : QString();
+        const auto connection = BackendConnection->createIndependentConnection();
+        const auto usedProjectUuid = used->getId();
+        QtConcurrent::run([connection, usedProjectUuid]() {
+            Reply<QList<UsageBranch>> reply;
+            try {
+                for (const auto &branch : connection->getAllBranchesForProjectWithID(usedProjectUuid)) {
+                    if (branch == nullptr)
+                        continue;
+                    UsageBranch entry;
+                    entry.Id = uuidText(branch->getId());
+                    entry.Name = QString::fromStdString(branch->getName());
+                    if (const auto head = branch->getHead())
+                        entry.HeadCommitId = uuidText(head->getId());
+                    reply.Value.append(entry);
+                }
+            } catch (const std::exception &ex) {
+                reply.Error = QString::fromStdString(CommunicationService::describeBackendError(ex));
+            }
+            return reply;
+        }).then(this, [this, generation, defaultBranchId, setLoading](Reply<QList<UsageBranch>> reply) {
+            if (generation != UsageBranchGeneration)
+                return;
+            setLoading(false);
+            if (!reply.Error.isEmpty())
+                emitNotify(3, tr("The branches could not be loaded."), reply.Error);
+            UsageBranches = reply.Value;
+            // The default branch of the project is preselected; without a known default the first branch is.
+            UsageDefaultBranch = UsageBranches.isEmpty() ? -1 : 0;
+            for (int i = 0; i < UsageBranches.size(); ++i)
+                if (UsageBranches[i].Id == defaultBranchId)
+                    UsageDefaultBranch = i;
+            emit usageBranchNamesChanged();
+        });
+    }
+
+    bool AppController::usageContext(DocumentModel *&document, QString &branchId) {
+        document = CurrentDocument;
+        if (!document || !document->isOnline()) {
+            emitNotify(2, tr("Project usages belong to online projects. Open an online project first."));
+            return false;
+        }
+        if (!requireConnection())
+            return false;
+        if (document->detached()) {
+            emitNotify(2, tr("You are viewing an older commit. Return to the branch head to change the project usages."));
+            return false;
+        }
+        branchId = document->branchId();
+        const auto project = document->getProject();
+        if (branchId.isEmpty() && project != nullptr && project->getDefaultBranch() != nullptr)
+            branchId = uuidText(project->getDefaultBranch()->getId());
+        if (branchId.isEmpty()) {
+            emitNotify(2, tr("The branch of this document is unknown. Refresh the history."));
+            return false;
+        }
+        return true;
+    }
+
+    void AppController::finishUsageChange(const QPointer<DocumentModel> &document, const std::shared_ptr<SysMLv2::REST::Commit> &commit, const QString &message) {
+        if (document && commit != nullptr) {
+            // The document now stands on the new commit; its content (and unsaved changes) are the same.
+            document->updateCommit(commit);
+            // A usage can resolve names: the libraries of the new commit are downloaded with the next parser run.
+            RemoteAttempted.remove(document->projectId() + QLatin1Char('@') + document->commitId());
+        }
+        emitNotify(1, message);
+        loadHistory();
+        refreshRemoteUsages();
+    }
+
+    bool AppController::addRemoteUsage(const QString &usedProjectIdText, const QString &usedBranchId) {
+        DocumentModel *document = nullptr;
+        QString branchId;
+        if (!usageContext(document, branchId))
+            return false;
+        // The project and the branch are looked up now: the list may have changed since the user chose them.
+        const auto used = findProject(OnlineProjects->getProjects(), usedProjectIdText);
+        if (used == nullptr) {
+            emitNotify(2, tr("The project is not in the list (any more). Refresh the list of projects."));
+            return false;
+        }
+        UsageBranch branch;
+        for (const auto &candidate : std::as_const(UsageBranches))
+            if (candidate.Id == usedBranchId)
+                branch = candidate;
+        if (branch.Id.isEmpty()) {
+            emitNotify(2, tr("Choose a branch of the project first."));
+            return false;
+        }
+        if (branch.HeadCommitId.isEmpty()) {
+            emitNotify(2, tr("The branch %1 has no commit yet.").arg(branch.Name));
+            return false;
+        }
+        const auto project = document->getProject();
+        if (used->getId() == project->getId()) {
+            emitNotify(2, tr("A project cannot use itself."));
+            return false;
+        }
+        const auto usedIdText = uuidText(used->getId());
+        for (const auto &existing : RemoteUsages->entries()) {
+            if (existing.ProjectId == usedIdText) {
+                emitNotify(2, tr("%1 is already used by this project. Use the update button of that usage to move it to the latest commit.")
+                                   .arg(QString::fromStdString(used->getName())));
+                return false;
+            }
+        }
+        const auto documentCommit = document->commitId();
+
+        const auto service = BackendConnection;
+        const auto projectId = project->getId();
+        const auto branchUuid = uuidOf(branchId);
+        const auto usedProjectId = used->getId();
+        const auto usedCommitId = uuidOf(branch.HeadCommitId);
+        const auto description = QStringLiteral("Add project usage of %1 (%2)").arg(QString::fromStdString(used->getName()), branch.Name).toStdString();
+        QPointer<DocumentModel> guard(document);
+        return runAsync<std::shared_ptr<SysMLv2::REST::Commit>>(tr("Adding project usage"),
+            [service, projectId, branchUuid, usedProjectId, usedCommitId, description, documentCommit]() {
+                requireBranchHead(*service, projectId, branchUuid, documentCommit);
+                // The list in the user interface may be old: the usages of the commit are read again before one is added.
+                for (const auto &existing : service->getCommitData(projectId, uuidOf(documentCommit), false).Usages)
+                    if (existing->getUsedProject() != nullptr && existing->getUsedProject()->getId() == usedProjectId)
+                        throw std::runtime_error("This project is already used. Update the usage instead of adding it again.");
+                return service->commitProjectUsages(projectId, branchUuid, description, {}, {{usedProjectId, usedCommitId}});
+            },
+            [this, guard](std::shared_ptr<SysMLv2::REST::Commit> commit) {
+                finishUsageChange(guard, commit, tr("Project usage added."));
+            });
+    }
+
+    void AppController::removeRemoteUsage(const QString &usageId) {
+        DocumentModel *document = nullptr;
+        QString branchId;
+        if (!usageContext(document, branchId))
+            return;
+        const auto service = BackendConnection;
+        const auto projectId = document->getProject()->getId();
+        const auto branchUuid = uuidOf(branchId);
+        const auto usage = uuidOf(usageId);
+        const auto documentCommit = document->commitId();
+        QPointer<DocumentModel> guard(document);
+        runAsync<std::shared_ptr<SysMLv2::REST::Commit>>(tr("Removing project usage"),
+            [service, projectId, branchUuid, usage, documentCommit]() {
+                requireBranchHead(*service, projectId, branchUuid, documentCommit);
+                return service->commitProjectUsages(projectId, branchUuid, "Remove project usage", {usage}, {});
+            },
+            [this, guard](std::shared_ptr<SysMLv2::REST::Commit> commit) {
+                finishUsageChange(guard, commit, tr("Project usage removed."));
+            });
+    }
+
+    void AppController::updateRemoteUsage(const QString &usageId) {
+        DocumentModel *document = nullptr;
+        QString branchId;
+        if (!usageContext(document, branchId))
+            return;
+        RemoteUsageEntry entry;
+        for (const auto &candidate : RemoteUsages->entries())
+            if (candidate.UsageId == usageId)
+                entry = candidate;
+        if (entry.UsageId.isEmpty()) {
+            emitNotify(2, tr("The project usage is not in the list. Refresh the list first."));
+            return;
+        }
+
+        const auto service = BackendConnection;
+        const auto projectId = document->getProject()->getId();
+        const auto branchUuid = uuidOf(branchId);
+        const auto usage = uuidOf(usageId);
+        const auto usedProjectId = uuidOf(entry.ProjectId);
+        const auto currentCommit = entry.CommitId;
+        const auto documentCommit = document->commitId();
+        QPointer<DocumentModel> guard(document);
+        // One commit replaces the usage: it deletes the old ProjectUsage and creates one that pins the head of the default branch.
+        runAsync<std::shared_ptr<SysMLv2::REST::Commit>>(tr("Updating project usage"),
+            [service, projectId, branchUuid, usage, usedProjectId, currentCommit, documentCommit]() -> std::shared_ptr<SysMLv2::REST::Commit> {
+                requireBranchHead(*service, projectId, branchUuid, documentCommit);
+                const auto used = service->getProjectWithId(usedProjectId);
+                const auto branches = service->getAllBranchesForProjectWithID(usedProjectId);
+                std::shared_ptr<SysMLv2::REST::Branch> chosen;
+                const auto defaultBranch = used != nullptr ? used->getDefaultBranch() : nullptr;
+                for (const auto &branch : branches)
+                    if (branch != nullptr && (chosen == nullptr || (defaultBranch != nullptr && branch->getId() == defaultBranch->getId())))
+                        chosen = branch;
+                const auto head = chosen != nullptr ? chosen->getHead() : nullptr;
+                if (head == nullptr)
+                    throw std::runtime_error("The used project has no commit yet.");
+                if (uuidText(head->getId()).startsWith(currentCommit))
+                    return nullptr;   // already the latest
+                return service->commitProjectUsages(projectId, branchUuid, "Update project usage to the latest commit", {usage},
+                                                    {{usedProjectId, head->getId()}});
+            },
+            [this, guard](std::shared_ptr<SysMLv2::REST::Commit> commit) {
+                if (commit == nullptr)
+                    emitNotify(0, tr("The project usage already points to the latest commit."));
+                else
+                    finishUsageChange(guard, commit, tr("Project usage updated."));
             });
     }
 
@@ -805,8 +1410,12 @@ namespace StructuraSystems::Client {
                 result.Projects = result.Service->getAllProjects();
                 return result;
             },
-            [this](ConnectResult result) {
+            [this, serverPath](ConnectResult result) {
                 BackendConnection = std::move(result.Service);
+                // The libraries of the project usages are cached per server: the one this connection goes to.
+                CacheFollowsSettings = false;
+                ConnectedKey = serverKey(QString::fromStdString(serverPath));
+                updateRemoteCacheDirectory(QString::fromStdString(serverPath));
                 setConnected(true);
                 populateOnlineProjects(result.Projects);
                 // Documents that stayed open while offline get their history back.
@@ -822,6 +1431,7 @@ namespace StructuraSystems::Client {
             return;
         }
         BackendConnection.reset();
+        ConnectedKey.clear();
         cancelDigitalTwinLoading();
         clearHistory();
         OnlineProjects->clear();
@@ -1388,4 +1998,5 @@ namespace StructuraSystems::Client {
                     emitNotify(1, tr("Created branch %1.").arg(creation.BranchName));
             });
     }
+
 }

@@ -76,6 +76,15 @@ namespace StructuraSystems::Client {
         return -1;
     }
 
+    int OpenDocumentsModel::indexOfDocument(DocumentModel *document) const {
+        if (!document)
+            return -1;
+        for (int i = 0; i < Entries.size(); i++)
+            if (Entries.at(i).Document == document)
+                return i;
+        return -1;
+    }
+
     DocumentModel *OpenDocumentsModel::at(int index) const {
         return (index >= 0 && index < Entries.size()) ? Entries.at(index).Document : nullptr;
     }

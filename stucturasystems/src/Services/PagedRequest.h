@@ -5,6 +5,7 @@
 //---------------------------------------------------------
 // External Classes
 //---------------------------------------------------------
+#include <atomic>
 #include <functional>
 #include <optional>
 #include <string>
@@ -12,6 +13,25 @@
 #include <nlohmann/json.hpp>
 
 namespace StructuraSystems::Client {
+    /**
+     * Lets the requests that the current thread makes stop when a flag becomes true: a page of getAllPages is not requested any
+     * more, and the transfer of the libcurl transport in progress is aborted (it then throws a ConnectionError). Used for the
+     * downloads in the background when the application quits.
+     */
+    class CancelScope {
+    public:
+        explicit CancelScope(const std::atomic<bool> *flag);
+        ~CancelScope();
+        CancelScope(const CancelScope &) = delete;
+        CancelScope &operator=(const CancelScope &) = delete;
+
+    private:
+        const std::atomic<bool> *Previous;
+    };
+
+    /** True if the CancelScope of the current thread has been cancelled. */
+    bool cancelRequested();
+
     /**
      * The answer of one GET request.
      */
@@ -30,6 +50,12 @@ namespace StructuraSystems::Client {
      * @param bearerToken The token for the Authorization header, empty for no header.
      */
     using HttpTransport = std::function<HttpResponse(const std::string &url, const std::string &bearerToken)>;
+
+    /**
+     * Sends one POST request with a JSON body (the ad-hoc queries of the SysML v2 API are POSTs). Is replaced by a fake in the tests.
+     * Throws like HttpTransport.
+     */
+    using HttpPostTransport = std::function<HttpResponse(const std::string &url, const std::string &bearerToken, const std::string &body)>;
 
     /**
      * Reads the target of the Link header (RFC 8288) with rel="next" from a raw header block.
@@ -75,6 +101,14 @@ namespace StructuraSystems::Client {
     std::vector<nlohmann::json> getAllPages(const std::string &firstUrl, const std::string &bearerToken, const HttpTransport &transport);
 
     /**
+     * Like getAllPages, for a list route that is read with a POST (a query): every page is requested with the same body, the
+     * following pages by the cursor of the Link header.
+     * @param body The JSON body of the request.
+     */
+    std::vector<nlohmann::json> postAllPages(const std::string &firstUrl, const std::string &bearerToken, const std::string &body,
+                                             const HttpPostTransport &transport);
+
+    /**
      * Downloads a single resource and parses it.
      * @throws SysMLv2::API::EXCEPTIONS::HTTPException If the server answers with a status outside of 2xx.
      * @throws SysMLv2::API::EXCEPTIONS::ConnectionError If the server is not reachable.
@@ -86,4 +120,7 @@ namespace StructuraSystems::Client {
      * The transport that uses libcurl, with the same settings as the SysMLAPIImplementation of the sysmllib.
      */
     HttpTransport curlTransport();
+
+    /** The POST transport that uses libcurl (JSON body, same settings and cancellation as curlTransport). */
+    HttpPostTransport curlPostTransport();
 }
