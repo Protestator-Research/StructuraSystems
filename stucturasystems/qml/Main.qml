@@ -29,6 +29,25 @@ ApplicationWindow {
     readonly property bool compact: width < 1100
     property bool _restored: false
 
+    /** Width of the side panel, adjustable by dragging its right edge. */
+    property real panelWidth: Theme.panelWidth
+    readonly property real panelMinWidth: 200
+    readonly property real panelMaxWidth: Math.max(panelMinWidth, Math.min(600, width * 0.45))
+    readonly property real effectivePanelWidth: clampPanelWidth(panelWidth)
+    property bool panelResizing: false
+
+    // Split editor: root.doc (the current document) is always the document of the active side.
+    /** The document on the inactive side, null while the editor is not split. */
+    property DocumentModel otherDoc: null
+    /** 0 left, 1 right */
+    property int activePane: 0
+    readonly property bool splitOpen: otherDoc !== null
+    // The documents shown on both sides. They are set by _syncPanes() only once a change is complete, so a side never
+    // shows an intermediate document (that would rebuild its editor and drop the focus of the clicked card).
+    property DocumentModel leftDoc: null
+    property DocumentModel rightDoc: null
+    property bool forceClose: false
+
     /** Open diagram editor windows (one per document). */
     property var _diagramWindows: []
 
@@ -60,25 +79,6 @@ ApplicationWindow {
         for (const window of _diagramWindows.slice())
             window.close()
     }
-
-    /** Width of the side panel, adjustable by dragging its right edge. */
-    property real panelWidth: Theme.panelWidth
-    readonly property real panelMinWidth: 200
-    readonly property real panelMaxWidth: Math.max(panelMinWidth, Math.min(600, width * 0.45))
-    readonly property real effectivePanelWidth: clampPanelWidth(panelWidth)
-    property bool panelResizing: false
-
-    // Split editor: root.doc (the current document) is always the document of the active side.
-    /** The document on the inactive side, null while the editor is not split. */
-    property DocumentModel otherDoc: null
-    /** 0 left, 1 right */
-    property int activePane: 0
-    readonly property bool splitOpen: otherDoc !== null
-    // The documents shown on both sides. They are set by _syncPanes() only once a change is complete, so a side never
-    // shows an intermediate document (that would rebuild its editor and drop the focus of the clicked card).
-    property DocumentModel leftDoc: null
-    property DocumentModel rightDoc: null
-    property bool forceClose: false
 
     function clampPanelWidth(w) {
         return Math.max(panelMinWidth, Math.min(panelMaxWidth, w))
@@ -739,7 +739,8 @@ ApplicationWindow {
                     }
                     IconToolButton {
                         iconSource: Theme.iconCommit
-                        tip: qsTr("Commit to server")
+                        tip: root.doc !== null && root.doc.detached ? qsTr("Return to the branch head to commit")
+                                                                     : qsTr("Commit to server")
                         enabled: root.canCommit
                         onClicked: commitDialog.open()
                     }
@@ -772,10 +773,6 @@ ApplicationWindow {
                 }
             }
 
-            // Editor or empty state
-            Item {
-                Layout.fillWidth: true
-                Layout.fillHeight: true
             // Editor or empty state, history panel on the right
             RowLayout {
                 Layout.fillWidth: true
@@ -791,13 +788,6 @@ ApplicationWindow {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
 
-                EditorView {
-                    id: editor
-                    anchors.fill: parent
-                    visible: root.doc !== null
-                    document: root.doc
-                    onDiagramEditorRequested: elementId => root.openDiagramEditor(elementId)
-                }
                         SplitView {
                             id: splitView
 
@@ -820,6 +810,7 @@ ApplicationWindow {
                                 split: root.splitOpen
                                 onActivationRequested: root.activatePane(0)
                                 onReturnRequested: AppController.returnToBranchHead()
+                                onDiagramEditorRequested: elementId => root.openDiagramEditor(elementId)
                                 onNewBranchRequested: newBranchDialog.openFor(document ? document.commitId : "")
                             }
 
@@ -834,6 +825,7 @@ ApplicationWindow {
                                 split: root.splitOpen
                                 onActivationRequested: root.activatePane(1)
                                 onReturnRequested: AppController.returnToBranchHead()
+                                onDiagramEditorRequested: elementId => root.openDiagramEditor(elementId)
                                 onNewBranchRequested: newBranchDialog.openFor(document ? document.commitId : "")
                             }
                         }
@@ -871,28 +863,30 @@ ApplicationWindow {
                             }
                         }
 
-                EmptyState {
-                    anchors.fill: parent
-                    visible: root.doc === null
-                    iconSource: Theme.iconProject
-                    iconSize: 72
-                    title: qsTr("No project open")
-                    text: qsTr("Open a folder or file to start modeling, or create a new project. "
-                               + "Double-click a project in the explorer to open it.")
+                        EmptyState {
+                            anchors.fill: parent
+                            visible: root.doc === null
+                            iconSource: Theme.iconProject
+                            iconSize: 72
+                            title: qsTr("No project open")
+                            text: qsTr("Open a folder or file to start modeling, or create a new project. "
+                                       + "Double-click a project in the explorer to open it.")
 
-                    Button {
-                        text: qsTr("Open folder")
-                        highlighted: true
-                        icon.source: Theme.iconFolder
-                        icon.color: "transparent"
-                        onClicked: root.openFolder()
-                    }
-                    Button {
-                        text: qsTr("New project")
-                        flat: true
-                        icon.source: Theme.iconNewProject
-                        icon.color: "transparent"
-                        onClicked: root.newProject(false)
+                            Button {
+                                text: qsTr("Open folder")
+                                highlighted: true
+                                icon.source: Theme.iconFolder
+                                icon.color: "transparent"
+                                onClicked: root.openFolder()
+                            }
+                            Button {
+                                text: qsTr("New project")
+                                flat: true
+                                icon.source: Theme.iconNewProject
+                                icon.color: "transparent"
+                                onClicked: root.newProject(false)
+                            }
+                        }
                     }
                 }
 
@@ -1065,7 +1059,14 @@ ApplicationWindow {
     CommitDialog { id: commitDialog }
     NewBranchDialog { id: newBranchDialog }
     CloseDocumentDialog { id: closeDialog }
-    QuitDialog { id: quitDialog }
+    DiscardChangesDialog { id: discardDialog }
+    QuitDialog {
+        id: quitDialog
+        onQuitAccepted: {
+            root.forceClose = true
+            root.close()
+        }
+    }
 
     Component {
         id: diagramWindowComponent

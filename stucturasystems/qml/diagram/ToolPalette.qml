@@ -320,7 +320,7 @@ Pane {
                       : tile.tool === DiagramTypes.ToolVariationDefinition
                       ? qsTr("A variation (variation part def): drop variants onto it, the allowed choices")
                       : tile.tool === DiagramTypes.ToolVariant
-                      ? qsTr("Drop onto a variation: one of its choices (variant)")
+                      ? qsTr("Drop onto a variation: a new variant (item / part, ...) or a usage declared elsewhere")
                       : tile.tool === DiagramTypes.ToolIndividualDefinition || tile.tool === DiagramTypes.ToolIndividual
                       ? qsTr("A single, unique thing (individual), e.g. one vehicle with its serial number")
                       : tile.tool === DiagramTypes.ToolSnapshot || tile.tool === DiagramTypes.ToolTimeslice
@@ -364,7 +364,9 @@ Pane {
                       : tile.tool === DiagramTypes.ToolPort
                       ? qsTr("Drop onto a part (drawn on its border), a port, a port definition or an interface definition (an end)")
                       : tile.tool === DiagramTypes.ToolItem
-                      ? qsTr("Drop onto a part, an item or a port definition")
+                      ? qsTr("Drop onto the canvas (an item of its own), or onto a part, an item or a port definition")
+                      : tile.tool === DiagramTypes.ToolEnumValue
+                      ? qsTr("Drop onto an enum def: a value of it (name, value with unit)")
                       : tile.tool === DiagramTypes.ToolAttribute && !tile.owner.parametric
                       ? qsTr("Drop onto a part or definition; onto an enum def it becomes a value")
                       : tile.tool === DiagramTypes.ToolStatement
@@ -912,6 +914,13 @@ Pane {
                     tool: DiagramTypes.ToolAttribute
                     visible: palette.structure || palette.parametric
                     label: palette.parametric ? qsTr("Value") : qsTr("Attribute")
+                    symbol: 3
+                }
+                Tile {
+                    owner: palette
+                    tool: DiagramTypes.ToolEnumValue
+                    visible: palette.structure
+                    label: qsTr("Enum")
                     symbol: 3
                 }
                 Tile {

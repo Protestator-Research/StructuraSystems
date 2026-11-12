@@ -408,9 +408,16 @@ Item {
                 textFormat: Text.StyledText
                 text: {
                     const escaped = node.title.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
-                    return escaped.replace(/(^|\s)(subsets|redefines|references|specializes|conjugates|crosses|for)(?=\s)/g,
-                                           "$1<b>$2</b>")
-                                  .replace(/\n/g, "<br>")
+                    // the brackets of the multiplicity in bold ("part1 : Part1 [0..*]"), not those of a unit in a value
+                    const lines = escaped.split("\n").map(line => {
+                        const value = line.indexOf(" = ")
+                        const declaration = value < 0 ? line : line.substring(0, value)
+                        return declaration.replace(/\[([^\]]*)\]/g, "<b>[</b>$1<b>]</b>") + (value < 0 ? "" : line.substring(value))
+                    })
+                    return lines.join("\n")
+                                .replace(/(^|\s)(subsets|redefines|references|specializes|conjugates|crosses|for)(?=\s)/g,
+                                         "$1<b>$2</b>")
+                                .replace(/\n/g, "<br>")
                 }
                 font.pixelSize: 14
                 // an abstract definition: its name in italics (table 4)
@@ -503,8 +510,11 @@ Item {
                                 required property var modelData
                                 readonly property string entryId: modelData.entryId
                                 readonly property string tooltip: modelData.tooltip
-                                text: modelData.text
-                                textFormat: Text.PlainText
+                                // as in the tables of the specification: keywords ("ref part", "subsets", "defines")
+                                // and the brackets of the multiplicity in bold; the text of a doc as written
+                                readonly property bool rich: modelData.rich !== undefined
+                                text: rich ? modelData.rich : modelData.text
+                                textFormat: rich ? Text.StyledText : Text.PlainText
                                 font.pixelSize: 13
                                 color: Theme.textPrimary
                                 // the annotated element of a note (table 2): a grey band across the compartment

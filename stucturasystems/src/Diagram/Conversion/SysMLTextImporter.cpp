@@ -889,9 +889,11 @@ namespace StructuraSystems::Diagram {
                     parseUsage(owner, *variantKind(owner), prefixes, begin, line, PerformStyle::DeclareAction, std::string());
                     return;
                 }
-                if (ownerKind(owner) == ElementKind::EnumerationDefinition && isNameToken(named) && isSymbol(";", named + 1) &&
-                    !isWord("enum", named)) {
-                    // "ok;" / "<'1'> ok;" in an enum def: a value without keyword
+                if (ownerKind(owner) == ElementKind::EnumerationDefinition &&
+                    ((isNameToken(named) && (isSymbol(";", named + 1) || isSymbol("=", named + 1)) && !isWord("enum", named)) ||
+                     (named == 0 && isSymbol("=")))) {
+                    // "ok;" / "<'1'> ok;" / "light = 1200 [kg];" / "= 70 [mm];" in an enum def: a value without keyword
+                    // (8.2.2.8: EnumeratedValue = 'enum'? Usage)
                     parseUsage(owner, ElementKind::EnumerationLiteral, prefixes, begin, line, PerformStyle::DeclareAction,
                                std::string());
                     return;

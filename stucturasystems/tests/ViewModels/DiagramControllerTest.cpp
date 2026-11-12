@@ -246,7 +246,7 @@ TEST_CASE("Controller: edit values are validated and applied") {
     CHECK(!controller.updateElement(part, {{"name", "engine"}, {"multiplicity", "2..1"}}).isEmpty());
     CHECK(controller.updateElement(part, {{"name", "engine"}, {"typeName", "Engine"}, {"multiplicity", "1..*"}}).isEmpty());
     CHECK_EQ(model.element(idOf(part)).name(), std::string("engine"));
-    CHECK_EQ(controller.nodes()->nodes().front().Title, QString("engine : Engine[1..*]"));
+    CHECK_EQ(controller.nodes()->nodes().front().Title, QString("engine : Engine [1..*]"));
 
     // the type and redefined features must be references: no sentences, numbers or keywords
     for (const char *type: {"max Masse Auto 1500kg", "1500", "part", "Engine;", "A, B"})
@@ -874,7 +874,7 @@ TEST_CASE("Structure view: redefinitions, connection and flow definitions") {
     for (const auto &compartment: smallNode->Compartments)
         for (const auto &entry: compartment.toMap().value("entries").toList())
             texts.append(entry.toMap().value("text").toString());
-    CHECK(texts.contains("mass :>> mass = 120.0"));
+    CHECK(texts.contains(":>> mass = 120.0"));
     const ElementId vehicle = model.children(RootId)[2];
     const ElementId smallEngine = model.children(vehicle).front();
     CHECK_EQ(structure.nodes()->find(smallEngine)->Title, QString("smallEng : SmallEngine\nredefines eng")); // table 4: own line
@@ -1446,7 +1446,7 @@ TEST_CASE("Controller: inherited features with ^, perform actions, exhibit state
     CHECK_EQ(entryTexts(vehicle, "assert constraints").size(), 1);
 
     const DiagramNode &vehicleB = node("vehicle_b");
-    CHECK_EQ(entryTexts(vehicleB, "attributes"), QStringList({QString("mass redefines mass = 1500"), QString("^velocity")}));
+    CHECK_EQ(entryTexts(vehicleB, "attributes"), QStringList({QString("^velocity"), QString("redefines mass = 1500")}));
     CHECK_EQ(entryTexts(vehicleB, "ports"), QStringList({QString("^fuelCmdPort")}));
     CHECK_EQ(entryTexts(vehicleB, "perform actions"), QStringList({QString("^providePower")}));
     CHECK_EQ(entryTexts(vehicleB, "exhibit states"), QStringList({QString("^vehicleStates")}));
@@ -1459,7 +1459,7 @@ TEST_CASE("Controller: inherited features with ^, perform actions, exhibit state
     CHECK(entryTexts(states, "actions").isEmpty()); // not "perform action1"
     const DiagramNode &usage = node("vehicleStates");
     CHECK_EQ(entryTexts(usage, "state actions"),
-             QStringList({QString("do action2b :>> action2"), QString("entry ^action1"), QString("exit ^action3")}));
+             QStringList({QString("entry ^action1"), QString("do action2b :>> action2"), QString("exit ^action3")}));
 }
 
 TEST_CASE("Controller: calc def parameters with return, calc usage with bound values (slides 79, 80)") {
@@ -1943,7 +1943,7 @@ TEST_CASE("Controller: action def parameters, port def directed features (slide 
     CHECK_EQ(entryTexts(port, "directed features"), QStringList({QString("in item fuelCmd : FuelCmd"), QString("in attribute x : Real")}));
     CHECK_EQ(entryTexts(port, "attributes"), QStringList({QString("y : Real")}));
     const DiagramNode &action = *controller.nodes()->find(model.children(RootId).at(1));
-    CHECK_EQ(entryTexts(action, "parameters"), QStringList({QString("in pwrCmd : PwrCmd"), QString("out torqueToWheels : Torque[*]")}));
+    CHECK_EQ(entryTexts(action, "parameters"), QStringList({QString("in pwrCmd : PwrCmd"), QString("out torqueToWheels : Torque [*]")}));
 }
 
 TEST_CASE("Controller: comments, doc, rep and metadata are notes with annotation lines (tables 2, 26)") {
@@ -2419,7 +2419,7 @@ TEST_CASE("Notations: packages, imports and aliases drawn as chosen (table 3), f
     const ElementId import = model.children(model.children(RootId).at(1)).at(0);
     // the groups and their modes: "individual" at first
     const QVariantList groups = controller.notationGroups();
-    CHECK_EQ(groups.size(), 11);
+    CHECK_EQ(groups.size(), 13);
     for (const auto &group: groups)
         CHECK_EQ(group.toMap().value("mode").toString(), QString("individual"));
     // defaults: nested package, alias symbol, import nested
@@ -2507,7 +2507,8 @@ TEST_CASE("Notations: the parts and ports of a part as nodes, inside it or as te
     QStringList groups;
     for (const auto &choice: controller.notationChoices(key(vehicle)))
         groups.append(choice.toMap().value("group").toString());
-    CHECK_EQ(groups, QStringList({QString("qualified"), QString("features"), QString("ports"), QString("docs")}));
+    CHECK_EQ(groups, QStringList({QString("qualified"), QString("features"), QString("ports"), QString("relationships"),
+                                  QString("docs")}));
 
     // inside the part (graphical compartment): no ◆ line, the part drawn around them
     controller.setNotation(key(vehicle), "features", "nested");
@@ -2719,8 +2720,8 @@ TEST_CASE("Notations: usages - qualified part of a part, subsets / redefines in 
     // subsets / redefines in the name: no lines
     controller.setNotation(key(subsetted), "specialization", "name");
     controller.setNotation(key(redefined), "specialization", "name");
-    CHECK_EQ(controller.nodes()->find(subsetted)->Title, QString("part1S : PartDef1S[m]\nsubsets part1"));
-    CHECK_EQ(controller.nodes()->find(redefined)->Title, QString("part1R : PartDef1R[m]\nredefines part1 = part2"));
+    CHECK_EQ(controller.nodes()->find(subsetted)->Title, QString("part1S : PartDef1S [m]\nsubsets part1"));
+    CHECK_EQ(controller.nodes()->find(redefined)->Title, QString("part1R : PartDef1R [m]\nredefines part1 = part2"));
     for (const auto &edge: controller.edges()->edges()) {
         CHECK(!(edge.Source == subsetted && edge.Kind == DiagramTypes::Specialization));
         CHECK(!(edge.Source == redefined && edge.Kind == DiagramTypes::Redefinition));
@@ -2855,7 +2856,7 @@ TEST_CASE("Notations: usages - subsets / redefines as lines as in the doc figure
     const ElementId part2 = model.children(part1).front();
     const ElementId part1S = model.children(RootId).at(1);
     const ElementId part2R = model.children(part1S).front();
-    CHECK_EQ(controller.nodes()->find(part1S)->Title, QString("part1S : Part1S[1]"));
+    CHECK_EQ(controller.nodes()->find(part1S)->Title, QString("part1S : Part1S [1]"));
     CHECK_EQ(controller.nodes()->find(part2R)->Title, QString("part2R : Part2R"));
     const auto has = [&](DiagramTypes::EdgeKind kind, ElementId source, ElementId target) {
         for (const auto &edge: controller.edges()->edges())
@@ -2923,4 +2924,325 @@ TEST_CASE("Notations: inherited parts as nodes ^part1, marked as drawn only (tab
     controller.setNotation(key(special), "inherited", "compartment");
     CHECK_EQ(controller.nodes()->count(), count);
     CHECK_EQ(SysMLCodeGenerator().generate(model), text);
+}
+
+namespace {
+    /// The compartments of a node as "title: entry | entry", the keyword in bold as *keyword*.
+    QStringList compartmentTexts(const DiagramNode &node) {
+        QStringList result;
+        for (const auto &compartment: node.Compartments) {
+            const auto map = compartment.toMap();
+            QStringList entries;
+            for (const auto &value: map.value("entries").toList()) {
+                const auto entryMap = value.toMap();
+                QString text = entryMap.value("text").toString();
+                const QString keyword = entryMap.value("keyword").toString();
+                if (!keyword.isEmpty() && text.startsWith(keyword))
+                    text = '*' + keyword + '*' + text.mid(keyword.size());
+                entries.append(text);
+            }
+            result.append(map.value("title").toString() + ": " + entries.join(" | "));
+        }
+        return result;
+    }
+}
+
+TEST_CASE("Notations: variants compartment of a variation (8.2.3 'Variants Compartment', three forms)") {
+    const std::string text = "variation item itemChoice : ItemDef {\n"
+                             "    variant part1;\n"
+                             "    variant item1;\n"
+                             "}\n"
+                             "variation item itemChoice1 : ItemDef {\n"
+                             "    variant part references part1;\n"
+                             "    variant item references item1;\n"
+                             "}\n"
+                             "variation item itemChoice2 : ItemDef {\n"
+                             "    variant part part1 : Part1;\n"
+                             "    variant item item1 : Item1;\n"
+                             "}\n";
+    SemanticModel model;
+    CHECK(SysMLTextImporter::importText(text, model).lossless());
+    DiagramController controller(model);
+    const ElementId choice = model.children(RootId).at(0);
+    const ElementId choice1 = model.children(RootId).at(1);
+    const ElementId choice2 = model.children(RootId).at(2);
+    CHECK_EQ(compartmentTexts(*controller.nodes()->find(choice)), QStringList({"variants: part1 | item1"}));
+    CHECK_EQ(compartmentTexts(*controller.nodes()->find(choice1)),
+             QStringList({"variants: *part references* part1 | *item references* item1"}));
+    // default, as in the table: both in the compartment, no node, no line
+    const ElementId part1 = model.children(choice2).at(0);
+    CHECK(controller.nodes()->find(part1) == nullptr);
+    CHECK(edgeOfKind(controller, DiagramTypes::VariantMembership) == nullptr);
+    CHECK_EQ(compartmentTexts(*controller.nodes()->find(choice2)),
+             QStringList({"variants: *part* part1 : Part1 | *item* item1 : Item1"}));
+    // on request: the variant part a node with a line (circle with a cross) at the variation, the item listed
+    controller.setNotation(key(choice2), "variants", "line");
+    CHECK(controller.nodes()->find(part1) != nullptr);
+    CHECK(edgeOfKind(controller, DiagramTypes::VariantMembership) != nullptr);
+    CHECK_EQ(compartmentTexts(*controller.nodes()->find(choice2)), QStringList({"variants: *item* item1 : Item1"}));
+    CHECK_EQ(SysMLCodeGenerator().generate(model), SysMLCodeGenerator().generate(model)); // stable
+    SemanticModel again;
+    CHECK(SysMLTextImporter::importText(SysMLCodeGenerator().generate(model), again).lossless());
+}
+
+TEST_CASE("Notations: variant parts compartment of a variation part (8.2.3 'Variant Parts Compartment')") {
+    const std::string text = "variation part partChoice : PartDef {\n"
+                             "    variant part part1 : PartDef1;\n"
+                             "    variant part part2 : PartDef2;\n"
+                             "}\n";
+    SemanticModel model;
+    CHECK(SysMLTextImporter::importText(text, model).lossless());
+    DiagramController controller(model);
+    const ElementId choice = model.children(RootId).at(0);
+    CHECK_EQ(controller.nodes()->count(), 1);
+    CHECK(controller.edges()->edges().empty());
+    CHECK_EQ(compartmentTexts(*controller.nodes()->find(choice)),
+             QStringList({"variant parts: part1 : PartDef1 | part2 : PartDef2"}));
+    CHECK_EQ(SysMLCodeGenerator().generate(model), text);
+    controller.setNotation(key(choice), "variants", "line");
+    CHECK_EQ(controller.nodes()->count(), 3);
+    CHECK(edgeOfKind(controller, DiagramTypes::VariantMembership) != nullptr);
+}
+
+TEST_CASE("Notations: relationships compartment instead of lines (8.2.3 'Relationships Compartment')") {
+    const std::string text = "part def PartDef1;\n"
+                             "part def PartDef2 :> PartDef1;\n"
+                             "part part1 : PartDef1;\n"
+                             "part part2 : PartDef2 :> part1;\n"
+                             "connect part2 to part3;\n"
+                             "part part3;\n";
+    SemanticModel model;
+    CHECK(SysMLTextImporter::importText(text, model).lossless());
+    DiagramController controller(model);
+    const ElementId partDef2 = model.children(RootId).at(1);
+    const ElementId part2 = model.children(RootId).at(3);
+    CHECK(edgeOfKind(controller, DiagramTypes::Specialization) != nullptr);
+    CHECK(edgeOfKind(controller, DiagramTypes::Connection) != nullptr);
+    CHECK(controller.nodes()->find(part2)->Compartments.isEmpty());
+    const std::string generated = SysMLCodeGenerator().generate(model);
+    controller.setNotationMode("relationships", "compartment");
+    CHECK_EQ(compartmentTexts(*controller.nodes()->find(partDef2)),
+             QStringList({"relationships: *defines* part2 | *specializes* PartDef1"}));
+    CHECK_EQ(compartmentTexts(*controller.nodes()->find(part2)),
+             QStringList({"relationships: *defined by* PartDef2 | *subsets* part1 | *connect to* part3"}));
+    CHECK(edgeOfKind(controller, DiagramTypes::Specialization) == nullptr);
+    CHECK(edgeOfKind(controller, DiagramTypes::Connection) == nullptr);
+    CHECK_EQ(SysMLCodeGenerator().generate(model), generated); // the notation does not change the text
+    // per element: only part2 as text, the line between the definitions stays
+    controller.setNotationMode("relationships", "individual");
+    controller.setNotation(key(part2), "relationships", "compartment");
+    CHECK(edgeOfKind(controller, DiagramTypes::Connection) == nullptr);
+    CHECK(edgeOfKind(controller, DiagramTypes::Specialization) != nullptr);
+    CHECK(controller.nodes()->find(partDef2)->Compartments.isEmpty());
+}
+
+TEST_CASE("Compartments: keywords and the brackets of the multiplicity in bold, names and units as written") {
+    const std::string text = "part def Vehicle {\n"
+                             "    ref part driver : Person[0..1];\n"
+                             "    attribute mass : Real[1] = 1500 [kg];\n"
+                             "    part 'part' : Engine;\n"
+                             "}\n";
+    SemanticModel model;
+    CHECK(SysMLTextImporter::importText(text, model).lossless());
+    DiagramController controller(model);
+    const ElementId vehicle = model.children(RootId).at(0);
+    controller.setNotation(key(vehicle), "features", "compartment");
+    QStringList rich;
+    for (const auto &compartment: controller.nodes()->find(vehicle)->Compartments)
+        for (const auto &value: compartment.toMap().value("entries").toList())
+            rich.append(value.toMap().value("rich").toString());
+    CHECK(rich.contains("mass : Real <b>[</b>1<b>]</b> <b>=</b> 1500 [kg]"));
+    CHECK(rich.contains("<b>ref</b> driver : Person <b>[</b>0..1<b>]</b>"));
+    CHECK(rich.contains("part : Engine"));
+}
+
+TEST_CASE("Edit dialog: subsets / specializes, ordered / nonunique and the prefixes of the standard") {
+    const std::string text = "part def Vehicle {\n"
+                             "    attribute mass : Real[1];\n"
+                             "    attribute dryMass : Real[0..1];\n"
+                             "}\n"
+                             "part def Car;\n"
+                             "variation part choice : Vehicle {\n"
+                             "    variant part a : Car;\n"
+                             "}\n";
+    SemanticModel model;
+    CHECK(SysMLTextImporter::importText(text, model).lossless());
+    DiagramController controller(model);
+    const ElementId vehicle = model.children(RootId).at(0);
+    const ElementId dryMass = model.children(vehicle).at(1);
+    const ElementId car = model.children(RootId).at(1);
+    const ElementId variant = model.children(model.children(RootId).at(2)).at(0);
+
+    auto details = controller.elementDetails(key(dryMass));
+    CHECK(details.value("hasSpecializations").toBool());
+    CHECK_EQ(details.value("specializationWord").toString(), QString("subsets"));
+    CHECK(details.value("prefixOptions").toStringList().contains("constant"));
+    CHECK(!details.value("prefixOptions").toStringList().contains("variant"));
+    CHECK(controller.elementDetails(key(variant)).value("prefixOptions").toStringList().contains("variant"));
+    CHECK(controller.elementDetails(key(variant)).value("prefixFlags").toMap().value("variant").toBool());
+    CHECK_EQ(controller.elementDetails(key(car)).value("prefixOptions").toStringList(),
+             QStringList({"abstract", "variation", "individual"}));
+
+    // "derived constant attribute dryMass : Real[0..1] ordered nonunique subsets mass, ISQ::mass;"
+    QVariantMap values{{"name", "dryMass"}, {"typeName", "Real"}, {"multiplicity", "0..1"}, {"value", ""},
+                       {"prefixes", "derived constant"}, {"ordered", true}, {"nonunique", true},
+                       {"specializes", "mass, ISQ::mass"}, {"specializationKeyword", "subsets"},
+                       {"redefines", ""}, {"redefinitionKeyword", ":>>"}};
+    CHECK_EQ(controller.updateElement(key(dryMass), values), QString());
+    const std::string generated = SysMLCodeGenerator().generate(model);
+    CHECK(generated.find("derived constant attribute dryMass : Real[0..1] ordered nonunique subsets mass, ISQ::mass;") !=
+          std::string::npos);
+    SemanticModel again;
+    CHECK(SysMLTextImporter::importText(generated, again).lossless());
+    CHECK_EQ(SysMLCodeGenerator().generate(again), generated);
+    details = controller.elementDetails(key(dryMass));
+    CHECK_EQ(details.value("specializations").toString(), QString("mass, ISQ::mass"));
+    CHECK(details.value("ordered").toBool());
+    CHECK(details.value("prefixFlags").toMap().value("constant").toBool());
+    // listed in the compartment as written (the line between entries cannot be drawn)
+    controller.setNotation(key(vehicle), "features", "compartment");
+    bool listed = false;
+    for (const auto &compartment: controller.nodes()->find(vehicle)->Compartments)
+        for (const auto &value: compartment.toMap().value("entries").toList())
+            listed = listed || value.toMap().value("text").toString() ==
+                                       "readonly /dryMass : Real [0..1] ordered nonunique subsets mass, ISQ::mass";
+    CHECK(listed);
+    // abstract and variation exclude each other; a definition specializes
+    values["prefixes"] = "abstract variation";
+    CHECK(!controller.updateElement(key(dryMass), values).isEmpty());
+    QVariantMap definition{{"name", "Car"}, {"typeName", ""}, {"multiplicity", ""}, {"value", ""}, {"prefixes", "abstract"},
+                           {"specializes", "Vehicle"}, {"specializationKeyword", ":>"}};
+    CHECK_EQ(controller.updateElement(key(car), definition), QString());
+    CHECK(SysMLCodeGenerator().generate(model).find("abstract part def Car :> Vehicle;") != std::string::npos);
+    CHECK(edgeOfKind(controller, DiagramTypes::Specialization) != nullptr);
+    definition["specializes"] = "";
+    CHECK_EQ(controller.updateElement(key(car), definition), QString());
+    CHECK(SysMLCodeGenerator().generate(model).find("abstract part def Car;") != std::string::npos);
+}
+
+TEST_CASE("Editor: items on the canvas, variants of a fitting kind or declared elsewhere, references (7.6.3, 7.6.7)") {
+    SemanticModel model;
+    CHECK(SysMLTextImporter::importText("part part1;\nitem def ItemDef;\n", model).lossless());
+    DiagramController controller(model);
+    // an item on the empty canvas: "item item1;" on package level
+    const QString item = controller.addElement(DiagramTypes::ToolItem, 600, 400);
+    CHECK(!item.isEmpty());
+    if (item.isEmpty())
+        return;
+    const ElementId itemId = item.toULongLong();
+    CHECK(model.element(itemId).kind() == ElementKind::ItemUsage);
+    CHECK_EQ(model.element(itemId).owner(), RootId);
+    // made a variation: "variation item item1 : ItemDef"
+    QVariantMap values{{"name", "itemChoice"}, {"typeName", "ItemDef"}, {"multiplicity", ""}, {"value", ""},
+                       {"prefixes", "variation"}};
+    CHECK_EQ(controller.updateElement(item, values), QString());
+    const auto *node = controller.nodes()->find(itemId);
+    CHECK(node != nullptr);
+    if (!node)
+        return;
+    const QPointF center = node->Rect.center();
+    // the variant tool on it: a new item or part, or part1 declared elsewhere
+    const QVariantList choices = controller.variantChoices(center.x(), center.y());
+    QStringList texts;
+    for (const auto &choice: choices)
+        texts.append(choice.toMap().value("text").toString());
+    CHECK_EQ(texts, QStringList({"New variant item", "New variant part", "Existing: part1"}));
+    CHECK(controller.variantChoices(10, 10).isEmpty());
+    CHECK(!controller.addVariant(item, "", "part1").isEmpty());
+    CHECK(!controller.addVariant(item, "part", "").isEmpty());
+    const std::string text = SysMLCodeGenerator().generate(model);
+    CHECK(text.find("variation item itemChoice : ItemDef {\n    variant part1;\n    variant part part2;\n}") != std::string::npos);
+    SemanticModel again;
+    CHECK(SysMLTextImporter::importText(text, again).lossless());
+    // a reference subsetting from the dialog: "item copy references part1;"
+    const ElementId variant = model.children(itemId).at(1);
+    CHECK(controller.elementDetails(key(variant)).value("hasReferences").toBool());
+    QVariantMap reference{{"name", "part2"}, {"typeName", ""}, {"multiplicity", ""}, {"value", ""}, {"prefixes", "variant"},
+                          {"references", "part1"}, {"referencesKeyword", "::>"}};
+    CHECK_EQ(controller.updateElement(key(variant), reference), QString());
+    CHECK(SysMLCodeGenerator().generate(model).find("variant part part2 ::> part1;") != std::string::npos);
+    reference["references"] = "";
+    CHECK_EQ(controller.updateElement(key(variant), reference), QString());
+    CHECK(SysMLCodeGenerator().generate(model).find("variant part part2;") != std::string::npos);
+}
+
+TEST_CASE("Editor: a variation holds only its variants (8.3.6: all memberships are variant memberships)") {
+    SemanticModel model;
+    CHECK(SysMLTextImporter::importText("variation item itemChoice : ItemDef;\npart loose;\npart def Defined;\n", model).lossless());
+    DiagramController controller(model);
+    const ElementId choice = model.children(RootId).at(0);
+    const ElementId loose = model.children(RootId).at(1);
+    const ElementId defined = model.children(RootId).at(2);
+    const auto center = [&](ElementId id) { return controller.nodes()->find(id)->Rect.center(); };
+    // the part tool onto it: a variant part
+    const QString added = controller.addElement(DiagramTypes::ToolPart, center(choice).x(), center(choice).y());
+    CHECK(!added.isEmpty());
+    if (added.isEmpty())
+        return;
+    CHECK(model.element(added.toULongLong()).kind() == ElementKind::PartUsage);
+    CHECK_EQ(model.element(added.toULongLong()).owner(), choice);
+    CHECK(SysMLCodeGenerator().generate(model).find("    variant part part1;") != std::string::npos);
+    // a part definition is not taken
+    CHECK(controller.addElement(DiagramTypes::ToolPartDefinition, center(choice).x(), center(choice).y()).isEmpty());
+    // a part moved into it becomes a variant, moved out again no variant any more
+    controller.setNotation(key(choice), "variants", "line");
+    controller.moveNode(key(loose), center(choice).x() - 20, center(choice).y() - 10);
+    controller.finishMove(key(loose));
+    CHECK_EQ(model.element(loose).owner(), choice);
+    CHECK(SysMLCodeGenerator().generate(model).find("    variant part loose;") != std::string::npos);
+    // like a part on a composition line it stays when moved; removing its line takes it out
+    QString lineKey;
+    for (const auto &edge: controller.edges()->edges())
+        if (edge.Kind == DiagramTypes::VariantMembership && edge.Target == loose)
+            lineKey = edge.Key;
+    CHECK(!lineKey.isEmpty());
+    controller.deleteEdge(lineKey);
+    CHECK_EQ(model.element(loose).owner(), RootId);
+    CHECK(SysMLCodeGenerator().generate(model).find("\npart loose;") != std::string::npos);
+    // a definition moved onto it stays where it is
+    controller.moveNode(key(defined), center(choice).x() - 20, center(choice).y() - 10);
+    controller.finishMove(key(defined));
+    CHECK_EQ(model.element(defined).owner(), RootId);
+    SemanticModel again;
+    CHECK(SysMLTextImporter::importText(SysMLCodeGenerator().generate(model), again).lossless());
+}
+
+TEST_CASE("Editor: enum values with name, value and unit, with or without 'enum' (8.2.2.8, table 6)") {
+    SemanticModel model;
+    CHECK(SysMLTextImporter::importText("enum def DiameterChoice;\npart def Engine;\n", model).lossless());
+    DiagramController controller(model);
+    const ElementId choice = model.children(RootId).at(0);
+    const ElementId engine = model.children(RootId).at(1);
+    const auto center = [&](ElementId id) { return controller.nodes()->find(id)->Rect.center(); };
+    // only onto an enum def
+    CHECK(controller.addElement(DiagramTypes::ToolEnumValue, center(engine).x(), center(engine).y()).isEmpty());
+    const QString first = controller.addElement(DiagramTypes::ToolEnumValue, center(choice).x(), center(choice).y());
+    const QString second = controller.addElement(DiagramTypes::ToolEnumValue, center(choice).x(), center(choice).y());
+    const QString third = controller.addElement(DiagramTypes::ToolEnumValue, center(choice).x(), center(choice).y());
+    CHECK(!first.isEmpty());
+    CHECK(!third.isEmpty());
+    if (first.isEmpty() || third.isEmpty())
+        return;
+    CHECK(controller.elementDetails(first).value("isEnumValue").toBool());
+    CHECK(controller.elementDetails(first).value("mayBeUnnamed").toBool());
+    // "enum small = 60 [mm];", "= 70 [mm];" (no name, no keyword), "large;"
+    CHECK_EQ(controller.updateElement(first, {{"name", "small"}, {"enumValue", "60"}, {"enumUnit", "mm"}, {"enumKeyword", true}}),
+             QString());
+    CHECK_EQ(controller.updateElement(second, {{"name", ""}, {"enumValue", "70"}, {"enumUnit", "mm"}, {"enumKeyword", false}}),
+             QString());
+    CHECK_EQ(controller.updateElement(third, {{"name", "large"}, {"enumValue", ""}, {"enumUnit", ""}, {"enumKeyword", false}}),
+             QString());
+    // neither name nor value; a unit without value
+    CHECK(!controller.updateElement(third, {{"name", ""}, {"enumValue", ""}, {"enumUnit", ""}, {"enumKeyword", true}}).isEmpty());
+    CHECK(!controller.updateElement(third, {{"name", "large"}, {"enumValue", ""}, {"enumUnit", "mm"}, {"enumKeyword", true}}).isEmpty());
+    const std::string text = SysMLCodeGenerator().generate(model);
+    CHECK(text.find("enum def DiameterChoice {\n    enum small = 60 [mm];\n    = 70 [mm];\n    large;\n}") != std::string::npos);
+    const auto details = controller.elementDetails(first);
+    CHECK_EQ(details.value("enumValue").toString(), QString("60"));
+    CHECK_EQ(details.value("enumUnit").toString(), QString("mm"));
+    CHECK(details.value("enumKeyword").toBool());
+    CHECK(!controller.elementDetails(second).value("enumKeyword").toBool());
+    SemanticModel again;
+    CHECK(SysMLTextImporter::importText(text, again).lossless());
+    CHECK_EQ(SysMLCodeGenerator().generate(again), text);
 }

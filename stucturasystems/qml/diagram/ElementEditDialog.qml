@@ -15,6 +15,37 @@ Dialog {
     property DiagramController controller
     property string elementId
     property var details: ({})
+    /** The prefixes of the standard switched on ("abstract": true, ...). */
+    property var flags: ({})
+
+    /** The prefixes in the order of the textual notation: variant, end, direction, derived, abstract / variation,
+        constant, ref, individual, then the further ones (#metadata, ...). */
+    function composedPrefixes() {
+        let words = []
+        for (const word of ["variant", "end"])
+            if (flags[word] === true)
+                words.push(word)
+        if (directionBox.visible && directionBox.currentIndex > 0)
+            words.push(directionBox.currentText)
+        for (const word of ["derived", "abstract", "variation", "constant", "ref", "individual"])
+            if (flags[word] === true)
+                words.push(word)
+        const further = prefixField.text.trim()
+        if (further.length > 0)
+            words.push(further)
+        return words.join(" ")
+    }
+
+    function setFlag(word, on) {
+        let copy = Object.assign({}, flags)
+        copy[word] = on
+        // the standard: abstract or variation
+        if (on && word === "abstract")
+            copy["variation"] = false
+        if (on && word === "variation")
+            copy["abstract"] = false
+        flags = copy
+    }
 
     function openFor(id) {
         elementId = id
@@ -30,7 +61,19 @@ Dialog {
         }
         multiplicityField.text = details.multiplicity
         valueField.text = details.value
-        prefixField.text = details.prefixes
+        flags = Object.assign({}, details.prefixFlags !== undefined ? details.prefixFlags : {})
+        prefixField.text = details.otherPrefixes !== undefined ? details.otherPrefixes : details.prefixes
+        directionBox.currentIndex = Math.max(0, ["", "in", "out", "inout"].indexOf(details.direction !== undefined ? details.direction : ""))
+        orderedCheck.checked = details.ordered === true
+        nonuniqueCheck.checked = details.nonunique === true
+        specializesField.text = details.specializations !== undefined ? details.specializations : ""
+        referencesField.text = details.references !== undefined ? details.references : ""
+        enumKeywordCheck.checked = details.enumKeyword !== false
+        enumValueField.text = details.enumValue !== undefined ? details.enumValue : ""
+        enumUnitField.text = details.enumUnit !== undefined ? details.enumUnit : ""
+        referencesKeywordBox.currentIndex = details.referencesKeyword === "::>" ? 1 : 0
+        specializationKeywordBox.currentIndex = details.specializationKeyword !== undefined &&
+                                                details.specializationKeyword !== ":>" ? 1 : 0
         referenceCheck.checked = details.referenceAction
         roleBox.currentIndex = Math.max(0, ["entry", "do", "exit", "action"].indexOf(details.role))
         textArea.text = details.text
@@ -76,7 +119,7 @@ Dialog {
             createType: typeField.createsType,
             multiplicity: multiplicityField.text,
             value: valueField.text,
-            prefixes: prefixField.text,
+            prefixes: dialog.composedPrefixes(),
             referenceAction: referenceCheck.checked
         }
         if (details.hasPorts === true) {
@@ -100,6 +143,23 @@ Dialog {
             values.doc = docArea.text
         if (details.stateAction)
             values.role = ["entry", "do", "exit", "action"][roleBox.currentIndex]
+        if (details.hasMultiplicity) {
+            values.ordered = orderedCheck.checked
+            values.nonunique = nonuniqueCheck.checked
+        }
+        if (details.isEnumValue) {
+            values.enumKeyword = enumKeywordCheck.checked
+            values.enumValue = enumValueField.text
+            values.enumUnit = enumUnitField.text
+        }
+        if (details.hasReferences) {
+            values.references = referencesField.text
+            values.referencesKeyword = referencesKeywordBox.currentText
+        }
+        if (details.hasSpecializations) {
+            values.specializes = specializesField.text
+            values.specializationKeyword = specializationKeywordBox.currentText
+        }
         if (details.hasRedefinitions) {
             values.redefines = redefinesField.text
             values.redefinitionKeyword = redefinitionKeywordBox.currentText
@@ -180,6 +240,53 @@ Dialog {
             placeholderText: dialog.details.mayBeUnnamed === true ? qsTr("optional") : ""
             onAccepted: dialog.apply()
             Accessible.name: qsTr("Name")
+        }
+
+        // an enumerated value (8.2.2.8: EnumeratedValue = 'enum'? Usage): "enum red;", "enum = 60 [mm];", "= 60 [mm];"
+        Label {
+            visible: dialog.details.isEnumValue === true
+            text: qsTr("Value")
+            color: Theme.textSecondary
+        }
+        RowLayout {
+            visible: dialog.details.isEnumValue === true
+            Layout.fillWidth: true
+            spacing: 6
+            Label {
+                text: "="
+                color: Theme.textSecondary
+            }
+            TextField {
+                id: enumValueField
+                objectName: "enumValueField"
+                Layout.fillWidth: true
+                placeholderText: qsTr("optional, e.g. 60")
+                onAccepted: dialog.apply()
+                Accessible.name: qsTr("Value")
+            }
+            Label {
+                text: qsTr("Unit")
+                color: Theme.textSecondary
+            }
+            TextField {
+                id: enumUnitField
+                objectName: "enumUnitField"
+                Layout.preferredWidth: 110
+                placeholderText: "mm, SI::kg"
+                onAccepted: dialog.apply()
+                Accessible.name: qsTr("Unit")
+            }
+        }
+        Item {
+            visible: dialog.details.isEnumValue === true
+            implicitWidth: 1
+            implicitHeight: 1
+        }
+        CheckBox {
+            id: enumKeywordCheck
+            objectName: "enumKeywordCheck"
+            visible: dialog.details.isEnumValue === true
+            text: qsTr("Write the keyword enum (\"enum red;\" instead of \"red;\")")
         }
 
         // short name: requirement <'1.1'> vehicleMass
@@ -310,6 +417,118 @@ Dialog {
             onAccepted: dialog.apply()
             Accessible.name: qsTr("Multiplicity")
         }
+        // after the multiplicity: "[1..*] ordered nonunique"
+        Item {
+            visible: dialog.details.hasMultiplicity === true
+            implicitWidth: 1
+            implicitHeight: 1
+        }
+        RowLayout {
+            visible: dialog.details.hasMultiplicity === true
+            Layout.fillWidth: true
+            spacing: 12
+            CheckBox {
+                id: orderedCheck
+                objectName: "orderedCheck"
+                text: "ordered"
+            }
+            CheckBox {
+                id: nonuniqueCheck
+                objectName: "nonuniqueCheck"
+                text: "nonunique"
+            }
+        }
+
+        // what it specializes: ":> part1" / "subsets part1" (usage), ":> PartDef1" / "specializes PartDef1" (definition)
+        Label {
+            visible: dialog.details.hasSpecializations === true
+            text: dialog.details.specializationWord === "specializes" ? qsTr("Specializes") : qsTr("Subsets")
+            color: Theme.textSecondary
+        }
+        RowLayout {
+            visible: dialog.details.hasSpecializations === true
+            Layout.fillWidth: true
+            spacing: 6
+
+            ComboBox {
+                id: specializationKeywordBox
+                objectName: "specializationKeywordBox"
+                Layout.preferredWidth: 130
+                model: [":>", dialog.details.specializationWord !== undefined ? dialog.details.specializationWord : "subsets"]
+            }
+            TextField {
+                id: specializesField
+                objectName: "specializesField"
+                Layout.fillWidth: true
+                placeholderText: dialog.details.specializationWord === "specializes" ? qsTr("optional, e.g. PartDef1")
+                                                                                     : qsTr("optional, e.g. part1 or Vehicle::mass")
+                onAccepted: dialog.apply()
+                Accessible.name: dialog.details.specializationWord === "specializes" ? qsTr("Specialized definitions")
+                                                                                     : qsTr("Subsetted features")
+            }
+        }
+
+        // reference subsetting: "part p references q;", "::> q" (7.6.3)
+        Label {
+            visible: dialog.details.hasReferences === true
+            text: qsTr("References")
+            color: Theme.textSecondary
+        }
+        RowLayout {
+            visible: dialog.details.hasReferences === true
+            Layout.fillWidth: true
+            spacing: 6
+
+            ComboBox {
+                id: referencesKeywordBox
+                objectName: "referencesKeywordBox"
+                Layout.preferredWidth: 130
+                model: ["references", "::>"]
+            }
+            TextField {
+                id: referencesField
+                objectName: "referencesField"
+                Layout.fillWidth: true
+                placeholderText: qsTr("optional, e.g. part1 or vehicle.engine")
+                onAccepted: dialog.apply()
+                Accessible.name: qsTr("Referenced feature")
+            }
+        }
+
+        // redefinition of inherited features: "part smallEng : SmallEngine redefines eng;", ":>> mass = 2000.0;"
+        Label {
+            visible: dialog.details.hasRedefinitions === true
+            text: qsTr("Redefines")
+            color: Theme.textSecondary
+        }
+        RowLayout {
+            visible: dialog.details.hasRedefinitions === true
+            Layout.fillWidth: true
+            spacing: 6
+
+            ComboBox {
+                id: redefinitionKeywordBox
+                objectName: "redefinitionKeywordBox"
+                Layout.preferredWidth: 130
+                model: [":>>", "redefines"]
+            }
+            TextField {
+                id: redefinesField
+                objectName: "redefinesField"
+                Layout.fillWidth: true
+                placeholderText: qsTr("optional, e.g. eng or Vehicle::mass")
+                onAccepted: dialog.apply()
+                Accessible.name: qsTr("Redefined features")
+            }
+        }
+        CheckBox {
+            id: nameFromRedefinitionCheck
+            objectName: "nameFromRedefinitionCheck"
+            Layout.columnSpan: 2
+            visible: dialog.details.hasRedefinitions === true
+            enabled: redefinesField.text.trim().length > 0
+            text: qsTr("No name of its own: named like the redefined feature (\"part :>> cyl[4];\")")
+        }
 
         Label {
             visible: dialog.details.hasValue === true
@@ -326,16 +545,52 @@ Dialog {
             Accessible.name: qsTr("Value")
         }
 
+        // the prefixes of the standard as switches, the direction of a feature, further ones (#metadata) as text
+        Label {
+            visible: dialog.details.isTextual !== true && dialog.details.prefixOptions !== undefined &&
+                     dialog.details.prefixOptions.length > 0
+            Layout.alignment: Qt.AlignTop
+            Layout.topMargin: 10
+            text: qsTr("Prefixes")
+            color: Theme.textSecondary
+        }
+        Flow {
+            visible: dialog.details.isTextual !== true && dialog.details.prefixOptions !== undefined &&
+                     dialog.details.prefixOptions.length > 0
+            Layout.fillWidth: true
+            spacing: 4
+            ComboBox {
+                id: directionBox
+                objectName: "directionBox"
+                visible: dialog.details.hasDirection === true
+                width: 110
+                model: ["", "in", "out", "inout"]
+                displayText: currentIndex === 0 ? qsTr("direction") : currentText
+                Accessible.name: qsTr("Direction")
+            }
+            Repeater {
+                model: dialog.details.prefixOptions !== undefined ? dialog.details.prefixOptions : []
+                CheckBox {
+                    required property string modelData
+                    objectName: "prefix_" + modelData
+                    // constant: drawn as "readonly" in the compartments (tables 5, 7 of the specification)
+                    text: modelData === "constant" ? "constant (readonly)" : modelData
+                    checked: dialog.flags[modelData] === true
+                    onToggled: dialog.setFlag(modelData, checked)
+                }
+            }
+        }
         Label {
             visible: dialog.details.isTextual !== true
-            text: qsTr("Prefixes")
+            text: dialog.details.prefixOptions !== undefined && dialog.details.prefixOptions.length > 0
+                  ? qsTr("Further prefixes") : qsTr("Prefixes")
             color: Theme.textSecondary
         }
         TextField {
             id: prefixField
             visible: dialog.details.isTextual !== true
             Layout.fillWidth: true
-            placeholderText: "derived #measurable"
+            placeholderText: "#measurable"
             onAccepted: dialog.apply()
             Accessible.name: qsTr("Prefixes and metadata")
         }
@@ -373,41 +628,6 @@ Dialog {
             placeholderText: qsTr("optional, e.g. vehicle::interior::seatBelt, vehicle::bodyAssy::bumper")
             onAccepted: dialog.apply()
             Accessible.name: qsTr("Annotated elements")
-        }
-
-        // redefinition of inherited features: "part smallEng : SmallEngine redefines eng;", ":>> mass = 2000.0;"
-        Label {
-            visible: dialog.details.hasRedefinitions === true
-            text: qsTr("Redefines")
-            color: Theme.textSecondary
-        }
-        RowLayout {
-            visible: dialog.details.hasRedefinitions === true
-            Layout.fillWidth: true
-            spacing: 6
-
-            ComboBox {
-                id: redefinitionKeywordBox
-                objectName: "redefinitionKeywordBox"
-                Layout.preferredWidth: 130
-                model: [":>>", "redefines"]
-            }
-            TextField {
-                id: redefinesField
-                objectName: "redefinesField"
-                Layout.fillWidth: true
-                placeholderText: qsTr("optional, e.g. eng or Vehicle::mass")
-                onAccepted: dialog.apply()
-                Accessible.name: qsTr("Redefined features")
-            }
-        }
-        CheckBox {
-            id: nameFromRedefinitionCheck
-            objectName: "nameFromRedefinitionCheck"
-            Layout.columnSpan: 2
-            visible: dialog.details.hasRedefinitions === true
-            enabled: redefinesField.text.trim().length > 0
-            text: qsTr("No name of its own: named like the redefined feature (\"part :>> cyl[4];\")")
         }
 
         // what an action does: send / accept / assign / terminate, if / while / loop / for

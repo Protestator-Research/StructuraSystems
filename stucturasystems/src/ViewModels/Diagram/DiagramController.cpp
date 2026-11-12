@@ -8,6 +8,7 @@
 #include "DiagramGeometry.h"
 
 #include <QRegularExpression>
+#include <QSet>
 #include <QJsonArray>
 #include <QMetaObject>
 
@@ -78,6 +79,8 @@ namespace StructuraSystems::Client {
                     return Diagram::isBehaviorKind(owner) ? ElementKind::ActionUsage : ElementKind::ActionPerformance;
                 case DiagramTypes::ToolSubject:
                     return ElementKind::Subject;
+                case DiagramTypes::ToolEnumValue:
+                    return ElementKind::EnumerationLiteral;
                 case DiagramTypes::ToolActor:
                     return ElementKind::Actor;
                 case DiagramTypes::ToolObjective:
@@ -423,7 +426,9 @@ namespace StructuraSystems::Client {
                 if (text.startsWith(QLatin1Char('#')))
                     metadata += QStringLiteral("«") + text.mid(1) + QStringLiteral("» ");
                 else if (text == QLatin1String("derived"))
-                    derived = true;
+                    derived = true; // "/attribute12" (tables 5, 7)
+                else if (text == QLatin1String("constant"))
+                    words += QStringLiteral("readonly "); // the graphical notation: "readonly attribute13" (tables 5, 7)
                 else
                     words += text + QLatin1Char(' ');
             }
@@ -503,15 +508,136 @@ namespace StructuraSystems::Client {
             return keyword == "import" || keyword == "alias";
         }
 
+        bool hasPrefix(const Diagram::SysMLElement &element, const char *prefix) {
+            return std::find(element.prefixes().begin(), element.prefixes().end(), prefix) != element.prefixes().end();
+        }
+
+        /// "variation part def", "variation item itemChoice": an element whose variants are listed in it.
+        bool isVariation(const Diagram::SysMLElement &element) { return hasPrefix(element, "variation"); }
+
+        /// "variant part1;", "variant part part1 : Part1;", also one kept as text ("variant part references part1;").
+        bool isVariantElement(const Diagram::SysMLElement &element) {
+            if (element.kind() == ElementKind::Textual)
+                return element.text().rfind("variant ", 0) == 0;
+            return hasPrefix(element, "variant");
+        }
+
         QVariantMap entry(ElementId id, const QString &text, const QString &tooltip = QString()) {
             return {{QStringLiteral("entryId"), QString::number(id)},
                     {QStringLiteral("text"), elide(text)},
                     {QStringLiteral("tooltip"), tooltip.isEmpty() && text.size() > MaximumEntryLength ? text : tooltip}};
         }
 
+        /// Reserved words of the SysML v2 textual notation (as in SysMLCodeGenerator).
+        bool isSysMLKeyword(const QString &word) {
+            static const QSet<QString> keywords = {
+                    "about", "abstract", "accept", "action", "actor", "after", "alias", "all", "allocate",
+                    "allocation", "analysis", "and", "as", "assert", "assign", "assume", "at", "attribute",
+                    "bind", "binding", "by", "calc", "case", "comment", "concern", "connect", "connection",
+                    "constant", "constraint", "crosses", "decide", "def", "default", "defined", "dependency",
+                    "derived", "do", "doc", "else", "end", "entry", "enum", "event", "exhibit", "exit",
+                    "expose", "false", "filter", "first", "flow", "for", "fork", "frame", "from", "hastype",
+                    "if", "implies", "import", "in", "include", "individual", "inout", "interface", "istype",
+                    "item", "join", "language", "library", "locale", "loop", "merge", "message", "meta",
+                    "metadata", "new", "nonunique", "not", "null", "objective", "occurrence", "of", "or",
+                    "ordered", "out", "package", "parallel", "part", "perform", "port", "private",
+                    "protected", "public", "readonly", "redefines", "ref", "references", "render", "rendering", "rep",
+                    "require", "requirement", "return", "satisfy", "send", "snapshot", "specializes",
+                    "stakeholder", "standard", "state", "subject", "subsets", "succession", "terminate",
+                    "then", "timeslice", "to", "transition", "true", "until", "use", "variant", "variation",
+                    "verification", "verify", "via", "view", "viewpoint", "when", "while", "xor"};
+            return keywords.contains(word);
+        }
+
+        /// An entry of a compartment as in the tables of the specification: the keywords in bold ("ref part",
+        /// "subsets", "defines" given as keyword of the entry), the brackets of the multiplicity too ("[0..*]");
+        /// names in quotes ('part') and the brackets of units in a value ("= 60 [mm]") stay as they are.
+        QString richEntryText(const QString &text, const QString &keyword) {
+            const auto escaped = [](QString value) {
+                return value.replace(QLatin1Char('&'), QStringLiteral("&amp;"))
+                        .replace(QLatin1Char('<'), QStringLiteral("&lt;"))
+                        .replace(QLatin1Char('>'), QStringLiteral("&gt;"));
+            };
+            QString result;
+            int at = 0;
+            if (!keyword.isEmpty() && text.startsWith(keyword)) {
+                result = QStringLiteral("<b>") + escaped(keyword) + QStringLiteral("</b>");
+                at = int(keyword.size());
+            }
+            bool value = false; // after "=", ":=", "default": an expression, its brackets are units
+            while (at < text.size()) {
+                const QChar c = text.at(at);
+                if (c == QLatin1Char('\'')) {
+                    const int end = text.indexOf(QLatin1Char('\''), at + 1);
+                    const int stop = end < 0 ? int(text.size()) : end + 1;
+                    result += escaped(text.mid(at, stop - at));
+                    at = stop;
+                } else if (c.isLetter() || c == QLatin1Char('_')) {
+                    int end = at;
+                    while (end < text.size() && (text.at(end).isLetterOrNumber() || text.at(end) == QLatin1Char('_')))
+                        ++end;
+                    const QString word = text.mid(at, end - at);
+                    // part of a name ("x.in", "P::part" stay plain)
+                    const bool before = at > 0 && (text.at(at - 1).isLetterOrNumber() || text.at(at - 1) == QLatin1Char('.') ||
+                                                   (text.at(at - 1) == QLatin1Char(':') && at > 1 &&
+                                                    text.at(at - 2) == QLatin1Char(':')));
+                    // a name that is a keyword ('part' : Engine, written in quotes): followed by ":" / "[" / the end
+                    int next = end;
+                    while (next < text.size() && text.at(next) == QLatin1Char(' '))
+                        ++next;
+                    // (at the end only as the whole entry: "readonly attribute13 ordered" keeps its keywords)
+                    const bool atEnd = next >= text.size();
+                    const bool name = (atEnd && at == 0) ||
+                                      (!atEnd && text.at(next) == QLatin1Char('[')) ||
+                                      (!atEnd && text.at(next) == QLatin1Char(':') &&
+                                       !(next + 1 < text.size() && (text.at(next + 1) == QLatin1Char(':') ||
+                                                                     text.at(next + 1) == QLatin1Char('>') ||
+                                                                     text.at(next + 1) == QLatin1Char('='))));
+                    if (word == QLatin1String("default"))
+                        value = true;
+                    result += !before && !name && isSysMLKeyword(word) ? QStringLiteral("<b>") + word + QStringLiteral("</b>") : word;
+                    at = end;
+                } else if (!value && (text.mid(at, 3) == QLatin1String(":>>") || text.mid(at, 3) == QLatin1String("::>"))) {
+                    result += QStringLiteral("<b>") + escaped(text.mid(at, 3)) + QStringLiteral("</b>"); // ":>> attribute5"
+                    at += 3;
+                } else if (!value && (text.mid(at, 2) == QLatin1String(":>") || text.mid(at, 2) == QLatin1String(":="))) {
+                    if (text.mid(at, 2) == QLatin1String(":="))
+                        value = true;
+                    result += QStringLiteral("<b>") + escaped(text.mid(at, 2)) + QStringLiteral("</b>"); // ":> attribute7"
+                    at += 2;
+                } else if (c == QLatin1Char('^') && at == 0) {
+                    result += QStringLiteral("<b>^</b>"); // "^attribute2" (inherited)
+                    ++at;
+                } else {
+                    if (c == QLatin1Char('=') && !value && !(at + 1 < text.size() && text.at(at + 1) == QLatin1Char('='))) {
+                        value = true;
+                        result += QStringLiteral("<b>=</b>"); // "attribute8 : AttributeDef8 = expression1"
+                        ++at;
+                        continue;
+                    }
+                    if (!value && (c == QLatin1Char('[') || c == QLatin1Char(']')))
+                        result += QStringLiteral("<b>") + c + QStringLiteral("</b>");
+                    else
+                        result += escaped(QString(c));
+                    ++at;
+                }
+            }
+            return result;
+        }
+
         void addCompartment(QVariantList &compartments, const QString &title, const QVariantList &entries) {
-            if (!entries.isEmpty())
-                compartments.append(QVariantMap{{QStringLiteral("title"), title}, {QStringLiteral("entries"), entries}});
+            if (entries.isEmpty())
+                return;
+            QVariantList styled = entries;
+            if (title != QLatin1String("doc")) { // the text of a doc / comment as written
+                for (auto &value: styled) {
+                    QVariantMap map = value.toMap();
+                    map[QStringLiteral("rich")] = richEntryText(map.value(QStringLiteral("text")).toString(),
+                                                                map.value(QStringLiteral("keyword")).toString());
+                    value = map;
+                }
+            }
+            compartments.append(QVariantMap{{QStringLiteral("title"), title}, {QStringLiteral("entries"), styled}});
         }
 
         /// Packages, definitions and parts; statements kept as text only on package level (constraint def, ...).
@@ -595,6 +721,25 @@ namespace StructuraSystems::Client {
             return qualified;
         }
 
+        /// ":> part1, ISQ::mass" of a feature listed as text: what it subsets in the model (no line between entries)
+        /// and what it subsets outside it, with the word as written (":>", "subsets").
+        QString specializationText(const Diagram::SemanticModel &model, ElementId id) {
+            const auto &element = model.element(id);
+            QStringList targets;
+            for (const auto &relationship: model.relationships()) {
+                if (relationship.Kind == RelationshipKind::Specialization && relationship.Source == id &&
+                    model.contains(relationship.Target))
+                    targets.append(QString::fromStdString(referenceTo(model, element.owner(), relationship.Target)));
+            }
+            for (const auto &reference: element.externalSpecializations())
+                targets.append(QString::fromStdString(reference));
+            if (targets.isEmpty())
+                return {};
+            const QString keyword = element.specializationKeyword().empty()
+                                    ? QStringLiteral(":>") : QString::fromStdString(element.specializationKeyword());
+            return QLatin1Char(' ') + keyword + QLatin1Char(' ') + targets.join(QStringLiteral(", "));
+        }
+
         /// The element an import names ("Definitions::*" -> Definitions, "vehicle::**[@Safety]" -> vehicle).
         std::optional<ElementId> importedElement(const Diagram::SemanticModel &model, ElementId import) {
             std::string target = model.element(import).target();
@@ -663,6 +808,16 @@ namespace StructuraSystems::Client {
                     {"typing", QT_TRANSLATE_NOOP("DiagramController", "Type"),
                      {{"name", QT_TRANSLATE_NOOP("DiagramController", "In the name")},
                       {"line", QT_TRANSLATE_NOOP("DiagramController", "Line (defined by)")}}},
+                    // variants of a variation: nodes with variant membership (circle with a cross) / compartment
+                    // 'variants' / 'variant parts' (graphical BNF 8.2.3, "Variants Compartment")
+                    {"variants", QT_TRANSLATE_NOOP("DiagramController", "Variants"),
+                     {{"line", QT_TRANSLATE_NOOP("DiagramController", "Nodes with \u2295 line")},
+                      {"compartment", QT_TRANSLATE_NOOP("DiagramController", "Text (variants)")}}},
+                    // specializes, subsets, defined by, connect to, ...: lines / compartment 'relationships'
+                    // ("Relationships Compartment")
+                    {"relationships", QT_TRANSLATE_NOOP("DiagramController", "Relationships"),
+                     {{"line", QT_TRANSLATE_NOOP("DiagramController", "Lines")},
+                      {"compartment", QT_TRANSLATE_NOOP("DiagramController", "Text (relationships)")}}},
                     // table 2: a note with a line / documentation compartment
                     {"docs", QT_TRANSLATE_NOOP("DiagramController", "Doc"),
                      {{"note", QT_TRANSLATE_NOOP("DiagramController", "Note with line")},
@@ -889,22 +1044,21 @@ namespace StructuraSystems::Client {
             const auto &element = model.element(id);
             const QString redefinitions = redefinitionText(element);
             QString text = QString::fromStdString(element.name());
-            if (element.nameFromRedefinition() && !element.redefinitions().empty()) {
-                // the implicit name: the last segment of the redefined feature ("Vehicle::mass" -> "mass")
-                QString redefined = QString::fromStdString(element.redefinitions().front());
-                redefined = redefined.section(QStringLiteral("::"), -1).section(QLatin1Char('.'), -1);
-                text = redefined;
-            }
+            // no name of its own: as in the tables of the specification ":>> attribute5", "redefines cylinders [4]"
+            const bool implicitName = element.nameFromRedefinition() && !element.redefinitions().empty();
+            if (implicitName)
+                text = redefinitions;
             if (!element.typeName().empty())
                 text += QStringLiteral(" : ") + QString::fromStdString(element.typeName());
+            // as in the tables of the specification: "part1 : Part1 [0..*]", "attribute1 : AttributeDef1 [1..*]"
             if (element.multiplicity().has_value())
-                text += QString::fromStdString(element.multiplicity()->toString());
+                text += QLatin1Char(' ') + QString::fromStdString(element.multiplicity()->toString());
             if (!element.multiplicityQualifiers().empty()) // "[1..*] ordered nonunique"
                 text += QLatin1Char(' ') + QString::fromStdString(element.multiplicityQualifiers());
             if (!element.referencedFeature().empty()) // "references action3" (UsageDeclaration)
                 text += QLatin1Char(' ') + QString::fromStdString(element.referencesKeyword()) + QLatin1Char(' ') +
                         QString::fromStdString(element.referencedFeature());
-            if (!redefinitions.isEmpty())
+            if (!redefinitions.isEmpty() && !implicitName)
                 text += QLatin1Char(' ') + redefinitions;
             return text;
         }
@@ -1033,7 +1187,7 @@ namespace StructuraSystems::Client {
                    tool == DiagramTypes::ToolActor || tool == DiagramTypes::ToolObjective || tool == DiagramTypes::ToolEvent ||
                    tool == DiagramTypes::ToolVariant || tool == DiagramTypes::ToolSnapshot || tool == DiagramTypes::ToolTimeslice ||
                    tool == DiagramTypes::ToolMetadata || tool == DiagramTypes::ToolExpose || tool == DiagramTypes::ToolRender ||
-                   tool == DiagramTypes::ToolFilter;
+                   tool == DiagramTypes::ToolFilter || tool == DiagramTypes::ToolEnumValue;
         }
 
         /// Keyword shown above the name: «constraint def», «function», «assert constraint», ...
@@ -1532,6 +1686,14 @@ namespace StructuraSystems::Client {
             return Diagram::isUsageKind(kind) && !element.typeName().empty() && !portAnchor(Model, id);
         if (group == QLatin1String("docs"))
             return hasChild([&](ElementId child) { return isDocInCompartment(child); });
+        if (group == QLatin1String("variants"))
+            // only where a variant can be a node of its own; others are text in any case
+            return isVariation(element) && hasChild([&](ElementId child) {
+                       return isVariantElement(Model.element(child)) && isNodeElement(Model, child);
+                   });
+        if (group == QLatin1String("relationships"))
+            return kind != ElementKind::Package && kind != ElementKind::PortUsage && kind != ElementKind::Textual &&
+                   kind != ElementKind::Alias && !portAnchor(Model, id) && !relationshipEntries(id).isEmpty();
         return false;
     }
 
@@ -1546,6 +1708,12 @@ namespace StructuraSystems::Client {
             return QStringLiteral("border");
         if (group == QLatin1String("inherited"))
             return QStringLiteral("compartment");
+        // the variants of a variation in its compartment, as in the tables ("Variants Compartment",
+        // "Variant Parts Compartment"); nodes with the variant membership line on request
+        if (group == QLatin1String("variants"))
+            return QStringLiteral("compartment");
+        if (group == QLatin1String("relationships"))
+            return QStringLiteral("line");
         if (group == QLatin1String("typing"))
             return QStringLiteral("name");
         if (group == QLatin1String("docs"))
@@ -1880,7 +2048,23 @@ namespace StructuraSystems::Client {
     QString DiagramController::addElement(int tool, qreal x, qreal y) {
         AutoLayout = false;
         const QPointF point(x, y);
-        if (isFeatureTool(tool)) {
+        // onto a variation: a part or an item becomes one of its variants; nothing else goes into it (7.6.7)
+        if (const auto target = toId(nodeIdAt(point, std::nullopt, false));
+            target && isVariation(Model.element(*target)) && tool != DiagramTypes::ToolVariant &&
+            tool != DiagramTypes::ToolComment && tool != DiagramTypes::ToolDocumentation &&
+            tool != DiagramTypes::ToolDocumentationInside && tool != DiagramTypes::ToolRepresentation) {
+            const auto kinds = variantKinds(*target);
+            const ElementKind wanted = tool == DiagramTypes::ToolPart ? ElementKind::PartUsage
+                                       : tool == DiagramTypes::ToolItem ? ElementKind::ItemUsage
+                                       : ElementKind::Textual;
+            if (std::find(kinds.begin(), kinds.end(), wanted) != kinds.end())
+                return addVariant(QString::number(*target), QString::fromStdString(Diagram::defaultKeyword(wanted)), QString());
+            emit statusMessage(tr("A variation holds only its variants: drop a part / item or the Variant tool onto it."));
+            return {};
+        }
+        // an item onto the canvas (or into a package): "item item1 : Item1;" on package level, as a part
+        const bool itemOnCanvas = tool == DiagramTypes::ToolItem && !toId(nodeIdAt(point, std::nullopt, false));
+        if (isFeatureTool(tool) && !itemOnCanvas) {
             auto partId = toId(nodeIdAt(point, std::nullopt, false));
             // a filter onto a package frame: "filter @Safety;" in the package
             if (!partId && tool == DiagramTypes::ToolFilter)
@@ -1902,6 +2086,7 @@ namespace StructuraSystems::Client {
                                    : tool == DiagramTypes::ToolExpose ? tr("Drop it onto a view.")
                                    : tool == DiagramTypes::ToolRender ? tr("Drop it onto a view or view definition.")
                                    : tool == DiagramTypes::ToolFilter ? tr("Drop it onto a package or a view.")
+                                   : tool == DiagramTypes::ToolEnumValue ? tr("Drop the value onto an enum def.")
                                    : tr("Drop it onto a part or a definition that can own it."));
                 return {};
             }
@@ -1915,6 +2100,7 @@ namespace StructuraSystems::Client {
             return addAnnotation(tool, point);
         static const std::map<int, ElementKind> NodeTools = {
                 {DiagramTypes::ToolPart, ElementKind::PartUsage},
+                {DiagramTypes::ToolItem, ElementKind::ItemUsage},
                 {DiagramTypes::ToolPartDefinition, ElementKind::PartDefinition},
                 {DiagramTypes::ToolPackage, ElementKind::Package},
                 {DiagramTypes::ToolConstraintDefinition, ElementKind::ConstraintDefinition},
@@ -1979,6 +2165,7 @@ namespace StructuraSystems::Client {
                                  : kind == ElementKind::AnalysisDefinition ? "Analysis"
                                  : kind == ElementKind::AnalysisUsage ? "analysis"
                                  : kind == ElementKind::PartUsage ? "part"
+                                 : kind == ElementKind::ItemUsage ? "item"
                                  : kind == ElementKind::PartDefinition ? "Part"
                                  : kind == ElementKind::ConstraintDefinition ? "Constraint"
                                  : kind == ElementKind::CalcDefinition ? "Calc"
@@ -2191,12 +2378,119 @@ namespace StructuraSystems::Client {
         return addFeature(tool, owner);
     }
 
+    std::vector<ElementKind> DiagramController::variantKinds(ElementId variation) const {
+        // the kinds consistent with the kind of the variation (7.6.7): in an item variation an item or a part
+        if (!Model.contains(variation) || !isVariation(Model.element(variation)))
+            return {};
+        const ElementKind base = featureKind(Model.element(variation).kind(), DiagramTypes::ToolVariant);
+        std::vector<ElementKind> kinds{base};
+        if (base == ElementKind::ItemUsage)
+            kinds.push_back(ElementKind::PartUsage);
+        return kinds;
+    }
+
+    std::optional<QString> DiagramController::refusedByVariation(ElementId id, ElementId newOwner) const {
+        // "if isVariation = true, then all the memberships of the Usage must be VariantMemberships" (8.3.6)
+        if (!Model.contains(newOwner) || !isVariation(Model.element(newOwner)))
+            return std::nullopt;
+        const auto kinds = variantKinds(newOwner);
+        if (std::find(kinds.begin(), kinds.end(), Model.element(id).kind()) != kinds.end())
+            return std::nullopt;
+        return tr("A variation holds only its variants (here: %1).")
+                .arg(QString::fromStdString(Diagram::defaultKeyword(kinds.front())) +
+                     (kinds.size() > 1 ? QStringLiteral(", ") + QString::fromStdString(Diagram::defaultKeyword(kinds.back())) : QString()));
+    }
+
+    void DiagramController::reparentKeepingVariants(ElementId id, ElementId newOwner) {
+        // into a variation: a variant of it ("variant part p;"); out of it: no variant any more
+        Model.reparent(id, newOwner);
+        std::vector<std::string> prefixes = Model.element(id).prefixes();
+        const auto variant = std::find(prefixes.begin(), prefixes.end(), std::string("variant"));
+        const bool into = newOwner != RootId && isVariation(Model.element(newOwner));
+        if (into && variant == prefixes.end()) {
+            prefixes.insert(prefixes.begin(), "variant");
+            Model.setPrefixes(id, prefixes);
+        } else if (!into && variant != prefixes.end()) {
+            prefixes.erase(variant);
+            Model.setPrefixes(id, prefixes);
+        }
+    }
+
+    QVariantList DiagramController::variantChoices(qreal x, qreal y) const {
+        // a variant usage is of a kind consistent with the kind of its variation (7.6.7): in an item variation
+        // an item or a part; or a separately declared usage as variant ("variant part1;")
+        QVariantList choices;
+        const auto variation = toId(nodeIdAt(QPointF(x, y), std::nullopt, false));
+        if (!variation || !acceptsFeature(*variation, DiagramTypes::ToolVariant))
+            return choices;
+        const std::vector<ElementKind> kinds = variantKinds(*variation);
+        for (const ElementKind kind: kinds)
+            choices.append(QVariantMap{{QStringLiteral("text"), tr("New variant %1").arg(QString::fromStdString(Diagram::defaultKeyword(kind)))},
+                                       {QStringLiteral("variation"), QString::number(*variation)},
+                                       {QStringLiteral("kind"), QString::fromStdString(Diagram::defaultKeyword(kind))},
+                                       {QStringLiteral("existing"), QString()}});
+        // usages declared elsewhere, found by their name from the variation ("variant smallEngine;")
+        std::set<std::string> taken;
+        for (const ElementId child: Model.children(*variation))
+            taken.insert(Model.element(child).name());
+        std::function<void(ElementId)> visit = [&](ElementId owner) {
+            for (const ElementId child: Model.children(owner)) {
+                const auto &element = Model.element(child);
+                if (child == *variation || Model.isAncestor(*variation, child))
+                    continue;
+                if (std::find(kinds.begin(), kinds.end(), element.kind()) != kinds.end() && !element.name().empty() &&
+                    taken.count(element.name()) == 0 && resolveReference(Model, *variation, element.name()) == child &&
+                    choices.size() < 24)
+                    choices.append(QVariantMap{{QStringLiteral("text"), tr("Existing: %1").arg(QString::fromStdString(element.name()))},
+                                               {QStringLiteral("variation"), QString::number(*variation)},
+                                               {QStringLiteral("kind"), QString()},
+                                               {QStringLiteral("existing"), QString::fromStdString(element.name())}});
+                visit(child);
+            }
+        };
+        visit(RootId);
+        return choices;
+    }
+
+    QString DiagramController::addVariant(const QString &variationId, const QString &kind, const QString &existing) {
+        const auto variation = toId(variationId);
+        if (!variation || !acceptsFeature(*variation, DiagramTypes::ToolVariant))
+            return {};
+        const std::vector<ElementKind> kinds = variantKinds(*variation);
+        if (kinds.empty())
+            return {};
+        const ElementKind base = kinds.front();
+        ElementKind chosen = base;
+        for (const ElementKind fitting: kinds) {
+            if (kind == QString::fromStdString(Diagram::defaultKeyword(fitting)))
+                chosen = fitting;
+        }
+        std::optional<ElementId> id;
+        if (!runModelChange([&] {
+                if (!existing.isEmpty()) {
+                    // "variant part1;": the usage named so is the variant (written without kind keyword)
+                    id = Model.addElement(base, existing.toStdString(), *variation);
+                    Model.setDeclaredKeyword(*id, std::string());
+                } else {
+                    id = Model.addElement(chosen, uniqueName(chosen == ElementKind::PartUsage ? "part" : Diagram::defaultKeyword(chosen),
+                                                             *variation),
+                                          *variation);
+                }
+                Model.setPrefixes(*id, {"variant"});
+            }))
+            return {};
+        return id ? QString::number(*id) : QString();
+    }
+
     bool DiagramController::acceptsFeature(ElementId owner, int tool) const {
         if (!Model.contains(owner) || !isFeatureTool(tool))
             return false;
         const ElementKind ownerKind = Model.element(owner).kind();
         // the objective belongs to a use case / verification; subject and actors to cases and requirements
         if (tool == DiagramTypes::ToolObjective && !Diagram::isCaseKind(ownerKind))
+            return false;
+        // an enumerated value only in an enum def (it holds nothing else, 7.6.5)
+        if (tool == DiagramTypes::ToolEnumValue && ownerKind != ElementKind::EnumerationDefinition)
             return false;
         if (tool == DiagramTypes::ToolVariant) {
             const auto &prefixes = Model.element(owner).prefixes();
@@ -2525,6 +2819,10 @@ namespace StructuraSystems::Client {
                 notationApplies(owner, QStringLiteral("features")) &&
                 notationOf(owner, QStringLiteral("features")) == QLatin1String("compartment"))
                 return false;
+            // the variants of a variation listed in its compartment 'variants' / 'variant parts'
+            if (owner != RootId && isVariantElement(element) && isVariation(Model.element(owner)) &&
+                notationOf(owner, QStringLiteral("variants")) == QLatin1String("compartment"))
+                return false;
             if (owner != RootId && element.kind() == ElementKind::PortUsage && notationApplies(owner, QStringLiteral("ports")) &&
                 notationOf(owner, QStringLiteral("ports")) == QLatin1String("compartment"))
                 return false;
@@ -2768,8 +3066,8 @@ namespace StructuraSystems::Client {
         // owned by a part on a composition line (tree): it stays there wherever it is placed, unless it is dropped
         // onto another part - then it becomes one of its parts
         const bool ownedInTree = owner != RootId && Model.element(owner).kind() != ElementKind::Package && !ownedByContainer;
-        if (ownedInTree && !composes(Model.element(owner).kind()))
-            return;
+        if (ownedInTree && !composes(Model.element(owner).kind()) && !isVariation(Model.element(owner)))
+            return; // (the variant of a variation can be moved out of it)
 
         // a package drawn beside its package (⊕ line) / an element alone with its qualified name stays in it
         if (detachedFromOwner(id))
@@ -2787,7 +3085,8 @@ namespace StructuraSystems::Client {
         qreal partArea = 0;
         for (const auto &other: Nodes->nodes()) {
             if (other.Id == id || !Model.contains(other.Id) || other.Kind == DiagramTypes::PortNode ||
-                other.Kind == DiagramTypes::PackageNode || !composes(Model.element(other.Id).kind()) ||
+                other.Kind == DiagramTypes::PackageNode ||
+                !(composes(Model.element(other.Id).kind()) || isVariation(Model.element(other.Id))) || // or: a variant of it
                 Model.isAncestor(id, other.Id) || !other.Rect.contains(center))
                 continue;
             if (frame && !Model.isAncestor(*frame, other.Id))
@@ -2798,7 +3097,7 @@ namespace StructuraSystems::Client {
                 partArea = area;
             }
         }
-        if (part && !RelationshipRules::canReparent(Model, id, *part))
+        if (part && !isVariation(Model.element(*part)) && !RelationshipRules::canReparent(Model, id, *part))
             part.reset();
         if (ownedInTree && !part)
             return;
@@ -2809,7 +3108,12 @@ namespace StructuraSystems::Client {
         if (ownedByContainer && part && !nestedFeatures(*part) && Model.element(*part).kind() != ElementKind::Package &&
             Model.isAncestor(owner, *part))
             return;
-        const auto allowed = RelationshipRules::canReparent(Model, id, newOwner);
+        auto allowed = RelationshipRules::canReparent(Model, id, newOwner);
+        if (newOwner != RootId && isVariation(Model.element(newOwner))) {
+            // a variation takes the usages of a fitting kind as its variants, nothing else (7.6.7)
+            const auto refused = refusedByVariation(id, newOwner);
+            allowed = refused ? Diagram::RuleResult{false, refused->toStdString()} : Diagram::RuleResult{};
+        }
         const std::string &name = Model.element(id).name();
         const bool nameTaken = !name.empty() && std::any_of(Model.children(newOwner).begin(), Model.children(newOwner).end(),
                                                             [&](ElementId other) {
@@ -2826,7 +3130,7 @@ namespace StructuraSystems::Client {
                 fitIntoFrame(id, owner);
             return;
         }
-        if (runModelChange([&] { Model.reparent(id, newOwner); })) {
+        if (runModelChange([&] { reparentKeepingVariants(id, newOwner); })) {
             if (part) {
                 syncNow();
                 if (nestedFeatures(*part)) {
@@ -3114,7 +3418,7 @@ namespace StructuraSystems::Client {
                 if (const auto frame = frameAt(node->Rect.center(), child))
                     newOwner = *frame;
             }
-            runModelChange([&] { Model.reparent(child, newOwner); });
+            runModelChange([&] { reparentKeepingVariants(child, newOwner); });
             return;
         }
         bool ok = false;
@@ -3338,7 +3642,9 @@ namespace StructuraSystems::Client {
             return false;
         const bool ok = runModelChange([&] {
             if (kind == DiagramTypes::Composition) {
-                Model.reparent(*targetId, *sourceId);
+                if (const auto refused = refusedByVariation(*targetId, *sourceId))
+                    throw Diagram::ModelError(refused->toStdString());
+                reparentKeepingVariants(*targetId, *sourceId);
             } else if (kind == DiagramTypes::DefinedBy) {
                 Model.setTypeName(*sourceId, referenceTo(Model, Model.element(*sourceId).owner(), *targetId));
             } else if (kind == DiagramTypes::Import) {
@@ -3641,7 +3947,79 @@ namespace StructuraSystems::Client {
                                              {QStringLiteral("typeName"), QString::fromStdString(port.typeName())}});
             }
         }
+        // the prefixes of the standard as switches (8.2.2 RefPrefix / BasicUsagePrefix / DefinitionPrefix /
+        // VariantUsageMember): which apply to this element, which are set; the rest (#metadata, ...) as text
+        const bool definition = Diagram::isDefinitionKind(kind);
+        const bool usageKind = Diagram::isUsageKind(kind) && kind != ElementKind::EnumerationLiteral &&
+                               kind != ElementKind::ControlNode && !element.isElseBranch();
+        const bool occurrenceLike = kind == ElementKind::PartUsage || kind == ElementKind::PartDefinition ||
+                                    kind == ElementKind::ItemUsage || kind == ElementKind::ItemDefinition ||
+                                    kind == ElementKind::OccurrenceUsage || kind == ElementKind::OccurrenceDefinition;
+        QStringList prefixOptions;
+        if (definition)
+            prefixOptions = {QStringLiteral("abstract"), QStringLiteral("variation")};
+        else if (usageKind)
+            prefixOptions = {QStringLiteral("derived"), QStringLiteral("abstract"), QStringLiteral("variation"),
+                             QStringLiteral("constant"), QStringLiteral("ref"), QStringLiteral("end")};
+        if (occurrenceLike)
+            prefixOptions.append(QStringLiteral("individual"));
+        if (usageKind && element.owner() != RootId && isVariation(Model.element(element.owner())))
+            prefixOptions.prepend(QStringLiteral("variant"));
+        QVariantMap prefixFlags;
+        QString direction;
+        QStringList otherPrefixes;
+        for (const auto &prefix: element.prefixes()) {
+            const QString text = QString::fromStdString(prefix);
+            if (prefixOptions.contains(text))
+                prefixFlags[text] = true;
+            else if (usageKind && (text == QLatin1String("in") || text == QLatin1String("out") || text == QLatin1String("inout")))
+                direction = text;
+            else
+                otherPrefixes.append(text);
+        }
+        // "60 [mm]" -> value "60", unit "mm"
+        QString enumValue = QString::fromStdString(element.value());
+        QString enumUnit;
+        if (kind == ElementKind::EnumerationLiteral && enumValue.endsWith(QLatin1Char(']'))) {
+            const auto open = enumValue.lastIndexOf(QLatin1Char('['));
+            if (open > 0) {
+                enumUnit = enumValue.mid(open + 1, enumValue.size() - open - 2).trimmed();
+                enumValue = enumValue.left(open).trimmed();
+            }
+        }
+        // what it specializes / subsets: the elements of the model (lines) and those it does not hold
+        QStringList specializations;
+        for (const auto &relationship: Model.relationships()) {
+            if (relationship.Kind == RelationshipKind::Specialization && relationship.Source == *elementId &&
+                Model.contains(relationship.Target))
+                specializations.append(QString::fromStdString(referenceTo(Model, element.owner(), relationship.Target)));
+        }
+        for (const auto &reference: element.externalSpecializations())
+            specializations.append(QString::fromStdString(reference));
+        const QStringList qualifiers = QString::fromStdString(element.multiplicityQualifiers()).split(QLatin1Char(' '),
+                                                                                                       Qt::SkipEmptyParts);
         return {
+            {QStringLiteral("prefixOptions"), prefixOptions},
+            {QStringLiteral("prefixFlags"), prefixFlags},
+            {QStringLiteral("hasDirection"), usageKind},
+            {QStringLiteral("direction"), direction},
+            {QStringLiteral("otherPrefixes"), otherPrefixes.join(QLatin1Char(' '))},
+            {QStringLiteral("hasSpecializations"), definition || usageKind},
+            {QStringLiteral("specializationWord"), definition ? QStringLiteral("specializes") : QStringLiteral("subsets")},
+            {QStringLiteral("specializations"), specializations.join(QStringLiteral(", "))},
+            {QStringLiteral("specializationKeyword"), element.specializationKeyword().empty()
+                                                      ? QStringLiteral(":>") : QString::fromStdString(element.specializationKeyword())},
+            // an enumerated value (8.2.2.8): "enum red;" / "red;", "enum = 60 [mm];" / "= 60 [mm];"
+            {QStringLiteral("isEnumValue"), kind == ElementKind::EnumerationLiteral},
+            {QStringLiteral("enumKeyword"), element.declaredKeyword() != std::optional<std::string>(std::string())},
+            {QStringLiteral("enumValue"), enumValue},
+            {QStringLiteral("enumUnit"), enumUnit},
+            {QStringLiteral("hasReferences"), usageKind && kind != ElementKind::ActionPerformance},
+            {QStringLiteral("references"), QString::fromStdString(element.referencedFeature())},
+            {QStringLiteral("referencesKeyword"), element.referencesKeyword().empty()
+                                                  ? QStringLiteral("references") : QString::fromStdString(element.referencesKeyword())},
+            {QStringLiteral("ordered"), qualifiers.contains(QStringLiteral("ordered"))},
+            {QStringLiteral("nonunique"), qualifiers.contains(QStringLiteral("nonunique"))},
             {QStringLiteral("hasPorts"), hasPorts},
             {QStringLiteral("ports"), ports},
             {QStringLiteral("stateAction"), stateAction},
@@ -3691,7 +4069,8 @@ namespace StructuraSystems::Client {
                                                constraintRole == QLatin1String("assume constraint") ||
                                                constraintRole == QLatin1String("assert constraint"))) ||
                                              kind == ElementKind::RequirementUsage || kind == ElementKind::ActionUsage ||
-                                             kind == ElementKind::ControlNode || kind == ElementKind::MetadataUsage},
+                                             kind == ElementKind::ControlNode || kind == ElementKind::MetadataUsage ||
+                                             kind == ElementKind::EnumerationLiteral},
             {QStringLiteral("kindLabel"), kindText(element)},
             {QStringLiteral("name"), QString::fromStdString(element.name())},
             {QStringLiteral("typeName"), QString::fromStdString(element.typeName())},
@@ -3769,8 +4148,13 @@ namespace StructuraSystems::Client {
         if (name.empty() && !nameFromRedefinition &&
             !(requirementConstraint || kind == ElementKind::RequirementUsage || kind == ElementKind::ActionUsage ||
               kind == ElementKind::ControlNode || kind == ElementKind::MetadataUsage || Diagram::isAnonymousKind(kind) ||
-              (kind == ElementKind::ConstraintUsage && assertion)))
-            return tr("The name must not be empty.");
+              (kind == ElementKind::ConstraintUsage && assertion) ||
+              (kind == ElementKind::EnumerationLiteral && !values.value(QStringLiteral("enumValue")).toString().trimmed().isEmpty())))
+            return kind == ElementKind::EnumerationLiteral ? tr("An enumerated value needs a name or a value (enum = 60 [mm]).")
+                                                           : tr("The name must not be empty.");
+        if (kind == ElementKind::EnumerationLiteral && values.value(QStringLiteral("enumValue")).toString().trimmed().isEmpty() &&
+            !values.value(QStringLiteral("enumUnit")).toString().trimmed().isEmpty())
+            return tr("A unit belongs to a value: enter the value too (60 with unit mm).");
         if (kind == ElementKind::MetadataUsage && values.value(QStringLiteral("typeName")).toString().trimmed().isEmpty())
             return tr("Metadata needs its definition as type, e.g. Safety.");
         if (kind == ElementKind::Alias && values.contains(QStringLiteral("target"))) {
@@ -3869,6 +4253,25 @@ namespace StructuraSystems::Client {
         }
         if (nameFromRedefinition && redefinitions.empty())
             return tr("Name it after a redefined feature: enter the feature it redefines.");
+        // what it specializes / subsets: "part1", "Vehicle::mass, b"
+        std::vector<std::string> specializations;
+        for (const QString &reference: values.value(QStringLiteral("specializes")).toString().split(QLatin1Char(','),
+                                                                                                     Qt::SkipEmptyParts)) {
+            if (reference.trimmed().isEmpty())
+                continue;
+            if (!isReferenceText(reference.trimmed().toStdString(), false))
+                return tr("'%1' is not a name, e.g. part1 or Vehicle::mass.").arg(reference.trimmed());
+            specializations.push_back(reference.trimmed().toStdString());
+        }
+        if (const QString reference = values.value(QStringLiteral("references")).toString().trimmed();
+            !reference.isEmpty() && !isReferenceText(reference.toStdString(), false))
+            return tr("'%1' is not a feature name, e.g. part1 or vehicle.engine.").arg(reference);
+        // the standard: abstract or variation, not both (RefPrefix)
+        {
+            const QStringList words = values.value(QStringLiteral("prefixes")).toString().split(QLatin1Char(' '), Qt::SkipEmptyParts);
+            if (words.contains(QStringLiteral("abstract")) && words.contains(QStringLiteral("variation")))
+                return tr("abstract and variation exclude each other.");
+        }
         const auto segments = redefinitions.empty() ? std::vector<std::string>()
                                                     : SysMLTextImporter::splitReference(redefinitions.front());
         if (nameFromRedefinition && segments.empty())
@@ -3919,6 +4322,22 @@ namespace StructuraSystems::Client {
             if (values.contains(QStringLiteral("redefines")) && Diagram::isUsageKind(kind) &&
                 kind != ElementKind::EnumerationLiteral && kind != ElementKind::ControlNode)
                 Model.setRedefinitions(*elementId, redefinitionKeyword, redefinitions, false);
+            if (kind == ElementKind::EnumerationLiteral && values.contains(QStringLiteral("enumValue"))) {
+                // the value first: a value without name needs it ("enum = 60 [mm];")
+                const QString number = values.value(QStringLiteral("enumValue")).toString().trimmed();
+                const QString unit = values.value(QStringLiteral("enumUnit")).toString().trimmed();
+                const QString expression = number.isEmpty() ? QString()
+                                           : unit.isEmpty() ? number
+                                                            : number + QStringLiteral(" [") + unit + QLatin1Char(']');
+                if (!expression.isEmpty())
+                    Model.setValue(*elementId, "=", expression.toStdString());
+                if (ownName != Model.element(*elementId).name())
+                    Model.rename(*elementId, ownName);
+                if (expression.isEmpty())
+                    Model.setValue(*elementId, "=", std::string());
+                Model.setDeclaredKeyword(*elementId, values.value(QStringLiteral("enumKeyword"), true).toBool()
+                                                     ? std::nullopt : std::optional<std::string>(std::string()));
+            }
             if (ownName != Model.element(*elementId).name() && !Diagram::isAnonymousKind(kind))
                 Model.rename(*elementId, ownName);
             if (Diagram::isTargetKind(kind) && values.contains(QStringLiteral("target")))
@@ -4021,11 +4440,82 @@ namespace StructuraSystems::Client {
                                                                   : Diagram::PerformStyle::DeclareAction);
             if (values.contains(QStringLiteral("prefixes")))
                 Model.setPrefixes(*elementId, prefixes);
+            // "[1..*] ordered nonunique"
+            if (values.contains(QStringLiteral("ordered")) || values.contains(QStringLiteral("nonunique"))) {
+                QStringList qualifiers;
+                if (values.value(QStringLiteral("ordered")).toBool())
+                    qualifiers.append(QStringLiteral("ordered"));
+                if (values.value(QStringLiteral("nonunique")).toBool())
+                    qualifiers.append(QStringLiteral("nonunique"));
+                // the order as written stays ("nonunique ordered")
+                const QStringList written = QString::fromStdString(Model.element(*elementId).multiplicityQualifiers())
+                                                    .split(QLatin1Char(' '), Qt::SkipEmptyParts);
+                if (written.size() == qualifiers.size() &&
+                    std::all_of(written.begin(), written.end(), [&](const QString &word) { return qualifiers.contains(word); }))
+                    qualifiers = written;
+                if (qualifiers.join(QLatin1Char(' ')).toStdString() != Model.element(*elementId).multiplicityQualifiers())
+                    Model.setMultiplicityQualifiers(*elementId, qualifiers.join(QLatin1Char(' ')).toStdString());
+            }
+            // "part p references q;" / "::> q" (reference subsetting, 7.6.3)
+            if (values.contains(QStringLiteral("references"))) {
+                const std::string feature = values.value(QStringLiteral("references")).toString().trimmed().toStdString();
+                const std::string keyword = values.value(QStringLiteral("referencesKeyword"), QStringLiteral("references"))
+                                                    .toString().toStdString();
+                if (feature != Model.element(*elementId).referencedFeature() ||
+                    (!feature.empty() && keyword != Model.element(*elementId).referencesKeyword()))
+                    Model.setReferencedFeature(*elementId, feature.empty() ? std::string() : keyword, feature);
+            }
+            if (values.contains(QStringLiteral("specializes")))
+                applySpecializations(*elementId, specializations,
+                                     values.value(QStringLiteral("specializationKeyword")).toString().toStdString());
         } catch (const std::exception &exception) {
             error = QString::fromStdString(exception.what());
         }
         syncNow();
         return error;
+    }
+
+    void DiagramController::applySpecializations(ElementId id, const std::vector<std::string> &references,
+                                                 const std::string &keyword) {
+        // elements of the model: Specialization relationships (a line where both are shown); others as written
+        const auto &element = Model.element(id);
+        std::vector<ElementId> wanted;
+        std::vector<std::string> external;
+        for (const auto &reference: references) {
+            const auto target = resolveReference(Model, element.owner(), reference);
+            // a line only where the rules allow one (parts, ports, items, definitions); "attribute a :> b" as written
+            const bool present = target && std::any_of(Model.relationships().begin(), Model.relationships().end(),
+                                                       [&](const Diagram::Relationship &relationship) {
+                                                           return relationship.Kind == RelationshipKind::Specialization &&
+                                                                  relationship.Source == id && relationship.Target == *target;
+                                                       });
+            if (target && *target != id &&
+                (present || RelationshipRules::canRelate(Model, RelationshipKind::Specialization, id, *target)))
+                wanted.push_back(*target);
+            else
+                external.push_back(reference);
+        }
+        std::vector<Diagram::RelationshipId> removed;
+        std::vector<ElementId> present;
+        for (const auto &relationship: Model.relationships()) {
+            if (relationship.Kind != RelationshipKind::Specialization || relationship.Source != id)
+                continue;
+            if (std::find(wanted.begin(), wanted.end(), relationship.Target) == wanted.end())
+                removed.push_back(relationship.Id);
+            else
+                present.push_back(relationship.Target);
+        }
+        for (const Diagram::RelationshipId relationship: removed)
+            Model.removeRelationship(relationship);
+        for (const ElementId target: wanted) {
+            if (std::find(present.begin(), present.end(), target) == present.end())
+                Model.addRelationship(RelationshipKind::Specialization, id, target);
+        }
+        if (external != Model.element(id).externalSpecializations())
+            Model.setExternalSpecializations(id, external);
+        const std::string word = keyword == ":>" ? std::string() : keyword;
+        if (word != Model.element(id).specializationKeyword())
+            Model.setSpecializationKeyword(id, word);
     }
 
     QVariantMap DiagramController::edgeDetails(const QString &key) const {
@@ -4429,6 +4919,8 @@ namespace StructuraSystems::Client {
                 node.Kind != DiagramTypes::PortNode && node.Kind != DiagramTypes::NoteNode &&
                 node.Kind != DiagramTypes::LibraryNode && element.kind() != ElementKind::Textual)
                 node.Compartments += extraCompartments(id);
+            else if (relationshipsAsText(id))
+                addCompartment(node.Compartments, QStringLiteral("relationships"), relationshipEntries(id));
             if (Interconnection && !nodeChildren(id).empty()) {
                 // a part around its parts: keyword and name on top, its parts inside
                 node.Container = true;
@@ -4544,7 +5036,10 @@ namespace StructuraSystems::Client {
                 continue;
             const ElementKind ownerKind = Model.element(owner).kind();
             const ElementKind kind = Model.element(id).kind();
-            const bool composed = (composes(ownerKind) && (kind == ElementKind::PartUsage || kind == ElementKind::OccurrenceUsage)) ||
+            // a variant drawn as node: a line with a circle with a cross at its variation (also in a variation item)
+            const bool variantNode = isVariantElement(Model.element(id)) && isVariation(Model.element(owner));
+            const bool composed = variantNode ||
+                                  (composes(ownerKind) && (kind == ElementKind::PartUsage || kind == ElementKind::OccurrenceUsage)) ||
                                   ((isPartLike(ownerKind) || isRequirementOwner(ownerKind)) && kind == ElementKind::RequirementUsage) ||
                                   isActionTreeNode(Model, id);
             if (!composed || nestedFeatures(owner) || detachedFromOwner(id)) // inside its owner / alone: no line
@@ -4553,7 +5048,7 @@ namespace StructuraSystems::Client {
             // "ref part": a reference, no composition - a plain line
             const auto &prefixes = Model.element(id).prefixes();
             const bool reference = std::find(prefixes.begin(), prefixes.end(), "ref") != prefixes.end();
-            const bool variant = std::find(prefixes.begin(), prefixes.end(), "variant") != prefixes.end();
+            const bool variant = variantNode || std::find(prefixes.begin(), prefixes.end(), "variant") != prefixes.end();
             edge.Kind = Diagram::isTemporalKeyword(Model.element(id).declaredKeyword()) ? DiagramTypes::Temporal
                         : variant ? DiagramTypes::VariantMembership // a circle with a cross at the variation
                         : reference ? DiagramTypes::Aggregation : DiagramTypes::Composition;
@@ -4651,6 +5146,12 @@ namespace StructuraSystems::Client {
             // ":> PartDef0" written in the name of the specializing element: no line (table 4)
             if (relationship.Kind == RelationshipKind::Specialization &&
                 notationOf(relationship.Source, QStringLiteral("specialization")) == QLatin1String("name"))
+                continue;
+            // listed in the compartment 'relationships' of its source ("specializes PartDef1"), of either end of a
+            // connection ("connect to part3"): no line
+            if (relationshipsAsText(relationship.Source) ||
+                ((relationship.Kind == RelationshipKind::Connection || relationship.Kind == RelationshipKind::Interface) &&
+                 relationshipsAsText(relationship.Target)))
                 continue;
             DiagramEdge edge;
             edge.Kind = toEdgeKind(relationship.Kind);
@@ -4879,7 +5380,8 @@ namespace StructuraSystems::Client {
             if (notationOf(id, QStringLiteral("typing")) == QLatin1String("line") && Diagram::isUsageKind(element.kind()) &&
                 !portAnchor(Model, id) && !element.typeName().empty()) {
                 const auto type = resolveReference(Model, element.owner(), element.typeName());
-                if (type && wanted.count(*type) && typesUsage(Model.element(*type).kind(), element.kind())) {
+                if (type && wanted.count(*type) && typesUsage(Model.element(*type).kind(), element.kind()) &&
+                    !relationshipsAsText(id) && !relationshipsAsText(*type)) { // "defined by" / "defines" as text
                     DiagramEdge edge;
                     edge.Kind = DiagramTypes::DefinedBy;
                     edge.Source = id;
@@ -4890,7 +5392,7 @@ namespace StructuraSystems::Client {
                 }
             }
             // "references action3" / "::> part1": reference subsetting, if shown (hollow triangle with four dots)
-            if (!element.referencedFeature().empty()) {
+            if (!element.referencedFeature().empty() && !relationshipsAsText(id)) {
                 const auto referenced = resolveReference(Model, element.owner(), element.referencedFeature());
                 if (referenced && wanted.count(*referenced) && *referenced != id) {
                     DiagramEdge edge;
@@ -4904,7 +5406,8 @@ namespace StructuraSystems::Client {
             }
             // ":>> eng": the inherited feature it redefines, if shown (not when written in its name, table 4)
             for (std::size_t index = 0;
-                 notationOf(id, QStringLiteral("specialization")) != QLatin1String("name") && index < element.redefinitions().size();
+                 notationOf(id, QStringLiteral("specialization")) != QLatin1String("name") && !relationshipsAsText(id) &&
+                 index < element.redefinitions().size();
                  ++index) {
                 const auto redefined = redefinedFeature(Model, id, element.redefinitions()[index]);
                 if (!redefined || !wanted.count(*redefined) || *redefined == id)
@@ -5479,11 +5982,26 @@ namespace StructuraSystems::Client {
         return compartments;
     }
 
-    QVariantList DiagramController::extraCompartments(ElementId id) const {
-        // graphical BNF 8.2.3: relationships-compartment (defines, specializes, connect to, performs, satisfies, ...),
-        // connections / interfaces / flows / allocations / messages compartments of the element they are written in,
-        // occurrences / individuals / timeslices / snapshots, variants
-        QVariantList compartments;
+    bool DiagramController::relationshipsAsText(ElementId id) const {
+        if (Interconnection || !Model.contains(id))
+            return false;
+        // quick answer without collecting the entries: nothing chosen as text
+        const auto mode = NotationModes.find(QStringLiteral("relationships"));
+        const bool individual = mode == NotationModes.end() || mode->second == QLatin1String("individual");
+        if (!individual && mode->second != QLatin1String("compartment"))
+            return false;
+        if (individual) {
+            const auto chosen = Notations.find(id);
+            if (chosen == Notations.end() || chosen->second.count(QStringLiteral("relationships")) == 0 ||
+                chosen->second.at(QStringLiteral("relationships")) != QLatin1String("compartment"))
+                return false;
+        }
+        return
+               notationOf(id, QStringLiteral("relationships")) == QLatin1String("compartment") &&
+               notationApplies(id, QStringLiteral("relationships"));
+    }
+
+    QVariantList DiagramController::relationshipEntries(ElementId id) const {
         const auto &element = Model.element(id);
         const auto nameOf = [&](ElementId other, const std::string &feature = {}) {
             QString text = QString::fromStdString(Model.element(other).name());
@@ -5495,11 +6013,47 @@ namespace StructuraSystems::Client {
         };
         // relationships of the element itself
         QVariantList relationships;
-        const auto add = [&](const QString &text) { relationships.append(entry(id, text)); };
-        if (Diagram::isUsageKind(element.kind()) && !element.typeName().empty())
+        // the keyword in bold ("defines part2", "subsets part1", "connect to part3")
+        const auto add = [&](const QString &text) {
+            QVariantMap value = entry(id, text);
+            static const QStringList keywords = {QStringLiteral("connect to"), QStringLiteral("defined by")};
+            QString keyword = text.section(QLatin1Char(' '), 0, 0);
+            for (const QString &two: keywords) {
+                if (text.startsWith(two + QLatin1Char(' ')))
+                    keyword = two;
+            }
+            value[QStringLiteral("keyword")] = keyword;
+            relationships.append(value);
+        };
+        const bool usage = Diagram::isUsageKind(element.kind());
+        // a usage specializes a usage by subsetting (":>" = "subsets"), a definition a definition
+        const QString specializes = usage ? QStringLiteral("subsets ") : QStringLiteral("specializes ");
+        // a definition: the usages it defines ("defines part2")
+        if (Diagram::isDefinitionKind(element.kind())) {
+            std::vector<ElementId> defined;
+            std::function<void(ElementId)> visit = [&](ElementId owner) {
+                for (const ElementId child: Model.children(owner)) {
+                    const auto &other = Model.element(child);
+                    if (Diagram::isUsageKind(other.kind()) && !other.typeName().empty() &&
+                        resolveReference(Model, other.owner(), other.typeName()) == id)
+                        defined.push_back(child);
+                    visit(child);
+                }
+            };
+            visit(RootId);
+            // the same name twice (part1 and partChoice::part1): qualified
+            for (const ElementId child: defined) {
+                const bool twice = std::count_if(defined.begin(), defined.end(), [&](ElementId other) {
+                                       return Model.element(other).name() == Model.element(child).name();
+                                   }) > 1;
+                add(QStringLiteral("defines ") +
+                    (twice ? QString::fromStdString(Model.qualifiedName(child)) : nameOf(child)));
+            }
+        }
+        if (usage && !element.typeName().empty())
             add(QStringLiteral("defined by ") + QString::fromStdString(element.typeName()));
         for (const auto &reference: element.externalSpecializations())
-            add(QStringLiteral("specializes ") + QString::fromStdString(reference));
+            add(specializes + QString::fromStdString(reference));
         for (const auto &reference: element.redefinitions())
             add(QStringLiteral("redefines ") + QString::fromStdString(reference));
         if (!element.referencedFeature().empty())
@@ -5517,7 +6071,8 @@ namespace StructuraSystems::Client {
                                          : nameOf(relationship.Source, relationship.SourceFeature);
             switch (relationship.Kind) {
                 case RelationshipKind::Specialization:
-                    add((source ? QStringLiteral("specializes ") : QStringLiteral("specialized by ")) + other);
+                    if (source) // only the specializing side (as in the text: no "specialized by")
+                        add(specializes + other);
                     break;
                 case RelationshipKind::Connection:
                 case RelationshipKind::Interface:
@@ -5585,7 +6140,16 @@ namespace StructuraSystems::Client {
             };
             visit(RootId);
         }
-        addCompartment(compartments, QStringLiteral("relationships"), relationships);
+        return relationships;
+    }
+
+    QVariantList DiagramController::extraCompartments(ElementId id) const {
+        // graphical BNF 8.2.3: relationships-compartment (defines, specializes, connect to, performs, satisfies, ...),
+        // connections / interfaces / flows / allocations / messages compartments of the element they are written in,
+        // occurrences / individuals / timeslices / snapshots, variants
+        QVariantList compartments;
+        const auto &element = Model.element(id);
+        addCompartment(compartments, QStringLiteral("relationships"), relationshipEntries(id));
 
         // the relationships written in its body: connections, interfaces, flows, allocations, messages
         QVariantList connections;
@@ -5654,15 +6218,14 @@ namespace StructuraSystems::Client {
         QVariantList individuals;
         QVariantList timeslices;
         QVariantList snapshots;
-        QVariantList variants;
         for (const ElementId child: Model.children(id)) {
             const auto &owned = Model.element(child);
             const auto &prefixes = owned.prefixes();
             const QString text = usageText(Model, child);
             const auto keyword = owned.declaredKeyword().value_or("");
-            if (std::find(prefixes.begin(), prefixes.end(), "variant") != prefixes.end())
-                variants.append(entry(child, text));
-            else if (keyword.find("timeslice") != std::string::npos)
+            if (isVariantElement(owned) && isVariation(element))
+                continue; // in its compartment 'variants' already
+            if (keyword.find("timeslice") != std::string::npos)
                 timeslices.append(entry(child, text));
             else if (keyword.find("snapshot") != std::string::npos)
                 snapshots.append(entry(child, text));
@@ -5671,7 +6234,6 @@ namespace StructuraSystems::Client {
             else if (owned.kind() == ElementKind::OccurrenceUsage)
                 occurrences.append(entry(child, text));
         }
-        addCompartment(compartments, QStringLiteral("variants"), variants);
         addCompartment(compartments, QStringLiteral("occurrences"), occurrences);
         addCompartment(compartments, QStringLiteral("individuals"), individuals);
         addCompartment(compartments, QStringLiteral("timeslices"), timeslices);
@@ -5728,7 +6290,7 @@ namespace StructuraSystems::Client {
             const QString mark = inherited ? QStringLiteral("^") : QString();
             switch (childElement.kind()) {
                 case ElementKind::ItemUsage: {
-                    QString text = mark + decorate(childElement, usageText(Model, child)) + specializationText(childElement);
+                    QString text = mark + decorate(childElement, usageText(Model, child)) + specializationText(Model, child);
                     const std::string direction = directionOf(childElement);
                     if (portLike && !direction.empty()) {
                         // a port: "in item pwrCmd : PwrCmd" among the directed features
@@ -5744,14 +6306,14 @@ namespace StructuraSystems::Client {
                 }
                 case ElementKind::PortUsage:
                     if (!partLike || inherited || portsAsText) // on a part its own ports are drawn on its border
-                        ports.append(entry(child, mark + decorate(childElement, usageText(Model, child)) + specializationText(childElement)));
+                        ports.append(entry(child, mark + decorate(childElement, usageText(Model, child)) + specializationText(Model, child)));
                     break;
                 case ElementKind::PartUsage:
                     if (inherited && inheritedAsNodes)
                         break; // drawn as node of its own (^part1)
                     if (!partLike || inherited || partsAsText) // in an item: a list; in a part: its own parts are nodes with composition
                         parts.append(entry(child, mark + decorate(childElement, usageText(Model, child)) +
-                                                  specializationText(childElement)));
+                                                  specializationText(Model, child)));
                     break;
                 case ElementKind::EventOccurrence: {
                     // "then" when a succession from the event before leads to it
@@ -5806,7 +6368,7 @@ namespace StructuraSystems::Client {
                     const std::string direction = directionOf(childElement);
                     if (direction == "return") {
                         // "return" is the compartment, not a word of the entry
-                        QString text = mark + usageText(Model, child) + specializationText(childElement) + valueText(childElement);
+                        QString text = mark + usageText(Model, child) + specializationText(Model, child) + valueText(childElement);
                         QString metadata;
                         for (const auto &prefix: childElement.prefixes()) {
                             if (prefix != "return")
@@ -5815,10 +6377,10 @@ namespace StructuraSystems::Client {
                         result.append(entry(child, metadata + text));
                     } else if (!direction.empty()) {
                         parameters.append(entry(child, mark + decorate(childElement, usageText(Model, child)) +
-                                                       specializationText(childElement) + valueText(childElement)));
+                                                       specializationText(Model, child) + valueText(childElement)));
                     } else {
                         attributes.append(entry(child, mark + decorate(childElement, usageText(Model, child)) +
-                                                       specializationText(childElement) + valueText(childElement)));
+                                                       specializationText(Model, child) + valueText(childElement)));
                     }
                     break;
                 }
@@ -5866,10 +6428,10 @@ namespace StructuraSystems::Client {
                     break;
                 }
                 case ElementKind::Subject:
-                    subject.append(entry(child, mark + decorate(childElement, usageText(Model, child)) + specializationText(childElement)));
+                    subject.append(entry(child, mark + decorate(childElement, usageText(Model, child)) + specializationText(Model, child)));
                     break;
                 case ElementKind::Actor:
-                    actors.append(entry(child, mark + decorate(childElement, usageText(Model, child)) + specializationText(childElement)));
+                    actors.append(entry(child, mark + decorate(childElement, usageText(Model, child)) + specializationText(Model, child)));
                     break;
                 case ElementKind::RequirementUsage:
                     if (isObjective(childElement)) {
@@ -5922,7 +6484,7 @@ namespace StructuraSystems::Client {
                             continue;
                         arguments.append(QString::fromStdString(value.name()) + valueText(value));
                     }
-                    QString text = mark + decorate(childElement, usageText(Model, child)) + specializationText(childElement);
+                    QString text = mark + decorate(childElement, usageText(Model, child)) + specializationText(Model, child);
                     if (!arguments.isEmpty())
                         text += QLatin1Char('(') + arguments.join(QStringLiteral(", ")) + QLatin1Char(')');
                     if (!childElement.expression().empty())
@@ -5969,10 +6531,56 @@ namespace StructuraSystems::Client {
                     break;
             }
         };
-        for (const ElementId child: element.ownedElements())
-            addFeature(child, false);
+        // the variants of a variation (graphical BNF 8.2.3 "Variants Compartment" / "Variant Parts Compartment"):
+        // "part1" (variant part1;), "part references part1", "part part1 : Part1"; of a variation part with
+        // only variant parts: 'variant parts' with "part1 : PartDef1"
+        // the inherited features first ("^attribute1", tables 4, 5, 7), then its own
         for (const ElementId child: inheritedFeatures(Model, element.id()))
             addFeature(child, true);
+        QVariantList variants;
+        const bool variation = isVariation(element);
+        bool onlyParts = composes(element.kind());
+        for (const ElementId child: element.ownedElements()) {
+            if (variation && isVariantElement(Model.element(child)))
+                onlyParts = onlyParts && Model.element(child).kind() == ElementKind::PartUsage;
+        }
+        for (const ElementId child: element.ownedElements()) {
+            const auto &childElement = Model.element(child);
+            if (!variation || !isVariantElement(childElement)) {
+                addFeature(child, false);
+                continue;
+            }
+            if (shownAsNode(child))
+                continue; // a node with a line to the variation
+            QString text;
+            QString keyword;
+            if (childElement.kind() == ElementKind::Textual) {
+                // "variant part references part1;" -> "part references part1", the keywords in bold
+                text = QString::fromStdString(childElement.text()).simplified().mid(8);
+                if (text.endsWith(QLatin1Char(';')))
+                    text.chop(1);
+                const auto words = text.split(QLatin1Char(' '));
+                if (words.size() > 1)
+                    keyword = words.mid(0, words.size() - 1).join(QLatin1Char(' '));
+            } else {
+                // the compartment says 'variants': without the word "variant"
+                QString declared = decorate(childElement, usageText(Model, child)) + specializationText(Model, child);
+                declared.replace(QRegularExpression(QStringLiteral("(^|\\s)variant\\s")), QStringLiteral("\\1"));
+                if (onlyParts || (childElement.typeName().empty() && !childElement.multiplicity())) {
+                    text = declared; // "part1", "part1 : PartDef1"
+                } else {
+                    keyword = QString::fromStdString(
+                            childElement.declaredKeyword().value_or(Diagram::defaultKeyword(childElement.kind())));
+                    text = keyword + QLatin1Char(' ') + declared; // "part part1 : Part1"
+                }
+            }
+            QVariantMap value = entry(child, text.trimmed());
+            if (!keyword.isEmpty())
+                value[QStringLiteral("keyword")] = keyword;
+            variants.append(value);
+        }
+        addCompartment(compartments, onlyParts ? QStringLiteral("variant parts") : QStringLiteral("variants"), variants);
+
         if (Diagram::isOccurrenceKind(element.kind())) {
             // the messages of an interaction: "setSpeedMessage of SetSpeed: driver.sent \u2192 vehicle.received"
             for (const auto &relationship: Model.relationships()) {
@@ -6021,6 +6629,14 @@ namespace StructuraSystems::Client {
         if (withActions || behavior)
             addCompartment(compartments, QStringLiteral("actions"), actions);
         addCompartment(compartments, QStringLiteral("perform actions"), performs);
+        // entry, do, exit (own and inherited ones)
+        std::stable_sort(stateActions.begin(), stateActions.end(), [](const QVariant &a, const QVariant &b) {
+            const auto rank = [](const QVariant &value) {
+                const QString text = value.toMap().value(QStringLiteral("text")).toString();
+                return text.startsWith(QLatin1String("entry")) ? 0 : text.startsWith(QLatin1String("do")) ? 1 : 2;
+            };
+            return rank(a) < rank(b);
+        });
         addCompartment(compartments, QStringLiteral("state actions"), stateActions);
         addCompartment(compartments, QStringLiteral("states"), states);
         addCompartment(compartments, QStringLiteral("exhibit states"), exhibits);

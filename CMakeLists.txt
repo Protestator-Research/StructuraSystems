@@ -111,5 +111,3 @@ if(RUN_TESTS)
     enable_testing()
     add_subdirectory(./stucturasystems/tests)
 endif()
-
-add_subdirectory(./stucturasystems/)

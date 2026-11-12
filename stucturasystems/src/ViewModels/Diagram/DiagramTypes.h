@@ -96,7 +96,8 @@ namespace StructuraSystems::Client::DiagramTypes {
         ToolComment,               ///< "comment comment1 /* ... */" onto the canvas, a frame or an element (about it)
         ToolDocumentation,         ///< "doc /* ... */" of the element it is dropped onto
         ToolRepresentation,        ///< "rep rep1 language "text" /* ... */" of the element it is dropped onto
-        ToolDocumentationInside    ///< "doc /* ... */" of the part / definition it is dropped onto, shown in its box
+        ToolDocumentationInside,   ///< "doc /* ... */" of the part / definition it is dropped onto, shown in its box
+        ToolEnumValue              ///< "enum red;", "enum = 60 [mm];" in the enum def it is dropped onto (8.2.2.8)
     };
     Q_ENUM_NS(Tool)
 

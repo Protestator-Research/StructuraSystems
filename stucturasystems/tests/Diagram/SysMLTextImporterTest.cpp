@@ -2188,3 +2188,21 @@ TEST_CASE("Importer: multiplicities with expressions as bounds ([m], [1..n]) are
         CHECK_EQ(subsetted.multiplicity()->toString(), std::string("[m]"));
     CHECK(model.element(model.children(base).at(3)).kind() == ElementKind::PartUsage);
 }
+
+TEST_CASE("Import: enumerated values without the keyword enum, with and without name (8.2.2.8)") {
+    const std::string text = "enum def EnumerationDef6 {\n"
+                             "    light = 1200 [kg];\n"
+                             "    = 1500 [kg];\n"
+                             "    enum = 1800 [kg];\n"
+                             "    enum heavy = 2000 [kg];\n"
+                             "    other;\n"
+                             "}\n";
+    SemanticModel model;
+    CHECK(SysMLTextImporter::importText(text, model).lossless());
+    const ElementId definition = model.children(RootId).at(0);
+    CHECK_EQ(model.children(definition).size(), std::size_t(5));
+    for (const ElementId value: model.children(definition))
+        CHECK(model.element(value).kind() == ElementKind::EnumerationLiteral);
+    CHECK_EQ(model.element(model.children(definition).at(1)).value(), std::string("1500 [kg]"));
+    CHECK_EQ(SysMLCodeGenerator().generate(model), text);
+}

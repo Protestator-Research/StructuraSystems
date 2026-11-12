@@ -130,6 +130,17 @@ namespace StructuraSystems::Client {
         Q_INVOKABLE QString addElement(int tool, qreal x, qreal y);
         /// Like addElement, but attributes/actions go to the single selected part (palette click).
         Q_INVOKABLE QString addElementAtSelection(int tool, qreal x, qreal y);
+        /// What the variant tool dropped at (x, y) can add: a new variant of each fitting kind, a usage declared
+        /// elsewhere ("variant part1;"). Each {text, variation, kind, existing}; empty: no variation there.
+        Q_INVOKABLE QVariantList variantChoices(qreal x, qreal y) const;
+        /// Adds a variant to the variation: a new one of the kind ("item", "part") or the named existing usage.
+        Q_INVOKABLE QString addVariant(const QString &variationId, const QString &kind, const QString &existing);
+        /// The kinds a variant of the variation may have (7.6.7); empty: no variation.
+        [[nodiscard]] std::vector<Diagram::ElementKind> variantKinds(Diagram::ElementId variation) const;
+        /// Why the element cannot go into the new owner as variant of it (a variation holds only variants).
+        [[nodiscard]] std::optional<QString> refusedByVariation(Diagram::ElementId id, Diagram::ElementId newOwner) const;
+        /// Moves the element; into a variation it becomes a variant, out of it no variant any more.
+        void reparentKeepingVariants(Diagram::ElementId id, Diagram::ElementId newOwner);
 
         // ---- lookup --------------------------------------------------------------------------------
         /// Topmost node at a canvas position. Frames are hit only at their border and title band,
@@ -362,6 +373,12 @@ namespace StructuraSystems::Client {
         void computePortLabels() const;
         /// The further compartments shown with allCompartments (relationships, connections, ...).
         [[nodiscard]] QVariantList extraCompartments(Diagram::ElementId id) const;
+        /// The entries of the compartment 'relationships' (defines, specializes, subsets, defined by, connect to, ...).
+        [[nodiscard]] QVariantList relationshipEntries(Diagram::ElementId id) const;
+        /// Sets what an element specializes / subsets: lines to elements of the model, the others as written.
+        void applySpecializations(Diagram::ElementId id, const std::vector<std::string> &references, const std::string &keyword);
+        /// Whether the relationships of the element are listed in its compartment instead of drawn as lines.
+        [[nodiscard]] bool relationshipsAsText(Diagram::ElementId id) const;
         /// "All compartments": a doc directly in an element (not in a package) is shown in its compartment 'doc'.
         [[nodiscard]] bool isDocInCompartment(Diagram::ElementId id) const;
         [[nodiscard]] QVariantList docCompartment(Diagram::ElementId id) const;

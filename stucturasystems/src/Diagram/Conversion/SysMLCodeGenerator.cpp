@@ -695,6 +695,9 @@ namespace StructuraSystems::Diagram {
         word(keyword);
         nameAndShortName();
         rest();
+        // "= 70 [mm];": an enumerated value without keyword and name (8.2.2.8)
+        while (!text.empty() && text.front() == ' ')
+            text.erase(text.begin());
         return text;
     }
 

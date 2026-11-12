@@ -57,10 +57,27 @@ FocusScope {
         if (local.x < 0 || local.y < 0 || local.x > flick.width || local.y > flick.height)
             return
         const point = world.mapFromItem(null, sceneX, sceneY)
+        if (tool === DiagramTypes.ToolVariant) {
+            // a new variant of a fitting kind, or a usage declared elsewhere ("variant part1;", 7.6.7)
+            const choices = controller.variantChoices(point.x, point.y)
+            if (choices.length > 1) {
+                variantMenu.choices = choices
+                const at = canvas.mapFromItem(world, point.x, point.y)
+                variantMenu.popup(canvas, at.x, at.y)
+                return
+            }
+            if (choices.length === 1) {
+                const added = controller.addVariant(choices[0].variation, choices[0].kind, choices[0].existing)
+                canvas.forceActiveFocus()
+                if (added.length > 0)
+                    editDialog.openFor(added)
+                return
+            }
+        }
         const id = controller.addElement(tool, point.x, point.y)
         canvas.forceActiveFocus()
-        if (tool === DiagramTypes.ToolStatement && id.length > 0)
-            editDialog.openFor(id) // the text is what this element is about
+        if ((tool === DiagramTypes.ToolStatement || tool === DiagramTypes.ToolEnumValue) && id.length > 0)
+            editDialog.openFor(id) // the text is what this element is about; name / value / unit of an enum value
         else if (id.length > 0)
             askNotation(id, point)
     }
@@ -394,6 +411,27 @@ FocusScope {
     }
 
     // ---------------------------------------------------------------- menus and dialogs
+    // the variant tool on a variation: which variant
+    Menu {
+        id: variantMenu
+        objectName: "variantMenu"
+        property var choices: []
+
+        Repeater {
+            model: variantMenu.choices
+            MenuItem {
+                required property var modelData
+                text: modelData.text
+                onTriggered: {
+                    const added = canvas.controller.addVariant(modelData.variation, modelData.kind, modelData.existing)
+                    canvas.forceActiveFocus()
+                    if (added.length > 0 && modelData.existing.length === 0)
+                        editDialog.openFor(added) // name and type of the new one
+                }
+            }
+        }
+    }
+
     Menu {
         id: nodeMenu
 
