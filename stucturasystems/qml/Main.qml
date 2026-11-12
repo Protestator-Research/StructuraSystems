@@ -294,9 +294,43 @@ ApplicationWindow {
     }
 
     function _restoreState() {
-        width = Math.max(minimumWidth, windowState.width)
-        height = Math.max(minimumHeight, windowState.height)
-        if (windowState.hasPosition && _onScreen(windowState.x + 48, windowState.y + 48)) {
+        // Limit the saved size to a single screen. A saved size that nearly fills the
+        // screen is a maximized geometry that leaked into the normal geometry.
+        let screenW = Screen.width
+        let screenH = Screen.height
+        if (windowState.hasPosition) {
+            const screens = Qt.application.screens
+            for (let i = 0; i < screens.length; ++i) {
+                const s = screens[i]
+                const px = windowState.x + 48
+                const py = windowState.y + 48
+                if (px >= s.virtualX && px < s.virtualX + s.width
+                        && py >= s.virtualY && py < s.virtualY + s.height) {
+                    screenW = s.width
+                    screenH = s.height
+                    break
+                }
+            }
+        }
+        let w = windowState.width
+        let h = windowState.height
+        let fillsScreen = false
+        if (screenW > 0 && screenH > 0 && w >= 0.95 * screenW && h >= 0.9 * screenH) {
+            fillsScreen = true
+            w = defaultWidth
+            h = defaultHeight
+            windowState.width = defaultWidth
+            windowState.height = defaultHeight
+            windowState.hasPosition = false
+            windowState.maximized = true
+        }
+        if (screenW > 0)
+            w = Math.min(w, screenW)
+        if (screenH > 0)
+            h = Math.min(h, screenH)
+        width = Math.max(minimumWidth, w)
+        height = Math.max(minimumHeight, h)
+        if (!fillsScreen && windowState.hasPosition && _onScreen(windowState.x + 48, windowState.y + 48)) {
             x = windowState.x
             y = windowState.y
         }
@@ -306,13 +340,19 @@ ApplicationWindow {
         panelOpen = windowState.panelOpen && !compact
         historyOpen = windowState.historyOpen
         panelWidth = clampPanelWidth(windowState.panelWidth)
-        if (windowState.maximized)
+        if (windowState.maximized || fillsScreen)
             visibility = Window.Maximized
         _restored = true
     }
 
     // Only the geometry of the normal (not maximized) window is remembered.
+    // Storing is deferred: on maximize the size changes before the visibility does.
     function _storeGeometry() {
+        if (_restored)
+            storeTimer.restart()
+    }
+
+    function _commitGeometry() {
         if (!_restored || visibility !== Window.Windowed)
             return
         windowState.x = x
@@ -322,11 +362,20 @@ ApplicationWindow {
         windowState.hasPosition = true
     }
 
+    Timer {
+        id: storeTimer
+
+        interval: 250
+        onTriggered: root._commitGeometry()
+    }
+
     onXChanged: _storeGeometry()
     onYChanged: _storeGeometry()
     onWidthChanged: _storeGeometry()
     onHeightChanged: _storeGeometry()
     onVisibilityChanged: visibility => {
+        if (visibility === Window.Maximized || visibility === Window.FullScreen)
+            storeTimer.stop()
         if (_restored && (visibility === Window.Windowed || visibility === Window.Maximized))
             windowState.maximized = visibility === Window.Maximized
     }
@@ -346,13 +395,22 @@ ApplicationWindow {
             quitDialog.openDialog()
         } else {
             root.closeDiagramWindows()
+            return
+        }
+        // Flush a pending geometry store while the window is still visible.
+        if (storeTimer.running) {
+            _commitGeometry()
+            storeTimer.stop()
         }
     }
 
     Component.onCompleted: _restoreState()
 
-    width: 1280
-    height: 800
+    readonly property int defaultWidth: 1280
+    readonly property int defaultHeight: 800
+
+    width: defaultWidth
+    height: defaultHeight
     minimumWidth: 960
     minimumHeight: 600
     visible: true
