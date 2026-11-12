@@ -48,6 +48,38 @@ ApplicationWindow {
     property DocumentModel rightDoc: null
     property bool forceClose: false
 
+    /** Open diagram editor windows (one per document). */
+    property var _diagramWindows: []
+
+    /**
+     * Opens the graphical editor of the current document in its own window (or raises it).
+     * @param elementId block to show and edit; empty or undefined = the document's generated block
+     */
+    function openDiagramEditor(elementId) {
+        if (doc === null)
+            return
+        const blockId = elementId === undefined ? "" : elementId
+        for (const window of _diagramWindows) {
+            if (window.document === doc && window.blockElementId === blockId) {
+                window.raise()
+                window.requestActivate()
+                return
+            }
+        }
+        const window = diagramWindowComponent.createObject(null, { document: doc, blockElementId: blockId })
+        _diagramWindows = _diagramWindows.concat([window])
+        window.finished.connect(() => {
+            _diagramWindows = _diagramWindows.filter(other => other !== window)
+            Qt.callLater(() => window.destroy())
+        })
+        window.show()
+    }
+
+    function closeDiagramWindows() {
+        for (const window of _diagramWindows.slice())
+            window.close()
+    }
+
     function clampPanelWidth(w) {
         return Math.max(panelMinWidth, Math.min(panelMaxWidth, w))
     }
@@ -361,6 +393,8 @@ ApplicationWindow {
         if (!forceClose && AppController.hasUnsavedChanges()) {
             close.accepted = false
             quitDialog.openDialog()
+        } else {
+            root.closeDiagramWindows()
             return
         }
         // Flush a pending geometry store while the window is still visible.
@@ -426,6 +460,7 @@ ApplicationWindow {
     Shortcut { sequences: ["Ctrl+N"]; onActivated: root.newProject(false) }
     Shortcut { sequences: ["Ctrl+S"]; onActivated: root.saveCurrent() }
     Shortcut { sequences: ["F5"]; onActivated: root.parseCurrent() }
+    Shortcut { sequences: ["Ctrl+Shift+D"]; onActivated: root.openDiagramEditor() }
     Shortcut {
         sequences: ["Ctrl+W"]
         enabled: root.doc !== null
@@ -755,6 +790,12 @@ ApplicationWindow {
                         onClicked: root.parseCurrent()
                     }
                     IconToolButton {
+                        iconSource: Theme.iconDiagram
+                        tip: qsTr("Diagram editor (Ctrl+Shift+D)")
+                        enabled: root.doc !== null
+                        onClicked: root.openDiagramEditor()
+                    }
+                    IconToolButton {
                         iconSource: Theme.iconCommit
                         tip: root.doc !== null && root.doc.detached ? qsTr("Return to the branch head to commit")
                                                                      : qsTr("Commit to server")
@@ -827,6 +868,7 @@ ApplicationWindow {
                                 split: root.splitOpen
                                 onActivationRequested: root.activatePane(0)
                                 onReturnRequested: AppController.returnToBranchHead()
+                                onDiagramEditorRequested: elementId => root.openDiagramEditor(elementId)
                                 onNewBranchRequested: newBranchDialog.openFor(document ? document.commitId : "")
                             }
 
@@ -841,6 +883,7 @@ ApplicationWindow {
                                 split: root.splitOpen
                                 onActivationRequested: root.activatePane(1)
                                 onReturnRequested: AppController.returnToBranchHead()
+                                onDiagramEditorRequested: elementId => root.openDiagramEditor(elementId)
                                 onNewBranchRequested: newBranchDialog.openFor(document ? document.commitId : "")
                             }
                         }
@@ -1081,6 +1124,11 @@ ApplicationWindow {
             root.forceClose = true
             root.close()
         }
+    }
+
+    Component {
+        id: diagramWindowComponent
+        DiagramWindow {}
     }
     AboutDialog { id: aboutDialog }
     DetailsDialog { id: detailsDialog }
