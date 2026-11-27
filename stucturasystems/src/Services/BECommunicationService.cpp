@@ -37,6 +37,7 @@
 #include <memory>
 #include <optional>
 #include <stdexcept>
+#include "DocumentStructure.h"
 
 //---------------------------------------------------------
 // Internal Classes
@@ -44,7 +45,7 @@
 #include "BECommunicationService.h"
 #include "CommitDelta.h"
 
-
+#include <iostream>
 
 namespace {
     /**
@@ -167,10 +168,30 @@ namespace StructuraSystems::Client {
         return elementsOfCommit(projectId, commitId);
     }
 
+    
     std::vector<std::shared_ptr<KerML::Entities::Element>> CommunicationService::elementsOfCommit(boost::uuids::uuid projectId, boost::uuids::uuid commitId) const {
-        const auto entries = getAllPagesOf("projects/" + boost::lexical_cast<std::string>(projectId) + "/commits/" + boost::lexical_cast<std::string>(commitId) + "/elements");
+
+        const auto entries = getAllPagesOf(
+            "projects/" + boost::lexical_cast<std::string>(projectId) +
+            "/commits/" + boost::lexical_cast<std::string>(commitId) +
+            "/elements"
+        );
+
+        //Inspect the original elements received from the server.
+        std::cerr << "[Server] Project: " << projectId
+                << " | Commit: " << commitId
+                << " | Elements: " << entries.size()
+                << std::endl;
+
+        for (const auto& entry : entries) {
+            std::cerr << "[Server] Type: "
+                    << entry.value("@type", std::string("Unknown"))
+                    << std::endl;
+        }
+
         return entitiesFromJson<KerML::Entities::Element>(entries);
     }
+
 
     CommitData CommunicationService::getCommitData(boost::uuids::uuid projectId, boost::uuids::uuid commitId, bool withTexts) const {
         const auto project = boost::lexical_cast<std::string>(projectId);
@@ -186,18 +207,13 @@ namespace StructuraSystems::Client {
         data.Usages = entitiesFromJson<SysMLv2::REST::ProjectUsage>(rows);
 
         if (withTexts) {
-            const auto entries = getAllPagesOf("projects/" + project + "/commits/" + commit + "/elements");
-            // The deserializer of the sysmllib compares the "@type" without regard to the case, so this does too.
-            const auto lower = [](std::string text) {
-                std::transform(text.begin(), text.end(), text.begin(), [](unsigned char c) { return char(std::tolower(c)); });
-                return text;
-            };
-            std::vector<nlohmann::json> texts;
-            for (const auto &entry : entries)
-                if (entry.is_object() && entry.contains("@type") && entry["@type"].is_string() &&
-                    lower(entry["@type"].get<std::string>()) == "textualrepresentation")
-                    texts.push_back(entry);
-            data.Elements = entitiesFromJson<KerML::Entities::Element>(texts);
+            // Load all elements to resolve the document structure.
+            const auto elements = elementsOfCommit(projectId, commitId);
+
+            // Retrieve textual representations in document order.
+            const auto blocks = orderedDocumentBlocks(elements);
+
+            data.Elements.assign(blocks.begin(), blocks.end());
         }
         return data;
     }
