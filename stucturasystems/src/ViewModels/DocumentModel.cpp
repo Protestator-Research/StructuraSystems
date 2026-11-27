@@ -9,6 +9,7 @@
 #include <unordered_set>
 #include <utility>
 
+#include <QDebug>
 #include <QFile>
 #include <QRegularExpression>
 #include <QVariantMap>
@@ -34,6 +35,7 @@
 #include "../Models/Libraries/RemoteLibraries.h"
 #include "../Models/Parser/StructuraSystemsParser.h"
 #include "../Models/Parser/Markdown/CommonmarkParser/cmark.h"
+#include "../Services/DocumentStructure.h"
 
 namespace StructuraSystems::Client {
     namespace {
@@ -117,15 +119,34 @@ namespace StructuraSystems::Client {
         loadRows();
     }
 
+    DocumentModel::~DocumentModel() {
+    clearDocumentStructure();
+    }
+
     void DocumentModel::loadRows() {
-        for (const auto &element : Elements) {
+        // Loading a different commit starts a new local graph.
+        clearDocumentStructure();
+        auto orderedElements = Elements;
+        // A real document root determines the order; legacy online commits
+        // fall back to the order received from the server.
+        if ((IsOnline && Commit != nullptr) || findDocumentRootPackage(Elements)) {
+            const auto blocks = orderedDocumentBlocks(Elements);
+            orderedElements.assign(blocks.begin(), blocks.end());
+        }
+
+        for (const auto &element : orderedElements) {
             if (element == nullptr)
                 continue;
+
             auto type = element->getType();
             std::transform(type.begin(), type.end(), type.begin(), ::tolower);
+
             if (type != SysMLv2::REST::TEXTUAL_REPRESENTATION_TYPE)
                 continue;
-            auto textualRepresentation = std::dynamic_pointer_cast<KerML::Entities::TextualRepresentation>(element);
+
+            auto textualRepresentation =
+                std::dynamic_pointer_cast<KerML::Entities::TextualRepresentation>(element);
+
             if (textualRepresentation == nullptr)
                 continue;
 
@@ -135,6 +156,10 @@ namespace StructuraSystems::Client {
             updateHeader(row);
             Rows.push_back(std::move(row));
         }
+
+        syncElementOrder();
+        syncDocumentStructure();
+
         rebuildTableOfContents();
     }
 
@@ -395,6 +420,7 @@ namespace StructuraSystems::Client {
         if (entry.Element->body() == newBody)
             return;
         entry.Element->setBody(newBody);
+        syncDocumentStructureBlock(row);
         updateHeader(entry);
         markEdited(row, {BodyRole, HeaderTitleRole, HeaderAuthorRole});
         rebuildTableOfContents();
@@ -408,6 +434,7 @@ namespace StructuraSystems::Client {
         if (normalizeLanguage(QString::fromStdString(entry.Element->language())) == normalized)
             return;
         entry.Element->setLanguage(storedLanguage(normalized).toStdString());
+        syncDocumentStructureBlock(row);
         updateHeader(entry);
         markEdited(row, {LanguageRole, HeaderTitleRole, HeaderAuthorRole});
         rebuildTableOfContents();
@@ -426,6 +453,48 @@ namespace StructuraSystems::Client {
                 element = Rows[next++].Element;
         }
     }
+    
+    const std::vector<std::shared_ptr<KerML::Entities::Element>> &DocumentModel::documentStructure() const {
+        return LocalDocumentStructure;
+    }
+
+    void DocumentModel::clearDocumentStructure() {
+        // Only the private copies are disposed, never Elements or InstanceElements.
+        for (const auto &element : LocalDocumentStructure)
+            if (element)
+                KerML::Entities::disposeLinks(*element);
+        LocalDocumentStructure.clear();
+    }
+
+    void DocumentModel::syncDocumentStructure() {
+        std::vector<std::shared_ptr<KerML::Entities::TextualRepresentation>> blocks;
+        blocks.reserve(Rows.size());
+        for (const auto &row : Rows)
+            blocks.push_back(row.Element);
+
+        const auto root = LocalDocumentStructure.empty()
+            ? findDocumentRootPackage(Elements) : LocalDocumentStructure.front();
+        auto updated = createDocumentStructure(title().toStdString(), blocks, root);
+        clearDocumentStructure();
+        LocalDocumentStructure = std::move(updated);
+        qDebug().noquote() << "[DocumentStructure] Local root:"
+                           << elementIdString(LocalDocumentStructure.front())
+                           << "| Owned relationships:"
+                           << LocalDocumentStructure.front()->ownedRelationship().size();
+    }
+
+    void DocumentModel::syncDocumentStructureBlock(int row) {
+        const auto &block = Rows[row].Element;
+        for (const auto &element : LocalDocumentStructure) {
+            if (element->getId() != block->getId())
+                 continue;
+            if (auto copy = std::dynamic_pointer_cast<KerML::Entities::TextualRepresentation>(element)) {
+                copy->setBody(block->body());
+                copy->setLanguage(block->language());
+                return;
+            }
+        }
+    }
 
     void DocumentModel::moveRow(int from, int to) {
         if (Detached || !validRow(from) || !validRow(to) || from == to)
@@ -438,6 +507,7 @@ namespace StructuraSystems::Client {
         endMoveRows();
 
         syncElementOrder();
+        syncDocumentStructure();
         rebuildTableOfContents();
         setModified(true);
         emit edited();
@@ -468,6 +538,7 @@ namespace StructuraSystems::Client {
         entry.ElementTree = new ElementTreeModel(this);
         Rows.insert(Rows.begin() + row, std::move(entry));
         endInsertRows();
+        syncDocumentStructure();
 
         rebuildTableOfContents();
         emit countChanged();
@@ -485,6 +556,7 @@ namespace StructuraSystems::Client {
         Rows.erase(Rows.begin() + row);
         Elements.erase(std::remove(Elements.begin(), Elements.end(), element), Elements.end());
         endRemoveRows();
+        syncDocumentStructure();
 
         rebuildTableOfContents();
         emit countChanged();
@@ -774,6 +846,7 @@ namespace StructuraSystems::Client {
     }
 
     CommitDelta DocumentModel::commitDelta(const std::vector<std::shared_ptr<KerML::Entities::Element>> &base) const {
+        // The synthesized local document graph is deliberately not committed yet.
         return computeCommitDelta(base, Elements);
     }
 
