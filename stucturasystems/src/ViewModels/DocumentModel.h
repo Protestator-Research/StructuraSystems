@@ -108,7 +108,7 @@ namespace StructuraSystems::Client {
         DocumentModel(std::shared_ptr<SysMLv2::REST::Project> project, std::shared_ptr<SysMLv2::REST::Commit> commit,
                       std::vector<std::shared_ptr<KerML::Entities::Element>> elements, QObject *parent = nullptr);
 
-        ~DocumentModel() override = default;
+        ~DocumentModel() override;
 
         int rowCount(const QModelIndex &parent = QModelIndex()) const override;
         QVariant data(const QModelIndex &index, int role = Qt::DisplayRole) const override;
@@ -142,6 +142,9 @@ namespace StructuraSystems::Client {
 
         [[nodiscard]] std::shared_ptr<SysMLv2::REST::Project> getProject() const;
         [[nodiscard]] std::shared_ptr<SysMLv2::REST::Commit> getCommit() const;
+
+        /** Local document graph, not included in commits yet. Do not retain its objects across edits. */
+        [[nodiscard]] const std::vector<std::shared_ptr<KerML::Entities::Element>> &documentStructure() const;
 
         /**
          * Writes the elements to <basePath>/<project name>. Resets the modified flag on success.
@@ -253,6 +256,12 @@ namespace StructuraSystems::Client {
         void syncRemote();
         void updateHeader(Row &row) const;
         void syncElementOrder();
+        /** Rebuilds the local document graph in row order, preserving surviving identities. */
+        void syncDocumentStructure();
+        /** Mirrors content edits into the local graph without rebuilding it. */
+        void syncDocumentStructureBlock(int row);
+        /** Disposes the private graph, including its shared-pointer reference cycles. */
+        void clearDocumentStructure();
         void rebuildTableOfContents();
         void setModified(bool modified);
         void markEdited(int row, const QList<int> &roles);
@@ -261,6 +270,8 @@ namespace StructuraSystems::Client {
         std::shared_ptr<SysMLv2::REST::Project> Project;
         std::shared_ptr<SysMLv2::REST::Commit> Commit;
         std::vector<std::shared_ptr<KerML::Entities::Element>> Elements;
+        // Client-only graph until structural changes are supported by the commit path.
+        std::vector<std::shared_ptr<KerML::Entities::Element>> LocalDocumentStructure;
         std::vector<Row> Rows;
         std::shared_ptr<DocumentWorkspace> Workspace;
         std::shared_ptr<LibraryWorkspace> Libraries;
