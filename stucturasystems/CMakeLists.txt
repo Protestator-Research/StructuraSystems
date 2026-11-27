@@ -52,6 +52,8 @@ set(SOURCES
         resources/Resources.qrc
         src/Models/Libraries/CodeScanner.cpp
         src/Models/Libraries/CodeScanner.h
+        src/Models/Libraries/DocumentMerge.cpp
+        src/Models/Libraries/DocumentMerge.h
         src/Models/Libraries/DocumentWorkspace.cpp
         src/Models/Libraries/DocumentWorkspace.h
         src/Models/Libraries/LibraryWorkspace.cpp
@@ -95,6 +97,7 @@ qt_add_qml_module(StructuraSystems
             qml/Main.qml
             qml/Theme.qml
             qml/components/BranchChip.qml
+            qml/components/ContinuedPackagesChip.qml
             qml/components/DialogFooter.qml
             qml/components/Icon.qml
             qml/components/IconToolButton.qml
@@ -120,6 +123,7 @@ qt_add_qml_module(StructuraSystems
             qml/views/ElementCard.qml
             qml/views/ExplorerPane.qml
             qml/views/OnlinePane.qml
+            qml/views/OutlinePanel.qml
             qml/views/ProblemsSheet.qml
             qml/views/StatusBar.qml
             qml/dialogs/AboutDialog.qml

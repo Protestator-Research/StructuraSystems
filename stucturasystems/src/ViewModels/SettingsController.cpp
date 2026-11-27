@@ -11,6 +11,9 @@ namespace StructuraSystems::Client {
         AppearanceSettings.beginGroup(APPEARANCE_SETTINGS_GROUP_NAME);
         ThemeMode = qBound(0, AppearanceSettings.value(THEME_MODE_ENTRY, 0).toInt(), 2);
         AppearanceSettings.endGroup();
+        AppearanceSettings.beginGroup(STARTUP_SETTINGS_GROUP_NAME);
+        StartView = qBound(0, AppearanceSettings.value(START_VIEW_ENTRY, 0).toInt(), 2);
+        AppearanceSettings.endGroup();
         Settings.setPasswordLoadingCallback([this]() { emit passwordLoadingChanged(); });
     }
 
@@ -113,6 +116,18 @@ namespace StructuraSystems::Client {
         emit themeModeChanged();
     }
 
+    int SettingsController::startView() const {
+        return StartView;
+    }
+
+    void SettingsController::setStartView(int startView) {
+        startView = qBound(0, startView, 2);
+        if (startView == StartView)
+            return;
+        StartView = startView;
+        emit startViewChanged();
+    }
+
     void SettingsController::save() {
         const auto keychainWasAvailable = keychainAvailable();
         Settings.saveData();
@@ -121,6 +136,9 @@ namespace StructuraSystems::Client {
 
         AppearanceSettings.beginGroup(APPEARANCE_SETTINGS_GROUP_NAME);
         AppearanceSettings.setValue(THEME_MODE_ENTRY, ThemeMode);
+        AppearanceSettings.endGroup();
+        AppearanceSettings.beginGroup(STARTUP_SETTINGS_GROUP_NAME);
+        AppearanceSettings.setValue(START_VIEW_ENTRY, StartView);
         AppearanceSettings.endGroup();
         AppearanceSettings.sync();
 

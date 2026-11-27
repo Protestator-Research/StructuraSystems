@@ -62,7 +62,7 @@ ColumnLayout {
         clip: true
         boundsBehavior: Flickable.StopAtBounds
         model: page.libraries.entries
-        ScrollBar.vertical: ScrollBar { }
+        ScrollBar.vertical: ScrollBar { id: listBar }
 
         delegate: RowLayout {
             id: entry
@@ -74,7 +74,9 @@ ColumnLayout {
             required property bool inCycle
             required property string packages
 
-            width: ListView.view.width
+            // The row ends before the scroll bar: the bar lies on the right edge of the list and takes every click there, even
+            // while it is invisible (Material only fades it out), so the SpinBox and the button would not react at their edge.
+            width: ListView.view.width - listBar.width
             spacing: 8
 
             ColumnLayout {
@@ -175,7 +177,7 @@ ColumnLayout {
         clip: true
         boundsBehavior: Flickable.StopAtBounds
         model: AppController.remoteUsages
-        ScrollBar.vertical: ScrollBar { }
+        ScrollBar.vertical: ScrollBar { id: usageBar }
 
         delegate: RowLayout {
             id: usage
@@ -186,7 +188,8 @@ ColumnLayout {
             required property int level
             required property string status
 
-            width: ListView.view.width
+            // Same gutter as in the list of libraries: the invisible scroll bar would take the clicks on the right-aligned buttons.
+            width: ListView.view.width - usageBar.width
             spacing: 8
 
             TapHandler {

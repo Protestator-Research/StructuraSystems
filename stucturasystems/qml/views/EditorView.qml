@@ -14,6 +14,8 @@ Item {
     readonly property bool locked: AppController.busy || (document !== null && document.detached)
     readonly property int sideMargin: 24
 
+    /** Whether the outline panel is shown. */
+    property bool outlineOpen: false
     property int _pendingEditRow: -1
     property int _flashRow: -1
     property int _scrollRow: -1
@@ -88,7 +90,10 @@ Item {
     ListView {
         id: list
 
-        anchors.fill: parent
+        anchors.left: parent.left
+        anchors.top: parent.top
+        anchors.bottom: parent.bottom
+        anchors.right: outlinePanel.visible ? outlinePanel.left : parent.right
         model: view.document
         clip: true
         topMargin: 8
@@ -122,6 +127,7 @@ Item {
             required property int problemCount
             required property ElementTreeModel elementTree
             required property int elementCount
+            required property var continuedPackages
 
             width: list.width
             height: card.implicitHeight + divider.implicitHeight
@@ -139,6 +145,7 @@ Item {
                 problemCount: delegate.problemCount
                 elementTree: delegate.elementTree
                 elementCount: delegate.elementCount
+                continuedPackages: delegate.continuedPackages
                 document: view.document
                 tableOfContents: view.document ? view.document.tableOfContents : []
                 first: delegate.index === 0
@@ -161,6 +168,7 @@ Item {
                 onInsertRequested: (targetRow, language) => view.insertAndEdit(targetRow, language)
                 onDeleteRequested: deleteDialog.openFor(delegate.index)
                 onTocEntryActivated: row => view.scrollToRow(row)
+                onPackageActivated: row => view.scrollToRow(row)
             }
 
             InsertDivider {
@@ -181,18 +189,66 @@ Item {
         }
     }
 
+    // ---------------------------------------------------------------- outline
+    OutlinePanel {
+        id: outlinePanel
+
+        anchors.top: parent.top
+        anchors.bottom: parent.bottom
+        anchors.right: parent.right
+        width: Math.min(320, Math.round(view.width * 0.5))
+        visible: view.outlineOpen && view.document !== null
+        outline: view.document ? view.document.outline : null
+        onNodeActivated: row => view.scrollToRow(row)
+        onCloseRequested: {
+            view.outlineOpen = false
+            outlineButton.forceActiveFocus()
+        }
+    }
+
     Label {
-        anchors.centerIn: parent
+        anchors.centerIn: list
         visible: view.document !== null && view.document.count === 0
         text: qsTr("This document is empty. Use \"New element\" to add content.")
         color: Theme.textSecondary
     }
 
     // ---------------------------------------------------------------- extended FAB
+    // Opens or closes the outline panel; sits above the FAB.
+    RoundButton {
+        id: outlineButton
+
+        anchors.right: fab.right
+        anchors.rightMargin: 4
+        anchors.bottom: fab.top
+        anchors.bottomMargin: 12
+        implicitWidth: 40
+        implicitHeight: 40
+        enabled: view.document !== null
+        checkable: true
+        checked: view.outlineOpen
+        icon.source: Theme.iconDocument
+        icon.width: 20
+        icon.height: 20
+        icon.color: "transparent"
+        Material.elevation: 3
+        Material.background: checked ? Theme.primaryContainer : Theme.card
+        Accessible.name: view.outlineOpen ? qsTr("Hide the document outline") : qsTr("Show the document outline")
+        ToolTip.visible: hovered
+        ToolTip.text: view.outlineOpen ? qsTr("Hide the document outline") : qsTr("Show the document outline")
+        ToolTip.delay: 700
+
+        onClicked: {
+            view.outlineOpen = !view.outlineOpen
+            if (view.outlineOpen)
+                Qt.callLater(outlinePanel.focusTree)
+        }
+    }
+
     Button {
         id: fab
 
-        anchors.right: parent.right
+        anchors.right: list.right
         anchors.bottom: parent.bottom
         anchors.margins: 24
         text: qsTr("New element")

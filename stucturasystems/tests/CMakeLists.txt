@@ -143,6 +143,7 @@ qt_add_executable(OnlineDocumentTests
         ${SRC}/ViewModels/LanguageKeywords.cpp
         ${SRC}/Services/CommitDelta.cpp
         ${SRC}/Models/Libraries/CodeScanner.cpp
+        ${SRC}/Models/Libraries/DocumentMerge.cpp
         ${SRC}/Models/Libraries/DocumentWorkspace.cpp
         ${SRC}/Models/Libraries/LibraryWorkspace.cpp
         ${SRC}/Models/Libraries/RemoteLibraries.cpp
@@ -163,6 +164,67 @@ target_link_libraries(OnlineDocumentTests PRIVATE
 
 add_test(NAME OnlineDocumentTests COMMAND OnlineDocumentTests)
 set_tests_properties(OnlineDocumentTests PROPERTIES TIMEOUT 120)
+
+# Parse results stay attached to their card (element id) when cards are moved, inserted or removed. Same sources as OnlineDocumentTests.
+qt_add_executable(DocumentProvenanceTests
+        tst_DocumentProvenance.cpp
+        ${SRC}/ViewModels/DocumentModel.cpp
+        ${SRC}/ViewModels/ElementTreeModel.cpp
+        ${SRC}/ViewModels/ProblemListModel.cpp
+        ${SRC}/ViewModels/CompletionEngine.cpp
+        ${SRC}/ViewModels/LanguageKeywords.cpp
+        ${SRC}/Services/CommitDelta.cpp
+        ${SRC}/Models/Libraries/CodeScanner.cpp
+        ${SRC}/Models/Libraries/DocumentMerge.cpp
+        ${SRC}/Models/Libraries/DocumentWorkspace.cpp
+        ${SRC}/Models/Libraries/LibraryWorkspace.cpp
+        ${SRC}/Models/Libraries/RemoteLibraries.cpp
+        ${SRC}/Models/Libraries/WorkspaceConfig.cpp
+        ${SRC}/Models/Parser/StructuraSystemsParser.cpp
+        ${SRC}/Models/Parser/Markdown/MarkdownParser.cpp
+        ${CMARK_SOURCES})
+
+target_include_directories(DocumentProvenanceTests PRIVATE $<TARGET_PROPERTY:Qt6::Qml,INTERFACE_INCLUDE_DIRECTORIES>)
+
+target_link_libraries(DocumentProvenanceTests PRIVATE
+        Qt6::Core
+        Qt6::Test
+        yaml-cpp::yaml-cpp
+        sysmllib::sysmllib)
+
+add_test(NAME DocumentProvenanceTests COMMAND DocumentProvenanceTests)
+set_tests_properties(DocumentProvenanceTests PROPERTIES TIMEOUT 120)
+
+# The merged view of the cards of a document: the pure merge of element trees (packages continued in several cards, names declared
+# twice) and its use in DocumentModel (outline, continued packages, warnings). Same sources as DocumentProvenanceTests.
+qt_add_executable(DocumentOutlineTests
+        tst_DocumentOutline.cpp
+        ${SRC}/ViewModels/DocumentModel.cpp
+        ${SRC}/ViewModels/ElementTreeModel.cpp
+        ${SRC}/ViewModels/ProblemListModel.cpp
+        ${SRC}/ViewModels/CompletionEngine.cpp
+        ${SRC}/ViewModels/LanguageKeywords.cpp
+        ${SRC}/Services/CommitDelta.cpp
+        ${SRC}/Models/Libraries/CodeScanner.cpp
+        ${SRC}/Models/Libraries/DocumentMerge.cpp
+        ${SRC}/Models/Libraries/DocumentWorkspace.cpp
+        ${SRC}/Models/Libraries/LibraryWorkspace.cpp
+        ${SRC}/Models/Libraries/RemoteLibraries.cpp
+        ${SRC}/Models/Libraries/WorkspaceConfig.cpp
+        ${SRC}/Models/Parser/StructuraSystemsParser.cpp
+        ${SRC}/Models/Parser/Markdown/MarkdownParser.cpp
+        ${CMARK_SOURCES})
+
+target_include_directories(DocumentOutlineTests PRIVATE $<TARGET_PROPERTY:Qt6::Qml,INTERFACE_INCLUDE_DIRECTORIES>)
+
+target_link_libraries(DocumentOutlineTests PRIVATE
+        Qt6::Core
+        Qt6::Test
+        yaml-cpp::yaml-cpp
+        sysmllib::sysmllib)
+
+add_test(NAME DocumentOutlineTests COMMAND DocumentOutlineTests)
+set_tests_properties(DocumentOutlineTests PROPERTIES TIMEOUT 120)
 
 # The editing help of the code editor (indentation, bracket pairs, tab handling) is pure text logic.
 qt_add_executable(CodeEditAssistTests
@@ -248,6 +310,41 @@ target_link_libraries(NameIndexStageTests PRIVATE
 add_test(NAME NameIndexStageTests COMMAND NameIndexStageTests)
 set_tests_properties(NameIndexStageTests PROPERTIES TIMEOUT 60)
 
+# How text blocks of one document relate to each other (continued packages, SysML on KerML, forward references, per-row models).
+# Characterization of DocumentWorkspace; uses a tiny standard library, so it is fast.
+qt_add_executable(DocumentMergeTests
+        tst_DocumentMerge.cpp
+        ${SRC}/Models/Libraries/CodeScanner.cpp
+        ${SRC}/Models/Libraries/CodeScanner.h
+        ${SRC}/Models/Libraries/DocumentWorkspace.cpp
+        ${SRC}/Models/Libraries/DocumentWorkspace.h
+        ${SRC}/Models/Libraries/LibraryWorkspace.cpp
+        ${SRC}/Models/Libraries/LibraryWorkspace.h
+        ${SRC}/Models/Libraries/RemoteLibraries.cpp
+        ${SRC}/Models/Libraries/RemoteLibraries.h
+        ${SRC}/Models/Libraries/WorkspaceConfig.cpp
+        ${SRC}/Models/Libraries/WorkspaceConfig.h
+        ${SRC}/Models/Parser/Markdown/MarkdownParser.cpp
+        ${SRC}/ViewModels/CompletionEngine.cpp
+        ${SRC}/ViewModels/LanguageKeywords.cpp
+        ${SRC}/Services/BECommunicationService.cpp
+        ${SRC}/Services/BECommunicationService.h
+        ${SRC}/Services/CommitDelta.cpp
+        ${SRC}/Services/PagedRequest.cpp
+        ${SRC}/Services/entities/DigitalTwin.cpp
+        ${SRC}/Services/entities/DigitalTwinRequest.cpp
+        ${CMARK_SOURCES})
+
+target_link_libraries(DocumentMergeTests PRIVATE
+        Qt6::Core
+        Qt6::Test
+        sysmllib::sysmllib
+        CURL::libcurl
+        nlohmann_json::nlohmann_json)
+
+add_test(NAME DocumentMergeTests COMMAND DocumentMergeTests)
+set_tests_properties(DocumentMergeTests PROPERTIES TIMEOUT 120)
+
 # ctest starts the executable without the environment of the Conan build, so the shared libraries it needs (sysmllib and its
 # dependencies, Qt) are put on the PATH of the test. The directories come from the variables the Conan CMake generator sets
 # for every package (<package>_BIN_DIRS_<CONFIG>); only directories that exist are used.
@@ -281,7 +378,7 @@ if(WIN32 AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.22)
         list(APPEND _modifications "PATH=path_list_prepend:${_qt_bin}")
     endif()
     list(REMOVE_DUPLICATES _modifications)
-    set_tests_properties(LibraryWorkspaceTests OnlineSyncTests OnlineDocumentTests CodeEditAssistTests CompletionEngineTests StandardFormatTests NameIndexStageTests PROPERTIES ENVIRONMENT_MODIFICATION "${_modifications}")
+    set_tests_properties(LibraryWorkspaceTests WarmUpTests OnlineSyncTests OnlineDocumentTests DocumentProvenanceTests DocumentOutlineTests CodeEditAssistTests CompletionEngineTests StandardFormatTests NameIndexStageTests DocumentMergeTests PROPERTIES ENVIRONMENT_MODIFICATION "${_modifications}")
 endif()
 
 

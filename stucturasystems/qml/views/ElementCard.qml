@@ -18,6 +18,8 @@ Pane {
     required property int problemCount
     required property ElementTreeModel elementTree
     required property int elementCount
+    /** Packages this card continues, as list of {name, row}: row of the card that declares the package first. */
+    property var continuedPackages: []
     /** The document of the card; its last parse supplies the names of the libraries for the code completion. */
     property DocumentModel document
     property bool first: false
@@ -39,6 +41,7 @@ Pane {
     signal insertRequested(int targetRow, string language)
     signal deleteRequested
     signal tocEntryActivated(int row)
+    signal packageActivated(int row)
 
     function startEdit() {
         if (!locked)
@@ -203,6 +206,11 @@ Pane {
                     ToolTip.visible: elementChipHover.hovered
                     ToolTip.text: card.modelExpanded ? qsTr("Hide the model elements of this section") : qsTr("Show the model elements of this section")
                     ToolTip.delay: 500
+                }
+
+                ContinuedPackagesChip {
+                    packages: card.continuedPackages
+                    onPackageActivated: row => card.packageActivated(row)
                 }
 
                 Item {

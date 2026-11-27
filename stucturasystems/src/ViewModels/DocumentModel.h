@@ -8,6 +8,7 @@
 #include <memory>
 #include <vector>
 #include <QAbstractListModel>
+#include <QByteArray>
 #include <QList>
 #include <QString>
 #include <QStringList>
@@ -38,17 +39,25 @@ namespace StructuraSystems::Client {
      * Input of one parser run for a single textual element. Plain data, so it can be handed to a worker thread.
      */
     struct ParseInput {
-        int Row = -1;
+        int Row = -1;      ///< Row at the time of DocumentModel::parseInputs; only the key towards the DocumentWorkspace, not kept in the result
         QString Language;  ///< Normalized language ("SysMLv2" or "KerML")
         std::string Body;
+        QString ElementId; ///< Id of the TextualRepresentation of the row; the result is bound to it, so cards may move while the parser runs
+        /**
+         * DocumentModel::contentEpoch() when the inputs were collected, -1 if unknown (inputs built by hand). Only if every input
+         * has an epoch and an element id, the result carries a fingerprint and can be recognized as stale.
+         */
+        qint64 Epoch = -1;
     };
 
     /**
      * Result of a parser run. Plain data, produced by DocumentModel::runParser and applied by DocumentModel::applyParseResult.
+     * Everything that belongs to a card is bound to the element id of the card (ParseInput::ElementId), not to a row index.
      */
     struct ParseResult {
+        /** Problem::ElementId is set for the problems of a card (empty: the whole document); Problem::Row is only set by applyParseResult. */
         QList<Problem> Problems;
-        QHash<int, QList<ElementTreeNode>> ElementTrees;   ///< Root namespace and its owned elements per ParseInput::Row, only for error-free rows
+        QHash<QString, QList<ElementTreeNode>> ElementTrees;   ///< Root namespace and its owned elements per ParseInput::ElementId, only for error-free rows
         /**
          * The elements of the parsed texts. They are only counted and kept while the document is open; the model of a closed
          * document is taken apart when its workspace is recycled, so it must not be walked after that. (The element trees
@@ -59,6 +68,14 @@ namespace StructuraSystems::Client {
         bool NeedsRemoteDownload = false;
         /** The names of the model (libraries and document) for the code completion, a snapshot of plain data. Null if there is none. */
         std::shared_ptr<const NameIndex> Names;
+        /** True if Epoch and Fingerprint describe the inputs (see ParseInput::Epoch). Without them the result is never stale. */
+        bool HasProvenance = false;
+        qint64 Epoch = -1;           ///< DocumentModel::contentEpoch() of the inputs
+        /**
+         * What the result was computed from: one digest of (element id, language, body) per input, sorted, so the order of the
+         * cards does not matter. The cards refer to each other, so the result is only valid for exactly this set of cards.
+         */
+        QList<QByteArray> Fingerprint;
     };
 
     /**
@@ -83,6 +100,17 @@ namespace StructuraSystems::Client {
         Q_PROPERTY(bool detached READ detached NOTIFY detachedChanged)
         /** Headings (level 1-3) of all Markdown rows as list of {level, title, row}, used by the [toc] element. */
         Q_PROPERTY(QVariantList tableOfContents READ tableOfContents NOTIFY tableOfContentsChanged)
+        /**
+         * The elements of all SysML/KerML cards as one tree in card order (see DocumentMerge). Packages of the same name in several
+         * cards are one node whose cardRows lists the contributing cards. The pointer never changes.
+         *
+         * Derived from the element trees of the LAST PARSE, not from the current text: a parse result replaces it, moving, inserting
+         * and removing cards re-arranges it (card order decides which card is "first"), but editing a body without a new parse
+         * leaves it describing the old text, like the problems of the parser. A card with syntax errors has no tree and
+         * contributes nothing until it parses, so "first" cards and merge warnings can shift while a card is broken. If a row edit
+         * only changes the rows of the cards, the model is updated in place (dataChanged), otherwise it is reset.
+         */
+        Q_PROPERTY(StructuraSystems::Client::ElementTreeModel *outline READ outline CONSTANT)
     public:
         enum Roles {
             BodyRole = Qt::UserRole + 1,
@@ -93,7 +121,12 @@ namespace StructuraSystems::Client {
             SelectedRole,
             ProblemCountRole,
             ElementTreeRole,
-            ElementCountRole
+            ElementCountRole,
+            /**
+             * QVariantList of {name, row}: the packages of the card that an earlier card declares first (row = current row of that
+             * card). Derived from the trees of the last parse like outline (see there): no tree, no entries.
+             */
+            ContinuedPackagesRole
         };
         Q_ENUM(Roles)
 
@@ -126,6 +159,7 @@ namespace StructuraSystems::Client {
         [[nodiscard]] QString branchName() const;
         [[nodiscard]] bool detached() const;
         [[nodiscard]] QVariantList tableOfContents() const;
+        [[nodiscard]] ElementTreeModel *outline() const;
 
         Q_INVOKABLE void setBody(int row, const QString &body);
         /** @param language one of "Markdown", "YAML", "SysMLv2", "KerML" */
@@ -184,10 +218,33 @@ namespace StructuraSystems::Client {
         void adoptWorkspace(std::shared_ptr<DocumentWorkspace> workspace);
         /** Hands the workspace over (to be recycled when the document is closed). The document creates a new one if it is parsed again. */
         [[nodiscard]] std::shared_ptr<DocumentWorkspace> releaseWorkspace();
-        /** Stores the result of a parser run and updates the per row problem counts. GUI thread only. */
-        void applyParseResult(ParseResult result);
-        /** Synchronous convenience: parseInputs + runParser + applyParseResult. @return the problems found. */
+        /**
+         * Stores the result of a parser run and updates the per row problem counts. GUI thread only.
+         * The result is matched to the cards by element id, so it may be applied after cards were moved, inserted or removed since
+         * parseInputs; what belongs to a card that is gone is dropped.
+         *
+         * A result is stale as a whole if the SysML/KerML cards (element id, language, body; the order and Markdown/YAML cards do
+         * not matter) differ from the ones it was computed from, or if replaceContent was called since. A stale result is not
+         * applied at all: problems, element trees, names and instance elements stay as they were. A result without provenance
+         * (inputs built by hand, see ParseInput::Epoch) is always applied.
+         * @return false if the result was stale and therefore ignored.
+         */
+        bool applyParseResult(ParseResult result);
+        /**
+         * Forgets everything of the last parse: problems, element trees, names and instance elements. For a document that has no
+         * SysML/KerML card left. Emits problemRowsChanged (not problemsChanged) if there were problems.
+         */
+        void clearParseResults();
+        /** Incremented by replaceContent; a parse that started before is stale even if ids and texts are equal. */
+        [[nodiscard]] qint64 contentEpoch() const;
+        /** Synchronous convenience: parseInputs + runParser + applyParseResult. @return problems() */
         QList<Problem> parse();
+        /**
+         * The problems of the parser followed by the warnings about names that several cards declare ("'A::X' is also declared in
+         * card 1", severity 2, on the later card). The latter are derived data: recomputed from the trees of the last parse
+         * (see outline) on every parse result and row edit, not from edited text; a card without tree (syntax errors, not parsed
+         * yet) takes no part, so the warnings can change while a card is broken.
+         */
         [[nodiscard]] QList<Problem> problems() const;
         /**
          * The names of the model as of the last parse, for the code completion. Plain data that can be read on the GUI thread
@@ -237,6 +294,11 @@ namespace StructuraSystems::Client {
         void edited();
         /** Emitted after a parse result was applied. */
         void problemsChanged();
+        /**
+         * Emitted when stored problems only changed their row or were dropped because the cards were moved, inserted or removed
+         * (not for a parse result or replaceContent, which emit problemsChanged). Read the new state with problems().
+         */
+        void problemRowsChanged();
 
     private:
         struct Row {
@@ -246,6 +308,7 @@ namespace StructuraSystems::Client {
             ElementTreeModel *ElementTree = nullptr;   ///< Owned by the DocumentModel (QObject parent)
             QString HeaderTitle;
             QString HeaderAuthor;
+            QVariantList ContinuedPackages;   ///< Role ContinuedPackagesRole, set by remergeOutline
         };
 
         void loadRows();
@@ -257,6 +320,23 @@ namespace StructuraSystems::Client {
         void setModified(bool modified);
         void markEdited(int row, const QList<int> &roles);
         [[nodiscard]] bool validRow(int row) const;
+        /**
+         * Sets Problem::Row of the stored problems from their element id and the ProblemCount of the rows; drops the problems of
+         * cards that are gone. Call after the rows were changed.
+         * @return true if a problem was moved or dropped; the caller emits the signal that fits.
+         */
+        bool remapProblems();
+        /**
+         * Merges the element trees the cards hold now (in card order, see DocumentMerge) and updates the outline, the continued
+         * packages of the cards and the merge warnings (MergeProblems, with their rows and card numbers). Cheap plain-data work, call
+         * whenever the trees or the order of the cards may have changed, before remapProblems (which counts the problems per card).
+         * @return true if the merge warnings changed (also only their row or card number).
+         */
+        bool remergeOutline();
+        /** remergeOutline and remapProblems after the rows were changed by the user; emits problemRowsChanged if something changed. */
+        void followRowChange();
+        /** Drops the problems and the element tree of the card at @p row (it is no code card any more); emits problemRowsChanged if a problem went. */
+        void dropResultsOf(int row);
 
         std::shared_ptr<SysMLv2::REST::Project> Project;
         std::shared_ptr<SysMLv2::REST::Commit> Commit;
@@ -268,7 +348,10 @@ namespace StructuraSystems::Client {
         std::shared_ptr<RemoteLibraries> Remote;
         std::vector<std::shared_ptr<KerML::Entities::Element>> InstanceElements;
         QList<Problem> ParserProblems;
+        QList<Problem> MergeProblems;     ///< Derived from the trees by remergeOutline, never kept across a change
+        ElementTreeModel *Outline = nullptr;   ///< Owned by the DocumentModel (QObject parent)
         std::shared_ptr<const NameIndex> Names;
+        qint64 ContentEpoch = 0;
         bool Modified = false;
         bool IsOnline = false;
         bool IsLocalFile = false;

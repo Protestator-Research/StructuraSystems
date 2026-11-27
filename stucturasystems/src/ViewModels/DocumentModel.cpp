@@ -9,6 +9,7 @@
 #include <unordered_set>
 #include <utility>
 
+#include <QCryptographicHash>
 #include <QFile>
 #include <QRegularExpression>
 #include <QVariantMap>
@@ -29,6 +30,7 @@
 #include <sysmlv2/service/implementation/ElementNavigationService.h>
 
 #include "CompletionEngine.h"
+#include "../Models/Libraries/DocumentMerge.h"
 #include "../Models/Libraries/DocumentWorkspace.h"
 #include "../Models/Libraries/LibraryWorkspace.h"
 #include "../Models/Libraries/RemoteLibraries.h"
@@ -99,6 +101,7 @@ namespace StructuraSystems::Client {
         Commit(std::move(commit)),
         IsOnline(false),
         IsLocalFile(true) {
+        Outline = new ElementTreeModel(this);
         if (Commit != nullptr) {
             SysMLv2::API::ElementNavigationService elementService;
             Elements = elementService.getElements(Project, Commit);
@@ -114,6 +117,7 @@ namespace StructuraSystems::Client {
         Elements(std::move(elements)),
         IsOnline(true),
         IsLocalFile(false) {
+        Outline = new ElementTreeModel(this);
         loadRows();
     }
 
@@ -174,6 +178,10 @@ namespace StructuraSystems::Client {
 
     QVariantList DocumentModel::tableOfContents() const {
         return TableOfContents;
+    }
+
+    ElementTreeModel *DocumentModel::outline() const {
+        return Outline;
     }
 
     void DocumentModel::updateHeader(Row &row) const {
@@ -251,6 +259,8 @@ namespace StructuraSystems::Client {
                 return QVariant::fromValue(row.ElementTree);
             case ElementCountRole:
                 return row.ElementTree ? row.ElementTree->count() : 0;
+            case ContinuedPackagesRole:
+                return row.ContinuedPackages;
             default:
                 return {};
         }
@@ -291,7 +301,8 @@ namespace StructuraSystems::Client {
             {SelectedRole, "selected"},
             {ProblemCountRole, "problemCount"},
             {ElementTreeRole, "elementTree"},
-            {ElementCountRole, "elementCount"}
+            {ElementCountRole, "elementCount"},
+            {ContinuedPackagesRole, "continuedPackages"}
         };
     }
 
@@ -355,6 +366,7 @@ namespace StructuraSystems::Client {
         if (!IsOnline)
             return false;
 
+        ++ContentEpoch;   // running parses were computed from the old commit
         beginResetModel();
         Commit = std::move(commit);
         Elements = std::move(elements);
@@ -364,6 +376,8 @@ namespace StructuraSystems::Client {
         loadRows();
         InstanceElements.clear();
         ParserProblems.clear();
+        MergeProblems.clear();   // the new rows have no trees yet
+        Outline->clear();
         endResetModel();
 
         setModified(false);
@@ -405,12 +419,53 @@ namespace StructuraSystems::Client {
             return;
         auto &entry = Rows[row];
         const auto normalized = normalizeLanguage(language);
-        if (normalizeLanguage(QString::fromStdString(entry.Element->language())) == normalized)
+        const auto previous = normalizeLanguage(QString::fromStdString(entry.Element->language()));
+        if (previous == normalized)
             return;
         entry.Element->setLanguage(storedLanguage(normalized).toStdString());
         updateHeader(entry);
         markEdited(row, {LanguageRole, HeaderTitleRole, HeaderAuthorRole});
         rebuildTableOfContents();
+
+        // A card that is no code any more has no problems and no element tree: keep nothing of the last parse.
+        const auto isCode = [](const QString &name) { return name == "SysMLv2" || name == "KerML"; };
+        if (isCode(previous) && !isCode(normalized))
+            dropResultsOf(row);
+    }
+
+    void DocumentModel::dropResultsOf(int row) {
+        auto &entry = Rows[row];
+        const auto id = elementIdString(entry.Element);
+        const auto before = ParserProblems.size();
+        ParserProblems.removeIf([&id](const Problem &problem) { return problem.ElementId == id; });
+        const bool treeHadElements = entry.ElementTree->count() > 0;
+        if (treeHadElements) {
+            entry.ElementTree->setNodes({});
+            const auto changed = index(row);
+            emit dataChanged(changed, changed, {ElementCountRole});
+        }
+        const bool mergeChanged = remergeOutline();   // the card no longer contributes
+        const bool moved = remapProblems();   // ProblemCount of the card
+        if (moved || mergeChanged || ParserProblems.size() != before)
+            emit problemRowsChanged();
+    }
+
+    void DocumentModel::clearParseResults() {
+        const bool hadProblems = !ParserProblems.isEmpty() || !MergeProblems.isEmpty();
+        InstanceElements.clear();
+        Names.reset();
+        ParserProblems.clear();
+        for (size_t i = 0; i < Rows.size(); i++) {
+            if (Rows[i].ElementTree->count() > 0) {
+                Rows[i].ElementTree->setNodes({});
+                const auto changed = index(int(i));
+                emit dataChanged(changed, changed, {ElementCountRole});
+            }
+        }
+        remergeOutline();   // all trees are empty now: empty outline, no merge warnings
+        remapProblems();   // ProblemCount of the rows
+        if (hadProblems)
+            emit problemRowsChanged();
     }
 
     void DocumentModel::syncElementOrder() {
@@ -439,6 +494,7 @@ namespace StructuraSystems::Client {
 
         syncElementOrder();
         rebuildTableOfContents();
+        followRowChange();
         setModified(true);
         emit edited();
     }
@@ -470,6 +526,7 @@ namespace StructuraSystems::Client {
         endInsertRows();
 
         rebuildTableOfContents();
+        followRowChange();
         emit countChanged();
         setModified(true);
         emit edited();
@@ -487,6 +544,7 @@ namespace StructuraSystems::Client {
         endRemoveRows();
 
         rebuildTableOfContents();
+        followRowChange();
         emit countChanged();
         setModified(true);
         emit edited();
@@ -546,12 +604,33 @@ namespace StructuraSystems::Client {
             const auto language = normalizeLanguage(QString::fromStdString(Rows[i].Element->language()));
             if (language != "SysMLv2" && language != "KerML")
                 continue;
-            inputs.append({int(i), language, Rows[i].Element->body()});
+            inputs.append({int(i), language, Rows[i].Element->body(), elementIdString(Rows[i].Element), ContentEpoch});
         }
         return inputs;
     }
 
+    qint64 DocumentModel::contentEpoch() const {
+        return ContentEpoch;
+    }
+
     namespace {
+        /** Sorted digests of (element id, language, body) of the inputs; independent of their order. */
+        QList<QByteArray> fingerprintOf(const QList<ParseInput> &inputs) {
+            QList<QByteArray> digests;
+            digests.reserve(inputs.size());
+            for (const auto &input : inputs) {
+                QCryptographicHash hash(QCryptographicHash::Sha256);
+                hash.addData(input.ElementId.toUtf8());
+                hash.addData(QByteArrayView("\0", 1));
+                hash.addData(input.Language.toUtf8());
+                hash.addData(QByteArrayView("\0", 1));
+                hash.addData(QByteArrayView(input.Body.data(), qsizetype(input.Body.size())));
+                digests.append(hash.result());
+            }
+            std::sort(digests.begin(), digests.end());
+            return digests;
+        }
+
         /** Walks the owners of the first element up to the root namespace. */
         std::shared_ptr<KerML::Entities::Element>
         findRootElement(const std::vector<std::shared_ptr<KerML::Entities::Element>> &elements) {
@@ -634,18 +713,30 @@ namespace StructuraSystems::Client {
     ParseResult DocumentModel::runParser(const QList<ParseInput> &inputs, const QString &documentTitle,
                                          std::shared_ptr<DocumentWorkspace> workspace) {
         ParseResult result;
+        // Provenance only if all inputs know their epoch and card; inputs made by hand yield a result that is never stale.
+        if (!inputs.isEmpty() && std::all_of(inputs.begin(), inputs.end(), [&inputs](const ParseInput &input) {
+                return input.Epoch >= 0 && !input.ElementId.isEmpty() && input.Epoch == inputs.first().Epoch;
+            })) {
+            result.HasProvenance = true;
+            result.Epoch = inputs.first().Epoch;
+            result.Fingerprint = fingerprintOf(inputs);
+        }
         if (workspace == nullptr)
             workspace = std::make_shared<DocumentWorkspace>();
 
+        // The workspace only knows the rows; the results are bound to the element ids right here.
         std::vector<DocumentSource> sources;
-        for (const auto &input : inputs)
+        QHash<int, QString> idOfRow;
+        for (const auto &input : inputs) {
             sources.push_back({input.Row, input.Language == "KerML", input.Body});
+            idOfRow.insert(input.Row, input.ElementId);
+        }
 
         try {
             // The element trees are made while the workspace is locked: afterwards another thread may recycle the workspace and
             // take the model apart. Only plain data (and shared_ptrs, which are read on the GUI thread while the document is
             // open) leave this function.
-            auto resolved = workspace->update(sources, documentTitle, [&result](const WorkspaceRow &row) {
+            auto resolved = workspace->update(sources, documentTitle, [&result, &idOfRow](const WorkspaceRow &row) {
                 for (const auto &element : row.Elements)
                     result.InstanceElements.push_back(element);
 
@@ -654,7 +745,9 @@ namespace StructuraSystems::Client {
                             row.Root != nullptr ? std::static_pointer_cast<KerML::Entities::Element>(row.Root) : findRootElement(row.Elements);
                     if (root != nullptr) {
                         std::unordered_set<const KerML::Entities::Element *> visited;
-                        appendElementTree(root, -1, visited, result.ElementTrees[row.Row]);
+                        const auto id = idOfRow.value(row.Row);
+                        if (!id.isEmpty())
+                            appendElementTree(root, -1, visited, result.ElementTrees[id]);
                     }
                 }
             });
@@ -668,7 +761,7 @@ namespace StructuraSystems::Client {
                 problem.Line = diagnostic.Line;
                 problem.Column = diagnostic.Column;
                 problem.DocumentTitle = documentTitle;
-                problem.Row = diagnostic.Row;
+                problem.ElementId = idOfRow.value(diagnostic.Row);   // empty (whole document) for Row -1
                 problem.Severity = diagnostic.Severity;
                 result.Problems.append(problem);
             }
@@ -729,40 +822,143 @@ namespace StructuraSystems::Client {
         return std::exchange(Workspace, nullptr);
     }
 
-    void DocumentModel::applyParseResult(ParseResult result) {
+    bool DocumentModel::applyParseResult(ParseResult result) {
+        if (result.HasProvenance && (result.Epoch != ContentEpoch || result.Fingerprint != fingerprintOf(parseInputs())))
+            return false;   // computed from other content: attaching it to the current cards would be wrong
+
         // Previous errors and instance elements are replaced, not accumulated.
         InstanceElements = std::move(result.InstanceElements);
         ParserProblems = std::move(result.Problems);
         Names = std::move(result.Names);
 
+        // Cards may have been moved, inserted or removed since parseInputs: the ids decide where the results go.
         for (size_t i = 0; i < Rows.size(); i++) {
-            const int rowIndex = int(i);
-            const int errors = int(std::count_if(ParserProblems.begin(), ParserProblems.end(),
-                                                 [rowIndex](const Problem &problem) { return problem.Row == rowIndex; }));
-            QList<int> changedRoles;
-            if (Rows[i].ProblemCount != errors) {
-                Rows[i].ProblemCount = errors;
-                changedRoles.append(ProblemCountRole);
-            }
             const int elementsBefore = Rows[i].ElementTree->count();
-            Rows[i].ElementTree->setNodes(result.ElementTrees.value(rowIndex));
-            if (Rows[i].ElementTree->count() != elementsBefore)
-                changedRoles.append(ElementCountRole);
-            if (!changedRoles.isEmpty()) {
-                const auto changed = index(rowIndex);
-                emit dataChanged(changed, changed, changedRoles);
+            Rows[i].ElementTree->setNodes(result.ElementTrees.value(elementIdString(Rows[i].Element)));
+            if (Rows[i].ElementTree->count() != elementsBefore) {
+                const auto changed = index(int(i));
+                emit dataChanged(changed, changed, {ElementCountRole});
             }
         }
+        remergeOutline();   // from the trees just set; problemsChanged below covers the merge warnings
+        remapProblems();    // rows and counts of all problems, after the merge
         emit problemsChanged();
+        return true;
+    }
+
+    bool DocumentModel::remapProblems() {
+        QHash<QString, int> rowOfId;
+        for (size_t i = 0; i < Rows.size(); i++)
+            rowOfId.insert(elementIdString(Rows[i].Element), int(i));
+
+        bool changed = false;
+        QList<Problem> kept;
+        for (auto problem : std::as_const(ParserProblems)) {
+            int row = -1;
+            if (!problem.ElementId.isEmpty()) {
+                const auto found = rowOfId.constFind(problem.ElementId);
+                if (found == rowOfId.constEnd()) {
+                    changed = true;   // the card is gone
+                    continue;
+                }
+                row = found.value();
+            }
+            changed = changed || problem.Row != row;
+            problem.Row = row;
+            kept.append(std::move(problem));
+        }
+        ParserProblems = std::move(kept);
+
+        QList<int> counts(int(Rows.size()), 0);
+        for (const auto &problem : std::as_const(ParserProblems)) {
+            if (problem.Row >= 0)
+                counts[problem.Row]++;
+        }
+        for (const auto &problem : std::as_const(MergeProblems)) {
+            if (problem.Row >= 0)
+                counts[problem.Row]++;
+        }
+        for (size_t i = 0; i < Rows.size(); i++) {
+            if (Rows[i].ProblemCount != counts[int(i)]) {
+                Rows[i].ProblemCount = counts[int(i)];
+                const auto changedIndex = index(int(i));
+                emit dataChanged(changedIndex, changedIndex, {ProblemCountRole});
+            }
+        }
+        return changed;
+    }
+
+    bool DocumentModel::remergeOutline() {
+        QHash<QString, int> rowOfId;
+        QList<MergeCard> cards;
+        cards.reserve(qsizetype(Rows.size()));
+        for (size_t i = 0; i < Rows.size(); i++) {
+            const auto id = elementIdString(Rows[i].Element);
+            rowOfId.insert(id, int(i));
+            cards.append({id, Rows[i].ElementTree->nodes()});
+        }
+        const MergedModel merged = DocumentMerge::merge(cards);
+
+        // The outline: rows instead of card ids, so the view can jump to the cards. Only touched if its content changed.
+        QList<ElementTreeNode> nodes;
+        nodes.reserve(merged.Nodes.size());
+        for (const auto &mergedNode : merged.Nodes) {
+            ElementTreeNode node;
+            node.Type = mergedNode.Type;
+            node.Name = mergedNode.Name;
+            node.Parent = mergedNode.Parent;
+            node.QualifiedName = mergedNode.QualifiedName;
+            for (const auto &cardId : mergedNode.CardIds)
+                node.CardRows.append(rowOfId.value(cardId, -1));
+            nodes.append(std::move(node));
+        }
+        Outline->updateNodes(nodes);   // in place if only the rows of the cards differ
+
+        for (size_t i = 0; i < Rows.size(); i++) {
+            QVariantList continued;
+            for (const auto &package : merged.Continued.value(cards.at(qsizetype(i)).ElementId))
+                continued.append(QVariantMap{{"name", package.QualifiedName}, {"row", rowOfId.value(package.FirstCardId, -1)}});
+            if (continued != Rows[i].ContinuedPackages) {
+                Rows[i].ContinuedPackages = std::move(continued);
+                const auto changedIndex = index(int(i));
+                emit dataChanged(changedIndex, changedIndex, {ContinuedPackagesRole});
+            }
+        }
+
+        // The warnings: derived from scratch, so the card numbers follow the order of the cards.
+        QList<Problem> warnings;
+        for (const auto &finding : merged.Findings) {
+            Problem problem;
+            problem.Message = tr("'%1' is also declared in card %2").arg(finding.QualifiedName).arg(rowOfId.value(finding.FirstCardId, -1) + 1);
+            problem.DocumentTitle = title();
+            problem.Row = rowOfId.value(finding.CardId, -1);
+            problem.Severity = 2;
+            problem.ElementId = finding.CardId;
+            warnings.append(std::move(problem));
+        }
+        const auto same = [](const Problem &a, const Problem &b) {
+            return a.Message == b.Message && a.Line == b.Line && a.Column == b.Column && a.DocumentTitle == b.DocumentTitle &&
+                   a.Row == b.Row && a.Severity == b.Severity && a.ElementId == b.ElementId;
+        };
+        const bool changed = !std::equal(warnings.begin(), warnings.end(), MergeProblems.begin(), MergeProblems.end(), same);
+        MergeProblems = std::move(warnings);
+        return changed;
+    }
+
+    void DocumentModel::followRowChange() {
+        const bool mergeChanged = remergeOutline();   // first: remapProblems counts the merge warnings per card
+        const bool moved = remapProblems();
+        if (moved || mergeChanged)
+            emit problemRowsChanged();
     }
 
     QList<Problem> DocumentModel::parse() {
         applyParseResult(runParser(parseInputs(), title(), workspace()));
-        return ParserProblems;
+        return problems();
     }
 
     QList<Problem> DocumentModel::problems() const {
-        return ParserProblems;
+        return ParserProblems + MergeProblems;
     }
 
     std::shared_ptr<const NameIndex> DocumentModel::nameIndex() const {

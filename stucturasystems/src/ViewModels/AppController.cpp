@@ -624,6 +624,11 @@ namespace StructuraSystems::Client {
             if (document == CurrentDocument)
                 refreshProblems();
         });
+        // Cards moved, inserted or removed: the problems follow their cards. Not problemsChanged, which opens the problem list.
+        connect(document, &DocumentModel::problemRowsChanged, this, [this, document]() {
+            if (document == CurrentDocument)
+                Problems->updateProblems(document->problems());
+        });
         // Commit, branch switch and checkout change the context of the history.
         const auto contextChanged = [this, document]() {
             if (document == CurrentDocument)
@@ -916,15 +921,15 @@ namespace StructuraSystems::Client {
         parseDocument(document, false);
     }
 
-    void AppController::parseDocument(DocumentModel *document, bool automatic) {
+    bool AppController::parseDocument(DocumentModel *document, bool automatic, bool restart) {
         const auto inputs = document->parseInputs();
         if (inputs.isEmpty()) {
             if (!automatic)
                 emitNotify(0, tr("The document contains no SysML or KerML text to parse."));
-            return;
+            return false;
         }
         if (automatic && Busy)
-            return;   // the user started something else; the downloaded libraries are used by the next run
+            return false;   // the user started something else; the downloaded libraries are used by the next run
 
         const auto title = document->title();
         if (!document->hasWorkspace())
@@ -933,20 +938,36 @@ namespace StructuraSystems::Client {
         QPointer<DocumentModel> guard(document);
         // A workspace that is still loading the standard library makes the run wait for it (see DocumentWorkspace::warmUp()).
         const auto description = workspace->isWarm() ? tr("Parsing %1").arg(title) : tr("Parsing %1 (waiting for the standard library)").arg(title);
-        runAsync<ParseResult>(description,
+        return runAsync<ParseResult>(description,
             [inputs, title, workspace]() { return DocumentModel::runParser(inputs, title, workspace); },
-            [this, guard, title](ParseResult result) {
+            [this, guard, title, restart](ParseResult result) {
                 // The parser may have built the package index of the opened folder.
                 Libraries->indexUsed();
                 if (!guard)
                     return;
-                int errors = 0;
-                int warnings = 0;
-                for (const auto &problem : std::as_const(result.Problems))
-                    (problem.Severity >= 3 ? errors : warnings)++;
                 const auto elementCount = result.InstanceElements.size();
                 const bool needsRemote = result.NeedsRemoteDownload;
-                guard->applyParseResult(std::move(result));
+                if (!guard->applyParseResult(std::move(result))) {
+                    // The cards changed while the parser ran (or another commit was loaded): the result was not applied. The
+                    // workspace now holds the old texts, which the next run replaces. One automatic run (restart) takes the current
+                    // content; it does not restart again if the content changes once more, so this cannot loop. The remote download
+                    // (needsRemote) is left to that run, which finds out again whether it is needed.
+                    if (guard->parseInputs().isEmpty()) {
+                        // Nothing to parse any more: the document ends without results instead of keeping the old ones.
+                        guard->clearParseResults();
+                        setStatusText(tr("The document contains no SysML or KerML text to parse."));
+                        return;
+                    }
+                    if (!restart && parseDocument(guard, true, true))
+                        return;
+                    setStatusText(tr("%1 was changed while it was parsed. Parse it again.").arg(title));
+                    return;
+                }
+                // Counted after applying: problems of cards that were removed meanwhile are gone.
+                int errors = 0;
+                int warnings = 0;
+                for (const auto &problem : guard->problems())
+                    (problem.Severity >= 3 ? errors : warnings)++;
 
                 const auto summary = tr("%1: %n error(s), %2 warning(s), %3 element(s)", nullptr, errors).arg(title).arg(warnings).arg(elementCount);
                 setStatusText(summary);

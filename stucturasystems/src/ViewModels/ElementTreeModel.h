@@ -18,6 +18,15 @@ namespace StructuraSystems::Client {
         QString Type;
         QString Name;       ///< Empty if the element has no name
         int Parent = -1;    ///< Index of the parent node in the flat pre-order list, -1 for roots
+        /** Only set in the merged outline of a document (see DocumentModel::outline): names along the path joined by "::". */
+        QString QualifiedName;
+        /**
+         * Only set in the merged outline: current rows of the cards that declare the element, in card order. A package that is
+         * continued in several cards lists all of them; the first is where the element is declared first.
+         */
+        QList<int> CardRows;
+
+        friend bool operator==(const ElementTreeNode &, const ElementTreeNode &) = default;
     };
 
     /**
@@ -31,7 +40,10 @@ namespace StructuraSystems::Client {
     public:
         enum Roles {
             ElementTypeRole = Qt::UserRole + 1,
-            NameRole
+            NameRole,
+            QualifiedNameRole,   ///< Empty for the trees of single cards
+            CardRowRole,         ///< Row of the first card that declares the element, -1 if unknown (trees of single cards)
+            CardRowsRole         ///< QVariantList of the rows of all cards that declare it, in card order
         };
         Q_ENUM(Roles)
 
@@ -47,7 +59,16 @@ namespace StructuraSystems::Client {
 
         [[nodiscard]] int count() const;
 
+        /** The nodes the model shows (plain data, e.g. to merge the trees of several cards). */
+        [[nodiscard]] const QList<ElementTreeNode> &nodes() const;
+
         void setNodes(const QList<ElementTreeNode> &nodes);
+        /**
+         * Like setNodes, but if only ElementTreeNode::CardRows differ (same nodes, types, names, parents and qualified names) the
+         * model is not reset: the nodes are updated in place and dataChanged is emitted for CardRowRole and CardRowsRole of the
+         * nodes concerned, so a view keeps its expansion state. Nothing happens if the nodes are equal.
+         */
+        void updateNodes(const QList<ElementTreeNode> &nodes);
         void clear();
 
     signals:

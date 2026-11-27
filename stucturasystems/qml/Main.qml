@@ -302,10 +302,16 @@ ApplicationWindow {
             x = windowState.x
             y = windowState.y
         }
-        destination = Math.max(0, Math.min(2, windowState.destination))
+        // 0 = last used, 1 = local projects (Explorer), 2 = online projects. Applies only at startup.
+        const startView = AppController.settings.startView
+        if (startView === 1 || startView === 2)
+            destination = startView - 1
+        else
+            destination = Math.max(0, Math.min(2, windowState.destination))
         problemsSheet.bodyHeight = Math.max(problemsSheet.minBodyHeight,
                                             Math.min(problemsSheet.maxBodyHeight, windowState.problemsHeight))
-        panelOpen = windowState.panelOpen && !compact
+        // A chosen start view opens the panel, otherwise it would not be visible if the panel was closed last time.
+        panelOpen = (startView > 0 || windowState.panelOpen) && !compact
         historyOpen = windowState.historyOpen
         panelWidth = clampPanelWidth(windowState.panelWidth)
         if (windowState.maximized || fillsScreen)

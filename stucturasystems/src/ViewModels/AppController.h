@@ -296,8 +296,13 @@ namespace StructuraSystems::Client {
         void loadFile(const QString &filePath, const QString &folder, const QString &name);
         void openLocalProjectByName(const QString &name);
         void openDocument(const QString &key, DocumentModel *document);
-        /** Parses a document. @param automatic true for the run that follows a download of project usages (no message if busy). */
-        void parseDocument(DocumentModel *document, bool automatic);
+        /**
+         * Parses a document. @param automatic true for the run that follows a download of project usages or a stale result (no
+         * message if busy). @param restart true for the one run that repeats a parse whose result was stale; if that is stale too,
+         * the user is asked to parse again instead of starting another run.
+         * @return true if the run was started.
+         */
+        bool parseDocument(DocumentModel *document, bool automatic, bool restart = false);
         /** Downloads the libraries of the project usages of the document in the background (no Busy), then parses it again. */
         void startRemoteDownload(DocumentModel *document);
         void setRemoteUsagesLoading(bool loading);
