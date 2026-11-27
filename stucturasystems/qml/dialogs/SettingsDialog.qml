@@ -41,6 +41,7 @@ Dialog {
         password.text = settings.password
         rememberPassword.checked = settings.rememberPassword
         theme.currentIndex = settings.themeMode
+        startView.currentIndex = settings.startView
         libraries.refresh()
     }
 
@@ -83,9 +84,12 @@ Dialog {
         anchors.fill: parent
         contentWidth: availableWidth
         clip: true
+        // The content is never wider than the view; the (invisible) horizontal bar would cover the bottom of the last control and take its clicks.
+        ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
 
         ColumnLayout {
-            width: scroll.availableWidth
+            // Reserve a gutter for the vertical bar: it lies on top of the right edge of the view and takes every click there, so the content must end before it. Only the layout is narrowed; contentWidth stays at the full width because a narrower contentWidth would enable horizontal dragging.
+            width: scroll.availableWidth - scroll.effectiveScrollBarWidth
             spacing: 10
 
             SectionHeader { text: qsTr("General"); iconSource: Theme.iconFolder }
@@ -101,6 +105,19 @@ Dialog {
                     iconSource: Theme.iconFolder
                     tip: qsTr("Browse...")
                     onClicked: folderDialog.open()
+                }
+            }
+            // Three segments need about 340px, so the label sits above the control to fit the 520px dialog.
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: 6
+                Label {
+                    text: qsTr("Start with")
+                    color: Theme.textSecondary
+                }
+                SegmentedControl {
+                    id: startView
+                    model: [qsTr("Last used"), qsTr("Local projects"), qsTr("Online projects")]
                 }
             }
 
@@ -184,6 +201,7 @@ Dialog {
         settings.password = password.text
         settings.rememberPassword = rememberPassword.checked
         settings.themeMode = theme.currentIndex
+        settings.startView = startView.currentIndex
         settings.save()
     }
 }

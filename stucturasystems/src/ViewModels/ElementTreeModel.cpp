@@ -4,6 +4,8 @@
 
 #include "ElementTreeModel.h"
 
+#include <QVariantList>
+
 namespace StructuraSystems::Client {
     ElementTreeModel::ElementTreeModel(QObject *parent) : QAbstractItemModel(parent) {
     }
@@ -59,6 +61,16 @@ namespace StructuraSystems::Client {
                 return node.Name;
             case ElementTypeRole:
                 return node.Type;
+            case QualifiedNameRole:
+                return node.QualifiedName;
+            case CardRowRole:
+                return node.CardRows.isEmpty() ? -1 : node.CardRows.first();
+            case CardRowsRole: {
+                QVariantList rows;
+                for (const int row : node.CardRows)
+                    rows.append(row);
+                return rows;
+            }
             default:
                 return {};
         }
@@ -67,12 +79,19 @@ namespace StructuraSystems::Client {
     QHash<int, QByteArray> ElementTreeModel::roleNames() const {
         return {
             {ElementTypeRole, "elementType"},
-            {NameRole, "name"}
+            {NameRole, "name"},
+            {QualifiedNameRole, "qualifiedName"},
+            {CardRowRole, "cardRow"},
+            {CardRowsRole, "cardRows"}
         };
     }
 
     int ElementTreeModel::count() const {
         return int(Nodes.size());
+    }
+
+    const QList<ElementTreeNode> &ElementTreeModel::nodes() const {
+        return Nodes;
     }
 
     void ElementTreeModel::setNodes(const QList<ElementTreeNode> &nodes) {
@@ -92,6 +111,31 @@ namespace StructuraSystems::Client {
         endResetModel();
         if (countDiffers)
             emit countChanged();
+    }
+
+    void ElementTreeModel::updateNodes(const QList<ElementTreeNode> &nodes) {
+        if (nodes == Nodes)
+            return;
+        bool sameStructure = nodes.size() == Nodes.size();
+        for (int i = 0; sameStructure && i < nodes.size(); ++i) {
+            const auto &a = nodes.at(i);
+            const auto &b = Nodes.at(i);
+            sameStructure = a.Type == b.Type && a.Name == b.Name && a.Parent == b.Parent && a.QualifiedName == b.QualifiedName;
+        }
+        if (!sameStructure) {
+            setNodes(nodes);
+            return;
+        }
+        QList<int> changed;
+        for (int i = 0; i < nodes.size(); ++i) {
+            if (nodes.at(i).CardRows != Nodes.at(i).CardRows)
+                changed.append(i);
+        }
+        Nodes = nodes;
+        for (const int i : std::as_const(changed)) {
+            const auto changedIndex = createIndex(Rows.at(i), 0, quintptr(i));
+            emit dataChanged(changedIndex, changedIndex, {CardRowRole, CardRowsRole});
+        }
     }
 
     void ElementTreeModel::clear() {

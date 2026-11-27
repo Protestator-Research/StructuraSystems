@@ -34,6 +34,8 @@ namespace StructuraSystems::Client {
         Q_PROPERTY(bool keychainAvailable READ keychainAvailable NOTIFY keychainAvailableChanged)
         /** 0 = follow system, 1 = light, 2 = dark */
         Q_PROPERTY(int themeMode READ themeMode WRITE setThemeMode NOTIFY themeModeChanged)
+        /** 0 = last used, 1 = local projects, 2 = online projects */
+        Q_PROPERTY(int startView READ startView WRITE setStartView NOTIFY startViewChanged)
     public:
         explicit SettingsController(QObject *parent = nullptr);
         ~SettingsController() override = default;
@@ -63,6 +65,9 @@ namespace StructuraSystems::Client {
         [[nodiscard]] int themeMode() const;
         void setThemeMode(int themeMode);
 
+        [[nodiscard]] int startView() const;
+        void setStartView(int startView);
+
         /** Persists all settings. */
         Q_INVOKABLE void save();
 
@@ -78,6 +83,7 @@ namespace StructuraSystems::Client {
         void keychainAvailableChanged();
         void passwordLoadingChanged();
         void themeModeChanged();
+        void startViewChanged();
         /** Emitted after save() persisted the settings. */
         void saved();
 
@@ -85,9 +91,12 @@ namespace StructuraSystems::Client {
         SettingsModel Settings;
         QSettings AppearanceSettings;
         int ThemeMode = 0;
+        int StartView = 0;
 
         const QString APPEARANCE_SETTINGS_GROUP_NAME = "APPEARANCE";
         const QString THEME_MODE_ENTRY = "THEME_MODE";
+        const QString STARTUP_SETTINGS_GROUP_NAME = "STARTUP";
+        const QString START_VIEW_ENTRY = "START_VIEW";
     };
 }
 
