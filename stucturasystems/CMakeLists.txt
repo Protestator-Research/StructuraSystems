@@ -70,6 +70,8 @@ set(SOURCES
         src/Services/BECommunicationService.cpp
         src/Services/CommitDelta.h
         src/Services/CommitDelta.cpp
+        src/Services/DocumentStructure.h 
+        src/Services/DocumentStructure.cpp
         src/Services/PagedRequest.h
         src/Services/PagedRequest.cpp
         src/Services/entities/DigitalTwin.h
