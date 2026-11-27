@@ -32,6 +32,8 @@ qt_add_executable(LibraryWorkspaceTests
         ${SRC}/Services/BECommunicationService.cpp
         ${SRC}/Services/BECommunicationService.h
         ${SRC}/Services/CommitDelta.cpp
+        ${SRC}/Services/DocumentStructure.cpp
+        ${SRC}/Services/DocumentStructure.h
         ${SRC}/Services/PagedRequest.cpp
         ${SRC}/Services/entities/DigitalTwin.cpp
         ${SRC}/Services/entities/DigitalTwinRequest.cpp
@@ -67,6 +69,8 @@ qt_add_executable(DocumentWorkspaceBenchmark
         ${SRC}/Services/BECommunicationService.cpp
         ${SRC}/Services/BECommunicationService.h
         ${SRC}/Services/CommitDelta.cpp
+        ${SRC}/Services/DocumentStructure.cpp
+        ${SRC}/Services/DocumentStructure.h
         ${SRC}/Services/PagedRequest.cpp
         ${SRC}/Services/entities/DigitalTwin.cpp
         ${SRC}/Services/entities/DigitalTwinRequest.cpp
@@ -98,6 +102,8 @@ qt_add_executable(WarmUpTests
         ${SRC}/Services/BECommunicationService.cpp
         ${SRC}/Services/BECommunicationService.h
         ${SRC}/Services/CommitDelta.cpp
+        ${SRC}/Services/DocumentStructure.cpp
+        ${SRC}/Services/DocumentStructure.h
         ${SRC}/Services/PagedRequest.cpp
         ${SRC}/Services/entities/DigitalTwin.cpp
         ${SRC}/Services/entities/DigitalTwinRequest.cpp
@@ -119,6 +125,8 @@ qt_add_executable(OnlineSyncTests
         tst_OnlineSync.cpp
         ${SRC}/Services/BECommunicationService.cpp
         ${SRC}/Services/CommitDelta.cpp
+        ${SRC}/Services/DocumentStructure.cpp
+        ${SRC}/Services/DocumentStructure.h
         ${SRC}/Services/PagedRequest.cpp
         ${SRC}/Services/entities/DigitalTwin.cpp
         ${SRC}/Services/entities/DigitalTwinRequest.cpp)
@@ -142,6 +150,8 @@ qt_add_executable(OnlineDocumentTests
         ${SRC}/ViewModels/CompletionEngine.cpp
         ${SRC}/ViewModels/LanguageKeywords.cpp
         ${SRC}/Services/CommitDelta.cpp
+        ${SRC}/Services/DocumentStructure.cpp
+        ${SRC}/Services/DocumentStructure.h
         ${SRC}/Models/Libraries/CodeScanner.cpp
         ${SRC}/Models/Libraries/DocumentWorkspace.cpp
         ${SRC}/Models/Libraries/LibraryWorkspace.cpp
@@ -159,7 +169,8 @@ target_link_libraries(OnlineDocumentTests PRIVATE
         Qt6::Core
         Qt6::Test
         yaml-cpp::yaml-cpp
-        sysmllib::sysmllib)
+        sysmllib::sysmllib
+        md4c::md4c)
 
 add_test(NAME OnlineDocumentTests COMMAND OnlineDocumentTests)
 set_tests_properties(OnlineDocumentTests PROPERTIES TIMEOUT 120)
@@ -217,6 +228,8 @@ qt_add_executable(StandardFormatTests
         ${SRC}/Services/BECommunicationService.cpp
         ${SRC}/Services/BECommunicationService.h
         ${SRC}/Services/CommitDelta.cpp
+        ${SRC}/Services/DocumentStructure.cpp
+        ${SRC}/Services/DocumentStructure.h
         ${SRC}/Services/PagedRequest.cpp
         ${SRC}/Services/entities/DigitalTwin.cpp
         ${SRC}/Services/entities/DigitalTwinRequest.cpp
