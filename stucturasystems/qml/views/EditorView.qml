@@ -21,6 +21,9 @@ Item {
     property real _lastItemY: NaN
     property real _lastContentY: NaN
 
+    /** "Open in diagram editor" in the diagram preview of a card. */
+    signal diagramEditorRequested(string elementId)
+
     /**
      * Scrolls to the card of the given row and highlights it for a moment. The cards have different heights that are
      * only known once their delegates exist, so the view is positioned again until the target stopped moving.
@@ -120,6 +123,7 @@ Item {
             required property string headerTitle
             required property string headerAuthor
             required property int problemCount
+            required property string elementId
             required property ElementTreeModel elementTree
             required property int elementCount
 
@@ -137,6 +141,7 @@ Item {
                 headerTitle: delegate.headerTitle
                 headerAuthor: delegate.headerAuthor
                 problemCount: delegate.problemCount
+                elementId: delegate.elementId
                 elementTree: delegate.elementTree
                 elementCount: delegate.elementCount
                 document: view.document
@@ -160,6 +165,7 @@ Item {
                 }
                 onInsertRequested: (targetRow, language) => view.insertAndEdit(targetRow, language)
                 onDeleteRequested: deleteDialog.openFor(delegate.index)
+                onDiagramEditorRequested: view.diagramEditorRequested(delegate.elementId)
                 onTocEntryActivated: row => view.scrollToRow(row)
             }
 

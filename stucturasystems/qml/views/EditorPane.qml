@@ -18,6 +18,8 @@ FocusScope {
     signal activationRequested()
     signal returnRequested()
     signal newBranchRequested()
+    /** "Open in diagram editor" on an element card of this side. */
+    signal diagramEditorRequested(string elementId)
 
     function scrollToRow(row) {
         editor.scrollToRow(row)
@@ -61,6 +63,10 @@ FocusScope {
             Layout.fillWidth: true
             Layout.fillHeight: true
             document: pane.document
+            onDiagramEditorRequested: elementId => {
+                pane.activationRequested()
+                pane.diagramEditorRequested(elementId)
+            }
         }
     }
 
